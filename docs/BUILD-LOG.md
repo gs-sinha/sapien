@@ -319,3 +319,7 @@ User feedback from the inspector: the flow page showed a very large YAML block a
 - Bundle unchanged in practice: initial chunk 65.0 KB gz, whole app 208.7 KB gz (budget 120 / 300); 75 UI tests green.
 
 Not yet checked in a real browser against a live daemon; the behaviour is covered by tests that drive the event store directly.
+
+## v1.0.1 through the release pipeline (2026-09-06)
+
+First release cut by the tag-driven workflow rather than by hand: windows dropped from the goreleaser targets (Unix-only daemon syscalls), tag `v1.0.1` pushed, goreleaser produced the four archives, `checksums.txt`, and the multi-arch `ghcr.io/gs-sinha/sapien` images. The Homebrew tap (`gs-sinha/homebrew-tap`, created the same day with a hand-written v1.0.0 formula) was bumped by hand and verified with `brew install` in the `homebrew/brew` image; `docs/releasing.md` is the runbook, including the tap wiring that is still manual and why the formula keeps an explicit `version` line.
