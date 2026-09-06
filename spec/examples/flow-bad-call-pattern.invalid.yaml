@@ -1,0 +1,8 @@
+# invalid: "call" must match "<service-name>.<operationId>" (lowercase-kebab service name)
+version: 1
+id: order-allocation
+steps:
+  - id: create
+    call: OrderService_CreateOrder
+    assert:
+      - status == 201

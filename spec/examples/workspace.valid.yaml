@@ -1,0 +1,10 @@
+version: 1
+name: logistics
+services:
+  - name: order-service
+    source: { type: local, path: ../order-service }
+  - name: allocation-service
+    source: { type: git, url: git@github.com:company/allocation-service.git, ref: main, subdir: api }
+  - name: rider-service
+    source: { type: local, path: ~/code/rider-service }
+default_environment: local

@@ -1,0 +1,4 @@
+# invalid: id must start with a lowercase letter or digit; leading "_" is not allowed
+version: 1
+id: _create-qcom-order
+operation: order-service.createOrder

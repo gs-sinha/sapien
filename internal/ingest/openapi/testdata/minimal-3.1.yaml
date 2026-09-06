@@ -1,0 +1,86 @@
+openapi: 3.1.0
+info:
+  title: Fleet API
+  version: 2.0.0
+  description: Minimal 3.1 fixture covering type arrays, nullable, oneOf and cycles.
+tags:
+  - name: fleet
+    description: Vehicles and categories.
+  - name: undocumented
+paths:
+  /v1/health:
+    get:
+      summary: Health check
+      responses:
+        "200":
+          description: OK
+  /v1/vehicles/{vehicleId}:
+    parameters:
+      - name: vehicleId
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: getVehicle
+      summary: Get a vehicle
+      tags: [fleet]
+      responses:
+        "200":
+          description: A vehicle
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/Bike"
+                  - $ref: "#/components/schemas/Van"
+        "404":
+          description: Not found
+  /v1/categories/{categoryId}:
+    get:
+      operationId: getCategory
+      summary: Get a category
+      tags: [fleet]
+      parameters:
+        - name: categoryId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: A category
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Category"
+components:
+  schemas:
+    Category:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        nickname:
+          type: [string, "null"]
+        parent:
+          $ref: "#/components/schemas/Category"
+    Bike:
+      type: object
+      required: [id, gears]
+      properties:
+        id:
+          type: string
+        gears:
+          type: integer
+    Van:
+      type: object
+      required: [id, capacity]
+      properties:
+        id:
+          type: string
+        capacity:
+          type: number

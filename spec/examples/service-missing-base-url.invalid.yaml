@@ -1,0 +1,5 @@
+# invalid: environments.local is missing the required "base_url" key
+version: 1
+name: allocation-service
+environments:
+  local: {}

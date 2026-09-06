@@ -1,0 +1,161 @@
+package server
+
+import "net/http"
+
+// routeDef is one entry of the route table: the single source of truth for
+// both chi route registration (newRouter, in server.go) and the generated
+// openapi.json (openapi.go), so the two can't drift apart.
+type routeDef struct {
+	Method       string
+	Pattern      string
+	OperationID  string
+	Summary      string
+	RequiresAuth bool
+	Handler      func(*Server) http.HandlerFunc
+}
+
+// routeTable lists every route under /v1. See the package doc and the final
+// report for the mapping from each route to the engine.Engine method it
+// serves.
+var routeTable = []routeDef{
+	{http.MethodGet, "/v1/health", "getHealth", "Liveness and version check", false,
+		func(s *Server) http.HandlerFunc { return s.handleHealth }},
+	{http.MethodGet, "/v1/openapi.json", "getOpenAPI", "This OpenAPI document", true,
+		func(s *Server) http.HandlerFunc { return s.handleOpenAPI }},
+	{http.MethodGet, "/v1/workspace", "getWorkspace", "The current workspace", true,
+		func(s *Server) http.HandlerFunc { return s.handleWorkspace }},
+
+	{http.MethodGet, "/v1/services", "listServices", "List registered services", true,
+		func(s *Server) http.HandlerFunc { return s.handleServicesList }},
+	{http.MethodPost, "/v1/services", "addService", "Register a service", true,
+		func(s *Server) http.HandlerFunc { return s.handleServiceAdd }},
+	{http.MethodGet, "/v1/services/{id}", "getService", "Get one service", true,
+		func(s *Server) http.HandlerFunc { return s.handleServiceGet }},
+	{http.MethodDelete, "/v1/services/{id}", "removeService", "Unregister a service", true,
+		func(s *Server) http.HandlerFunc { return s.handleServiceRemove }},
+	{http.MethodPost, "/v1/services/sync", "syncAllServices", "Sync every service", true,
+		func(s *Server) http.HandlerFunc { return s.handleServicesSyncAll }},
+	{http.MethodPost, "/v1/services/{id}/sync", "syncService", "Sync one service", true,
+		func(s *Server) http.HandlerFunc { return s.handleServiceSync }},
+	{http.MethodPost, "/v1/services/reindex", "reindexServices", "Rebuild the catalog", true,
+		func(s *Server) http.HandlerFunc { return s.handleServicesReindex }},
+
+	{http.MethodGet, "/v1/operations", "listOperations", "List or search operations", true,
+		func(s *Server) http.HandlerFunc { return s.handleOperationsList }},
+	{http.MethodGet, "/v1/operations/resolve", "resolveOperation", "Resolve an operation reference", true,
+		func(s *Server) http.HandlerFunc { return s.handleOperationResolve }},
+	{http.MethodGet, "/v1/operations/{id}", "getOperation", "Get one operation", true,
+		func(s *Server) http.HandlerFunc { return s.handleOperationGet }},
+	{http.MethodGet, "/v1/operations/{id}/fields", "getOperationFields", "Get an operation's flattened fields", true,
+		func(s *Server) http.HandlerFunc { return s.handleOperationFields }},
+	{http.MethodGet, "/v1/schemas/{service}/{name}", "getSchema", "Get a named component schema", true,
+		func(s *Server) http.HandlerFunc { return s.handleSchemaGet }},
+	{http.MethodGet, "/v1/docs", "listDocs", "List or search docs", true,
+		func(s *Server) http.HandlerFunc { return s.handleDocsList }},
+	{http.MethodGet, "/v1/docs/{service}/*", "getDoc", "Get one doc", true,
+		func(s *Server) http.HandlerFunc { return s.handleDocGet }},
+
+	{http.MethodPost, "/v1/call", "callOperation", "Execute a single operation as a one-step run", true,
+		func(s *Server) http.HandlerFunc { return s.handleCall }},
+
+	{http.MethodGet, "/v1/flows", "listFlows", "List flows", true,
+		func(s *Server) http.HandlerFunc { return s.handleFlowsList }},
+	{http.MethodPost, "/v1/flows", "createFlow", "Create a flow", true,
+		func(s *Server) http.HandlerFunc { return s.handleFlowCreate }},
+	{http.MethodGet, "/v1/flows/{id}", "getFlow", "Get one flow", true,
+		func(s *Server) http.HandlerFunc { return s.handleFlowGet }},
+	{http.MethodPut, "/v1/flows/{id}", "updateFlow", "Update a flow", true,
+		func(s *Server) http.HandlerFunc { return s.handleFlowUpdate }},
+	{http.MethodDelete, "/v1/flows/{id}", "deleteFlow", "Delete a flow", true,
+		func(s *Server) http.HandlerFunc { return s.handleFlowDelete }},
+	{http.MethodPost, "/v1/flows/validate", "validateFlow", "Validate flow YAML", true,
+		func(s *Server) http.HandlerFunc { return s.handleFlowValidate }},
+	{http.MethodPost, "/v1/flows/parse", "parseFlow", "Parse flow YAML without validating", true,
+		func(s *Server) http.HandlerFunc { return s.handleFlowParse }},
+	{http.MethodGet, "/v1/flows/reference", "getFlowReference", "Get DSL reference text", true,
+		func(s *Server) http.HandlerFunc { return s.handleFlowReference }},
+	{http.MethodPost, "/v1/flows/{id}/run", "runFlow", "Run a saved flow", true,
+		func(s *Server) http.HandlerFunc { return s.handleFlowRun }},
+
+	{http.MethodPost, "/v1/runs/source", "runFlowSource", "Run an unsaved flow", true,
+		func(s *Server) http.HandlerFunc { return s.handleRunFlowSource }},
+	{http.MethodPost, "/v1/runs/{id}/cancel", "cancelRun", "Cancel a running run", true,
+		func(s *Server) http.HandlerFunc { return s.handleRunCancel }},
+	{http.MethodGet, "/v1/runs", "listRuns", "List run history", true,
+		func(s *Server) http.HandlerFunc { return s.handleRunsList }},
+	{http.MethodGet, "/v1/runs/{id}", "getRun", "Get one run, with steps", true,
+		func(s *Server) http.HandlerFunc { return s.handleRunGet }},
+	{http.MethodGet, "/v1/runs/{id}/steps/{step}", "getRunStep", "Get one step of a run", true,
+		func(s *Server) http.HandlerFunc { return s.handleRunStepGet }},
+	{http.MethodGet, "/v1/runs/{id}/hints", "getRunHints", "Diagnostic hints for a run's failed steps", true,
+		func(s *Server) http.HandlerFunc { return s.handleRunHints }},
+	{http.MethodPost, "/v1/runs/{id}/pin", "pinRun", "Pin or unpin a run", true,
+		func(s *Server) http.HandlerFunc { return s.handleRunPin }},
+	{http.MethodPost, "/v1/runs/purge", "purgeRuns", "Purge old, unpinned runs", true,
+		func(s *Server) http.HandlerFunc { return s.handleRunsPurge }},
+
+	{http.MethodGet, "/v1/memories", "listMemories", "List memories", true,
+		func(s *Server) http.HandlerFunc { return s.handleMemoriesList }},
+	{http.MethodPost, "/v1/memories", "createMemory", "Create a memory", true,
+		func(s *Server) http.HandlerFunc { return s.handleMemoryCreate }},
+	{http.MethodGet, "/v1/memories/search", "searchMemories", "Search memories, ranked", true,
+		func(s *Server) http.HandlerFunc { return s.handleMemoriesSearch }},
+	{http.MethodPost, "/v1/memories/relevant", "relevantMemories", "Structural memory retrieval by subject", true,
+		func(s *Server) http.HandlerFunc { return s.handleMemoriesRelevant }},
+	{http.MethodPost, "/v1/memories/reindex", "reindexMemories", "Rebuild the memory index", true,
+		func(s *Server) http.HandlerFunc { return s.handleMemoriesReindex }},
+	{http.MethodGet, "/v1/memories/{id}", "getMemory", "Get one memory", true,
+		func(s *Server) http.HandlerFunc { return s.handleMemoryGet }},
+	{http.MethodPatch, "/v1/memories/{id}", "updateMemory", "Update a memory", true,
+		func(s *Server) http.HandlerFunc { return s.handleMemoryUpdate }},
+	{http.MethodDelete, "/v1/memories/{id}", "deleteMemory", "Delete a memory", true,
+		func(s *Server) http.HandlerFunc { return s.handleMemoryDelete }},
+	{http.MethodGet, "/v1/memories/{id}/promotion", "getMemoryPromotion", "Where a memory should be promoted to", true,
+		func(s *Server) http.HandlerFunc { return s.handleMemoryPromotion }},
+
+	{http.MethodGet, "/v1/examples", "listExamples", "List or search saved examples", true,
+		func(s *Server) http.HandlerFunc { return s.handleExamplesList }},
+	{http.MethodPost, "/v1/examples", "createExample", "Create a saved example", true,
+		func(s *Server) http.HandlerFunc { return s.handleExampleCreate }},
+	{http.MethodGet, "/v1/examples/for-operations", "examplesForOperations", "Examples for a set of operations", true,
+		func(s *Server) http.HandlerFunc { return s.handleExamplesForOperations }},
+	{http.MethodPost, "/v1/examples/from-run", "exampleFromRun", "Save one run step as a verified example", true,
+		func(s *Server) http.HandlerFunc { return s.handleExampleFromRun }},
+	{http.MethodPost, "/v1/examples/reindex", "reindexExamples", "Rebuild the example index", true,
+		func(s *Server) http.HandlerFunc { return s.handleExamplesReindex }},
+	{http.MethodGet, "/v1/examples/{id}", "getExample", "Get one saved example", true,
+		func(s *Server) http.HandlerFunc { return s.handleExampleGet }},
+	{http.MethodPut, "/v1/examples/{id}", "updateExample", "Update a saved example", true,
+		func(s *Server) http.HandlerFunc { return s.handleExampleUpdate }},
+	{http.MethodDelete, "/v1/examples/{id}", "deleteExample", "Delete a saved example", true,
+		func(s *Server) http.HandlerFunc { return s.handleExampleDelete }},
+
+	{http.MethodPost, "/v1/context", "buildContext", "Build an agent context bundle", true,
+		func(s *Server) http.HandlerFunc { return s.handleContextBuild }},
+
+	{http.MethodGet, "/v1/environments", "listEnvironments", "List environments", true,
+		func(s *Server) http.HandlerFunc { return s.handleEnvironmentsList }},
+	{http.MethodGet, "/v1/environments/default", "getDefaultEnvironment", "Get the default environment name", true,
+		func(s *Server) http.HandlerFunc { return s.handleEnvironmentDefaultGet }},
+	{http.MethodPut, "/v1/environments/default", "setDefaultEnvironment", "Set the default environment", true,
+		func(s *Server) http.HandlerFunc { return s.handleEnvironmentDefaultSet }},
+	{http.MethodGet, "/v1/environments/{name}", "getEnvironment", "Get one environment", true,
+		func(s *Server) http.HandlerFunc { return s.handleEnvironmentGet }},
+
+	{http.MethodGet, "/v1/secrets", "listSecrets", "List secret names (never values)", true,
+		func(s *Server) http.HandlerFunc { return s.handleSecretsList }},
+	{http.MethodPut, "/v1/secrets/{name}", "setSecret", "Set a secret's value", true,
+		func(s *Server) http.HandlerFunc { return s.handleSecretSet }},
+	{http.MethodDelete, "/v1/secrets/{name}", "deleteSecret", "Delete a secret", true,
+		func(s *Server) http.HandlerFunc { return s.handleSecretDelete }},
+
+	{http.MethodGet, "/v1/events", "streamEvents", "Stream engine events over a WebSocket", true,
+		func(s *Server) http.HandlerFunc { return s.handleEvents }},
+	{http.MethodGet, "/v1/events/recent", "listRecentEvents", "List recently buffered events, oldest first", true,
+		func(s *Server) http.HandlerFunc { return s.handleEventsRecent }},
+
+	{http.MethodGet, "/v1/terminal", "streamTerminal", "Spawn a PTY-backed agent terminal over a WebSocket", true,
+		func(s *Server) http.HandlerFunc { return s.handleTerminal }},
+	{http.MethodGet, "/v1/terminal/targets", "getTerminalTargets", "Commands and directories the terminal endpoint accepts", true,
+		func(s *Server) http.HandlerFunc { return s.handleTerminalTargets }},
+}

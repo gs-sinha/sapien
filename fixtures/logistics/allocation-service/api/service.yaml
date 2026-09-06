@@ -1,0 +1,8 @@
+version: 1
+name: allocation-service
+description: Finds eligible riders and creates allocations for orders, enforcing QCOM eligibility.
+owners: [allocation-platform]
+concepts: [rider allocation, dispatch, matching, qcom]
+contracts: [openapi.yaml]
+environments:
+  local: { base_url: http://localhost:8082 }

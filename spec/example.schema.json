@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "<id>.example.yaml -- see PLAN.md section 34b and internal/domain/example.go. scope, service, and path are derived from where the file lives and from operation; they are never written in the file itself. version/created/updated are optional here even though their Go struct tags lack omitempty, because the engine fills them in on write (Store.Create/Update always set created/updated, and default version to 1).",
+  "title": "Saved example file",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "operation"],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]*$"
+    },
+    "operation": {
+      "type": "string",
+      "pattern": "^[^.\\s]+\\.[^\\s]+$"
+    },
+    "description": {
+      "type": "string"
+    },
+    "input": {
+      "type": "object"
+    },
+    "body": {},
+    "headers": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "expect": { "$ref": "#/$defs/expect" },
+    "verified": { "$ref": "#/$defs/verified" },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "created": { "type": "string", "format": "date-time" },
+    "updated": { "type": "string", "format": "date-time" }
+  },
+  "$defs": {
+    "expect": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "status": { "type": "integer" },
+        "body": {}
+      }
+    },
+    "verified": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "env": { "type": "string", "minLength": 1 },
+        "run": { "type": "string", "minLength": 1 },
+        "step": { "type": "string", "minLength": 1 },
+        "at": { "type": "string", "format": "date-time" },
+        "by": { "$ref": "#/$defs/source" }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": { "enum": ["user", "agent", "run", "import", "documentation"] },
+        "client": { "type": "string", "minLength": 1 },
+        "model": { "type": "string", "minLength": 1 },
+        "run_id": { "type": "string", "minLength": 1 },
+        "step_id": { "type": "string", "minLength": 1 },
+        "path": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

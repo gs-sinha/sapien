@@ -1,0 +1,144 @@
+version: 2
+
+project_name: sapien
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  # The one binary Sapien ships (PLAN.md §1, §33): CLI, `serve` daemon, and
+  # `mcp` bridge all live behind this single entrypoint.
+  #
+  # cmd/sapien-fixtures (the logistics mock servers used by tests and the
+  # demo, PLAN.md §0) is intentionally NOT built here: it is a dev/test
+  # fixture, not a release artifact.
+  - id: sapien
+    main: ./cmd/sapien
+    binary: sapien
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/growsimplee/sapien/internal/cli.Version={{ .Version }}
+      - -X github.com/growsimplee/sapien/internal/cli.Commit={{ .ShortCommit }}
+      - -X github.com/growsimplee/sapien/internal/cli.Date={{ .Date }}
+
+archives:
+  - id: sapien
+    ids: [sapien]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  use: git
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\([[:word:]-]+\))??!?:.+$'
+      order: 0
+    - title: Fixes
+      regexp: '^.*?fix(\([[:word:]-]+\))??!?:.+$'
+      order: 1
+    - title: Documentation
+      regexp: '^.*?docs(\([[:word:]-]+\))??!?:.+$'
+      order: 2
+    - title: Other
+      order: 999
+  filters:
+    exclude:
+      - '^chore:'
+      - '^ci:'
+      - '^test:'
+      - 'Merge pull request'
+      - 'Merge branch'
+
+release:
+  github:
+    owner: growsimplee
+    name: sapien
+  # Grouped changelog above is the release body; nothing else to add.
+
+# Publishes Formula/sapien.rb to github.com/growsimplee/homebrew-tap on every
+# non-prerelease tag. HOMEBREW_TAP_TOKEN needs `contents: write` on that repo
+# (see .github/workflows/release.yml). Formula/sapien.rb in *this* repo is a
+# reference copy only — goreleaser regenerates the tap's copy from the
+# archives built above, it does not read the checked-in file.
+brews:
+  - skip_upload: true  # set false once growsimplee/homebrew-tap exists and HOMEBREW_TAP_TOKEN is configured
+    name: sapien
+    ids: [sapien]
+    repository:
+      owner: growsimplee
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/growsimplee/sapien"
+    description: "Local-first, agent-native API workspace engine"
+    license: "Apache-2.0"
+    test: |
+      system "#{bin}/sapien", "version"
+    install: |
+      bin.install "sapien"
+
+# CI-use image: distroless static base, sapien on PATH as the entrypoint.
+# Built for linux/amd64 and linux/arm64 and joined into one multi-arch tag
+# by docker_manifests below. Requires a Dockerfile at the repo root (see
+# ./Dockerfile) and buildx on the release runner.
+dockers:
+  - id: sapien-linux-amd64
+    ids: [sapien]
+    goos: linux
+    goarch: amd64
+    dockerfile: Dockerfile
+    use: buildx
+    image_templates:
+      - "ghcr.io/growsimplee/sapien:{{ .Version }}-amd64"
+      - "ghcr.io/growsimplee/sapien:latest-amd64"
+    build_flag_templates:
+      - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.source=https://github.com/growsimplee/sapien"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.licenses=Apache-2.0"
+  - id: sapien-linux-arm64
+    ids: [sapien]
+    goos: linux
+    goarch: arm64
+    dockerfile: Dockerfile
+    use: buildx
+    image_templates:
+      - "ghcr.io/growsimplee/sapien:{{ .Version }}-arm64"
+      - "ghcr.io/growsimplee/sapien:latest-arm64"
+    build_flag_templates:
+      - "--platform=linux/arm64"
+      - "--label=org.opencontainers.image.source=https://github.com/growsimplee/sapien"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.licenses=Apache-2.0"
+
+docker_manifests:
+  - name_template: "ghcr.io/growsimplee/sapien:{{ .Version }}"
+    image_templates:
+      - "ghcr.io/growsimplee/sapien:{{ .Version }}-amd64"
+      - "ghcr.io/growsimplee/sapien:{{ .Version }}-arm64"
+  - name_template: "ghcr.io/growsimplee/sapien:latest"
+    image_templates:
+      - "ghcr.io/growsimplee/sapien:latest-amd64"
+      - "ghcr.io/growsimplee/sapien:latest-arm64"

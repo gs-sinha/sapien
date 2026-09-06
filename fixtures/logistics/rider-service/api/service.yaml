@@ -1,0 +1,8 @@
+version: 1
+name: rider-service
+description: Source of truth for rider availability, skills, and location.
+owners: [rider-platform]
+concepts: [riders, availability, qcom skill]
+contracts: [openapi.yaml]
+environments:
+  local: { base_url: http://localhost:8083 }

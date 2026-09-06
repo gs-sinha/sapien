@@ -1,0 +1,6 @@
+# Downloaded model weights, the Python venv, and the copied workspace index are
+# reproducible (see README in REPORT.md) and too large or too private to commit.
+models/
+.venv/
+sapien.db
+__pycache__/

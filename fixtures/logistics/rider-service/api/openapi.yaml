@@ -1,0 +1,239 @@
+openapi: 3.1.0
+info:
+  title: Rider Service
+  version: "1.0.0"
+  description: >
+    Rider Service is the source of truth for rider availability, skills, and
+    location. allocation-service reads rider state to decide who is eligible
+    for an order. See `docs/riders.md` for what `qcomSkill` and
+    `upcomingTrips` mean.
+servers:
+  - url: http://localhost:8083
+    description: Local mock server (fixtures/logistics/mock)
+tags:
+  - name: riders
+    description: Look up, search, and update the status of riders.
+security:
+  - bearerAuth: []
+paths:
+  /v1/riders/{riderId}:
+    get:
+      operationId: getRider
+      tags: [riders]
+      summary: Fetch a rider by ID
+      description: Returns the current state of a single rider.
+      parameters:
+        - $ref: '#/components/parameters/RiderId'
+      responses:
+        '200':
+          description: The rider
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Rider'
+              examples:
+                qcomRider:
+                  summary: An online rider eligible for QCOM orders
+                  value:
+                    riderId: R123
+                    name: Asha Rao
+                    online: true
+                    qcomSkill: true
+                    upcomingTrips: 1
+                    city: Bangalore
+                    rating: 4.8
+        '404':
+          description: No rider with that ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                notFound:
+                  value: { code: RIDER_NOT_FOUND, message: "no rider with id \"R999\"" }
+  /v1/riders/search:
+    post:
+      operationId: searchRiders
+      tags: [riders]
+      summary: Search for nearby riders
+      description: >
+        Returns riders near a point. Set `qcomOnly: true` to restrict
+        results to riders eligible for quick-commerce allocation
+        (`qcomSkill=true`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchRidersRequest'
+            examples:
+              nearBangalore:
+                value: { lat: 12.9716, lng: 77.5946, radiusKm: 5, qcomOnly: true }
+      responses:
+        '200':
+          description: Matching riders
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  riders:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Rider'
+                required: [riders]
+  /v1/riders/{riderId}/status:
+    patch:
+      operationId: updateRiderStatus
+      tags: [riders]
+      summary: Update a rider's online status
+      description: Toggles whether a rider is online and eligible for allocation.
+      parameters:
+        - $ref: '#/components/parameters/RiderId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateRiderStatusRequest'
+            examples:
+              goOnline:
+                value: { online: true }
+      responses:
+        '200':
+          description: Updated rider
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Rider'
+        '404':
+          description: No rider with that ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/riders:
+    get:
+      operationId: listRiders
+      tags: [riders]
+      summary: List riders
+      description: Lists riders, optionally filtered by city or online status.
+      parameters:
+        - name: city
+          in: query
+          required: false
+          schema: { type: string }
+        - name: online
+          in: query
+          required: false
+          schema: { type: boolean }
+      responses:
+        '200':
+          description: A page of riders
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  riders:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Rider'
+                required: [riders]
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  parameters:
+    RiderId:
+      name: riderId
+      in: path
+      required: true
+      schema: { type: string }
+      description: The rider ID, e.g. `R123`.
+  schemas:
+    SearchRidersRequest:
+      type: object
+      properties:
+        lat:
+          type: number
+        lng:
+          type: number
+        radiusKm:
+          type: number
+        qcomOnly:
+          type: boolean
+      required: [lat, lng, radiusKm]
+    UpdateRiderStatusRequest:
+      type: object
+      properties:
+        online:
+          type: boolean
+      required: [online]
+    Rider:
+      type: object
+      description: A delivery rider.
+      properties:
+        riderId:
+          type: string
+          example: R123
+        name:
+          type: string
+        online:
+          type: boolean
+        qcomSkill:
+          type: boolean
+          description: True if the rider may be allocated QCOM (quick-commerce) orders.
+        upcomingTrips:
+          type: integer
+          description: >
+            Count of trips already assigned to this rider that have not yet
+            been completed. Excludes reverse-pickup legs, which are counted
+            against the delivery they originated from.
+        city:
+          type: string
+        rating:
+          type: number
+          nullable: true
+          description: Average rider rating; null until the rider has completed a first trip.
+        vehicle:
+          $ref: '#/components/schemas/Vehicle'
+      required: [riderId, name, online, qcomSkill, upcomingTrips, city]
+    Vehicle:
+      description: A rider's vehicle; either a bike or a van.
+      oneOf:
+        - $ref: '#/components/schemas/Bike'
+        - $ref: '#/components/schemas/Van'
+    Bike:
+      type: object
+      properties:
+        kind:
+          type: string
+          enum: [bike]
+        plate:
+          type: string
+      required: [kind, plate]
+    Van:
+      type: object
+      properties:
+        kind:
+          type: string
+          enum: [van]
+        plate:
+          type: string
+        capacityKg:
+          type: number
+        trailer:
+          description: An optional attached trailer, itself a vehicle.
+          "$ref": '#/components/schemas/Vehicle'
+      required: [kind, plate, capacityKg]
+    Error:
+      type: object
+      description: Shared error shape used by every operation in this platform.
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+      required: [code, message]

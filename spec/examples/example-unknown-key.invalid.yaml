@@ -1,0 +1,6 @@
+# invalid: "scope" is not a recognized example file key (it is derived from
+# which directory the file lives under, not written in the file itself)
+version: 1
+id: create-qcom-order
+operation: order-service.createOrder
+scope: workspace

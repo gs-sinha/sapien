@@ -1,0 +1,5 @@
+# invalid: vars values must be strings, not nested objects
+version: 1
+name: staging
+vars:
+  TEST_CUSTOMER: { nested: true }

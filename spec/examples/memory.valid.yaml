@@ -1,0 +1,11 @@
+id: mem_01J8Z5K3W2RQ4X7M9NPQR2T3V8
+type: semantic
+scope: workspace
+subject:
+  operation: rider-service.getRider
+  field: response.200.body.qcomSkill
+tags: [qcom, allocation]
+source: { kind: user }
+created: 2026-09-05T10:20:00Z
+updated: 2026-09-05T10:20:00Z
+status: active

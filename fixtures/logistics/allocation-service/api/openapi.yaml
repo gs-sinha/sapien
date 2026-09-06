@@ -1,0 +1,247 @@
+openapi: 3.1.0
+info:
+  title: Allocation Service
+  version: "1.0.0"
+  description: >
+    Allocation Service matches an order to an eligible, online rider.
+    QCOM orders may only be matched to riders with qcomSkill=true; if no
+    eligible rider is online, allocation fails with `409 NO_RIDER_AVAILABLE`.
+    See `docs/allocation.md` for the full matching rules.
+servers:
+  - url: http://localhost:8082
+    description: Local mock server (fixtures/logistics/mock)
+tags:
+  - name: allocations
+    description: Create, inspect, and release rider allocations for orders.
+security:
+  - bearerAuth: []
+paths:
+  /v1/allocations:
+    post:
+      operationId: allocate
+      tags: [allocations]
+      summary: Allocate a rider to an order
+      description: >
+        Picks an eligible, online rider for the given order. For QCOM
+        orders, only riders with `qcomSkill=true` are eligible. Returns
+        `409 NO_RIDER_AVAILABLE` if none are free.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AllocateRequest'
+            examples:
+              basic:
+                value: { orderId: ord_0001 }
+      responses:
+        '201':
+          description: Allocation created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Allocation'
+              examples:
+                allocated:
+                  value:
+                    allocationId: alloc_0001
+                    orderId: ord_0001
+                    riderId: R123
+                    status: ALLOCATED
+                    allocatedAt: "2026-09-05T10:00:05Z"
+        '404':
+          description: Order not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: No eligible rider is currently online
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                noRider:
+                  value: { code: NO_RIDER_AVAILABLE, message: "no eligible rider is online for order \"ord_0001\"" }
+    get:
+      operationId: listAllocations
+      tags: [allocations]
+      summary: List allocations
+      description: Lists allocations, optionally filtered by order or rider.
+      parameters:
+        - name: orderId
+          in: query
+          required: false
+          schema: { type: string }
+        - name: riderId
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        '200':
+          description: A page of allocations
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  allocations:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Allocation'
+                required: [allocations]
+  /v1/allocations/stats:
+    get:
+      tags: [allocations]
+      summary: Allocation statistics
+      description: >
+        Aggregate counts of allocations by status. Deliberately has no
+        `operationId` so consumers exercise Sapien's ID synthesis
+        (`allocation-service.get_v1_allocations_stats`).
+      responses:
+        '200':
+          description: Allocation counts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AllocationStats'
+  /v1/allocations/{allocationId}:
+    get:
+      operationId: getAllocation
+      tags: [allocations]
+      summary: Fetch an allocation by ID
+      parameters:
+        - $ref: '#/components/parameters/AllocationId'
+      responses:
+        '200':
+          description: The allocation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Allocation'
+        '404':
+          description: No allocation with that ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/allocations/{allocationId}/release:
+    post:
+      operationId: releaseAllocation
+      tags: [allocations]
+      summary: Release an allocation
+      description: >
+        Frees the rider assigned to this allocation so they become eligible
+        for the next allocation. Cancelling an order via order-service
+        releases its allocation automatically.
+      parameters:
+        - $ref: '#/components/parameters/AllocationId'
+      responses:
+        '200':
+          description: Allocation released
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Allocation'
+        '404':
+          description: No allocation with that ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Allocation already released
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                alreadyReleased:
+                  value: { code: ALLOCATION_ALREADY_RELEASED, message: "allocation \"alloc_0001\" is already released" }
+  /v1/allocate:
+    post:
+      operationId: allocateV1
+      deprecated: true
+      tags: [allocations]
+      summary: Deprecated allocation endpoint
+      description: >
+        Legacy alias of `allocate`, kept only for backward compatibility.
+        New integrations should use `POST /v1/allocations` instead.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AllocateRequest'
+      responses:
+        '201':
+          description: Allocation created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Allocation'
+        '409':
+          description: No eligible rider is currently online
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  parameters:
+    AllocationId:
+      name: allocationId
+      in: path
+      required: true
+      schema: { type: string }
+      description: The allocation ID, e.g. `alloc_0001`.
+  schemas:
+    AllocateRequest:
+      type: object
+      properties:
+        orderId:
+          type: string
+      required: [orderId]
+    Allocation:
+      type: object
+      description: A rider assigned to an order.
+      properties:
+        allocationId:
+          type: string
+          example: alloc_0001
+        orderId:
+          type: string
+        riderId:
+          type: string
+        status:
+          type: string
+          enum: [ALLOCATED, RELEASED]
+        allocatedAt:
+          type: string
+          format: date-time
+      required: [allocationId, orderId, riderId, status, allocatedAt]
+    AllocationStats:
+      type: object
+      properties:
+        total:
+          type: integer
+        allocated:
+          type: integer
+        released:
+          type: integer
+      required: [total, allocated, released]
+    Error:
+      type: object
+      description: Shared error shape used by every operation in this platform.
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+      required: [code, message]

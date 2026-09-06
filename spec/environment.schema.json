@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "environments/<name>.yaml -- see PLAN.md section 7, 19, 20 and internal/domain/environment.go",
+  "title": "Environment file",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "name"],
+  "properties": {
+    "version": { "const": 1 },
+    "name": { "type": "string", "minLength": 1 },
+    "production": { "type": "boolean" },
+    "services": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/serviceEnv" }
+    },
+    "vars": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "auth": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/auth" }
+    },
+    "transport": { "$ref": "#/$defs/transport" },
+    "redaction": { "$ref": "#/$defs/redaction" }
+  },
+  "$defs": {
+    "serviceEnv": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "base_url": { "type": "string", "minLength": 1 },
+        "auth": { "$ref": "#/$defs/auth" }
+      }
+    },
+    "auth": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": { "enum": ["none", "bearer", "header", "basic", "query"] },
+        "token": { "type": "string" },
+        "name": { "type": "string" },
+        "value": { "type": "string" },
+        "username": { "type": "string" },
+        "password": { "type": "string" }
+      }
+    },
+    "transport": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "timeout_ms": { "type": "integer", "minimum": 0 },
+        "connect_timeout_ms": { "type": "integer", "minimum": 0 },
+        "insecure_tls": { "type": "boolean" },
+        "proxy": { "type": "string" },
+        "max_redirects": { "type": "integer", "minimum": 0 },
+        "max_body_bytes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "redaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "headers": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "json_paths": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

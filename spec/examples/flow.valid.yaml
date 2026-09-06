@@ -1,0 +1,39 @@
+version: 1
+id: order-allocation                # default: filename stem
+name: Order allocation
+description: Create an order, allocate, verify rider online.
+tags: [allocation, smoke]
+
+inputs:
+  customerId: { type: string, default: "${env.TEST_CUSTOMER}" }
+  city:       { type: string, required: true }
+
+steps:
+  - id: create
+    call: order-service.createOrder
+    input:                          # bound by name to path/query/header params
+      city: "${inputs.city}"
+    body:
+      customerId: "${inputs.customerId}"
+      type: QCOM
+    extract:
+      orderId: body.orderId
+    assert:
+      - status == 201
+
+  - id: allocate
+    call: allocation-service.allocate
+    body: { orderId: "${steps.create.out.orderId}" }
+    until: status == 200 && body.riderId != null     # optional polling
+    poll: { interval: 1s, timeout: 30s }
+    assert:
+      - latency_ms < 2000
+
+  - id: rider
+    call: rider-service.getRider
+    input: { riderId: "${steps.allocate.body.riderId}" }
+    assert:
+      - status == 200
+      - body.online == true
+      - { schema: contract }        # validate body against the 200 response schema
+      - { path: body.qcomSkill, eq: true, message: "QCOM riders must have qcomSkill" }

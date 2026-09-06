@@ -1,0 +1,6 @@
+# invalid: a "local" source requires "path", which is missing here
+version: 1
+name: logistics
+services:
+  - name: order-service
+    source: { type: local }

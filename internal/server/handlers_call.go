@@ -1,0 +1,21 @@
+package server
+
+import (
+	"net/http"
+
+	"github.com/growsimplee/sapien/internal/engine"
+)
+
+func (s *Server) handleCall(w http.ResponseWriter, r *http.Request) {
+	var req engine.CallRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, err)
+		return
+	}
+	out, err := s.engine.Runner().Call(r.Context(), req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}

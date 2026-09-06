@@ -1,0 +1,13 @@
+version: 1
+name: allocation-service
+description: Finds eligible riders and creates allocations.
+owners: [allocation-platform]
+concepts: [rider allocation, dispatch, matching]
+contracts: [openapi.yaml]
+environments:
+  local:   { base_url: http://localhost:8080 }
+  staging: { base_url: https://allocation.staging.internal }
+accepted_warnings:
+  - code: UNSUPPORTED_MEDIA_TYPE
+    match: "text/plain"
+    reason: These endpoints return text/plain by design; the contract describes the wire faithfully.

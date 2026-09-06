@@ -1,0 +1,35 @@
+version: 1
+id: smoke
+name: Allocation smoke test
+description: >
+  Allocates a rider for an existing order and confirms the allocation can be
+  read back by ID. This is a service-owned flow used to test service-owned
+  flow discovery (PLAN §6); it is also executed end to end, against a
+  pre-existing order, by internal/runner's fixture test.
+tags: [smoke, allocation]
+
+inputs:
+  orderId:
+    type: string
+    required: true
+    description: An existing order ID to allocate a rider for.
+
+steps:
+  - id: allocate
+    call: allocation-service.allocate
+    body:
+      orderId: "${inputs.orderId}"
+    extract:
+      allocationId: body.allocationId
+      riderId: body.riderId
+    assert:
+      - status == 201
+      - body.status == "ALLOCATED"
+
+  - id: check
+    call: allocation-service.getAllocation
+    input:
+      allocationId: "${steps.allocate.out.allocationId}"
+    assert:
+      - status == 200
+      - { path: body.riderId, eq: "${steps.allocate.out.riderId}", message: "getAllocation must return the same rider that was allocated" }

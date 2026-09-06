@@ -1,0 +1,5 @@
+# invalid: auth.default.type "token" is not one of none|bearer|header|basic|query
+version: 1
+name: staging
+auth:
+  default: { type: token, token: "${secret.STAGING_TOKEN}" }

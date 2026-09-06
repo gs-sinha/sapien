@@ -1,0 +1,4 @@
+# invalid: "steps" must contain at least one step
+version: 1
+id: order-allocation
+steps: []

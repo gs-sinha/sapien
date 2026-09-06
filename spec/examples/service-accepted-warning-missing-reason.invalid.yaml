@@ -1,0 +1,6 @@
+# invalid: an accepted_warnings entry must give a non-empty "reason"
+version: 1
+name: allocation-service
+accepted_warnings:
+  - code: UNSUPPORTED_MEDIA_TYPE
+    match: "text/plain"

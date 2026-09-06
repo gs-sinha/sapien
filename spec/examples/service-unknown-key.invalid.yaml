@@ -1,0 +1,4 @@
+# invalid: "endpoint" is not a recognized service.yaml key; base URLs live under "environments"
+version: 1
+name: allocation-service
+endpoint: http://localhost:8080

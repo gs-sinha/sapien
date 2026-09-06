@@ -1,0 +1,322 @@
+openapi: 3.1.0
+info:
+  title: Order Service
+  version: "1.0.0"
+  description: >
+    Order Service owns the lifecycle of a customer order in the Sapien
+    logistics reference platform: creation, cancellation, listing, and the
+    delivery timeline used to track progress from creation to drop-off.
+    Orders are either STANDARD (scheduled/regular delivery) or QCOM
+    (quick-commerce, which allocation-service will only allocate to a rider
+    with qcomSkill=true).
+servers:
+  - url: http://localhost:8081
+    description: Local mock server (fixtures/logistics/mock)
+tags:
+  - name: orders
+    description: >
+      Create, inspect, cancel, and track customer orders. An order is
+      created here first; allocation-service then assigns a rider to it.
+security:
+  - bearerAuth: []
+paths:
+  /v1/orders:
+    post:
+      operationId: createOrder
+      tags: [orders]
+      summary: Create a new order
+      description: >
+        Creates an order for a customer. `type: QCOM` marks the order as
+        quick-commerce; allocation-service will require a rider with
+        `qcomSkill=true` once it allocates this order. The order starts in
+        `CREATED` status with a single timeline event.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrderRequest'
+            examples:
+              qcomOrder:
+                summary: A quick-commerce order
+                value:
+                  customerId: cust_123
+                  type: QCOM
+                  pickup: { lat: 12.9716, lng: 77.5946 }
+                  drop: { lat: 12.9352, lng: 77.6146 }
+              standardOrder:
+                summary: A standard order
+                value:
+                  customerId: cust_456
+                  type: STANDARD
+                  pickup: { lat: 19.076, lng: 72.8777 }
+                  drop: { lat: 19.033, lng: 72.8296 }
+      responses:
+        '201':
+          description: Order created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+              examples:
+                created:
+                  summary: A newly created order
+                  value:
+                    orderId: ord_0001
+                    status: CREATED
+                    type: QCOM
+                    customerId: cust_123
+                    createdAt: "2026-09-05T10:00:00Z"
+        '400':
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                invalid:
+                  value: { code: INVALID_REQUEST, message: "customerId and type (STANDARD|QCOM) are required" }
+    get:
+      operationId: listOrders
+      tags: [orders]
+      summary: List orders
+      description: Lists orders, optionally filtered by customer or status.
+      parameters:
+        - name: customerId
+          in: query
+          required: false
+          schema: { type: string }
+          description: Filter by customer ID.
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [CREATED, ALLOCATED, CANCELLED, DELIVERED]
+          description: Filter by order status.
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+          description: Maximum number of orders to return.
+      responses:
+        '200':
+          description: A page of orders
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  orders:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Order'
+                required: [orders]
+              examples:
+                page:
+                  value:
+                    orders:
+                      - orderId: ord_0001
+                        status: CREATED
+                        type: QCOM
+                        customerId: cust_123
+                        createdAt: "2026-09-05T10:00:00Z"
+  /v1/orders/{orderId}:
+    get:
+      operationId: getOrder
+      tags: [orders]
+      summary: Fetch an order by ID
+      description: Returns the current state of a single order.
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+      responses:
+        '200':
+          description: The order
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '404':
+          description: No order with that ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                notFound:
+                  value: { code: ORDER_NOT_FOUND, message: "no order with id \"ord_9999\"" }
+  /v1/orders/{orderId}/cancel:
+    post:
+      operationId: cancelOrder
+      tags: [orders]
+      summary: Cancel an order
+      description: >
+        Cancels an order and releases any allocation attached to it. Fails
+        with `409 ORDER_ALREADY_DELIVERED` if the order has already been
+        delivered.
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+      responses:
+        '200':
+          description: Order cancelled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+              examples:
+                cancelled:
+                  value:
+                    orderId: ord_0001
+                    status: CANCELLED
+                    type: QCOM
+                    customerId: cust_123
+                    createdAt: "2026-09-05T10:00:00Z"
+        '404':
+          description: No order with that ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Order already delivered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                alreadyDelivered:
+                  value: { code: ORDER_ALREADY_DELIVERED, message: "order \"ord_0001\" has already been delivered" }
+  /v1/orders/{orderId}/timeline:
+    get:
+      operationId: getOrderTimeline
+      tags: [orders]
+      summary: Fetch the delivery timeline for an order
+      description: >
+        Returns the timeline of status events for an order plus an ETA in
+        minutes. The timeline is generated asynchronously after order
+        creation; callers should poll this endpoint (it returns `404` with
+        code `TIMELINE_NOT_READY` for a short window after creation) instead
+        of assuming it is available immediately. See `docs/timeline.md`.
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+      responses:
+        '200':
+          description: The timeline
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Timeline'
+              examples:
+                ready:
+                  value:
+                    orderId: ord_0001
+                    events:
+                      - { status: CREATED, at: "2026-09-05T10:00:00Z" }
+                    etaMinutes: 30
+        '404':
+          description: Order not found, or timeline not ready yet
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                notReady:
+                  summary: Timeline requested too soon after creation
+                  value: { code: TIMELINE_NOT_READY, message: "timeline for \"ord_0001\" is not ready yet" }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  parameters:
+    OrderId:
+      name: orderId
+      in: path
+      required: true
+      schema: { type: string }
+      description: The order ID, e.g. `ord_0001`.
+  schemas:
+    LatLng:
+      type: object
+      description: A geographic coordinate.
+      properties:
+        lat: { type: number }
+        lng: { type: number }
+      required: [lat, lng]
+    CreateOrderRequest:
+      type: object
+      description: Body of createOrder.
+      properties:
+        customerId:
+          type: string
+          description: Customer placing the order.
+        type:
+          type: string
+          enum: [STANDARD, QCOM]
+          description: STANDARD is regular delivery; QCOM requires a qcomSkill rider.
+        pickup:
+          $ref: '#/components/schemas/LatLng'
+        drop:
+          $ref: '#/components/schemas/LatLng'
+      required: [customerId, type, pickup, drop]
+    Order:
+      type: object
+      description: A customer order.
+      properties:
+        orderId:
+          type: string
+          example: ord_0001
+        status:
+          type: string
+          enum: [CREATED, ALLOCATED, CANCELLED, DELIVERED]
+        type:
+          type: string
+          enum: [STANDARD, QCOM]
+        customerId:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        timeline:
+          type: array
+          items:
+            $ref: '#/components/schemas/TimelineEvent'
+          description: >
+            Optional inline snapshot of timeline events as of this response.
+            The full, polled timeline is available from getOrderTimeline.
+      required: [orderId, status, type, customerId, createdAt]
+    TimelineEvent:
+      type: object
+      properties:
+        status:
+          type: string
+        at:
+          type: string
+          format: date-time
+        note:
+          type: string
+      required: [status, at]
+    Timeline:
+      type: object
+      description: The full delivery timeline for one order.
+      properties:
+        orderId:
+          type: string
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/TimelineEvent'
+        etaMinutes:
+          type: integer
+      required: [orderId, events, etaMinutes]
+    Error:
+      type: object
+      description: Shared error shape used by every operation in this platform.
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+      required: [code, message]

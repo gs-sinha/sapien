@@ -1,0 +1,10 @@
+version: 1
+id: create-qcom-order
+operation: order-service.createOrder
+description: QCOM order in Bengaluru that allocates to a qcom-skilled rider
+input: {}
+body: { customerId: c1, type: QCOM, pickup: { lat: 12.97, lng: 77.59 }, drop: { lat: 12.93, lng: 77.61 } }
+headers: {}
+expect: { status: 201, body: { orderId: ord_0001 } }
+verified: { env: stage, run: run_01J8Z5K3W2RQ4X7M9NPQR2T3V8, step: call, at: 2026-09-05T10:00:00Z, by: { kind: agent, client: claude-code } }
+tags: [qcom, happy-path]

@@ -1,0 +1,6 @@
+# invalid: "repos" is not a recognized sapien.workspace.yaml key (typo for "services")
+version: 1
+name: logistics
+repos:
+  - name: order-service
+    source: { type: local, path: ../order-service }

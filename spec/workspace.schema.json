@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "sapien.workspace.yaml -- see PLAN.md section 7 and internal/domain/workspace.go, service.go",
+  "title": "Sapien workspace file",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "name"],
+  "properties": {
+    "version": { "const": 1 },
+    "name": { "type": "string", "minLength": 1 },
+    "services": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/serviceRef" }
+    },
+    "default_environment": { "type": "string", "minLength": 1 }
+  },
+  "$defs": {
+    "serviceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "source"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "source": { "$ref": "#/$defs/source" }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": { "enum": ["local", "git"] },
+        "path": { "type": "string", "minLength": 1 },
+        "url": { "type": "string", "minLength": 1 },
+        "ref": { "type": "string", "minLength": 1 },
+        "subdir": { "type": "string", "minLength": 1 },
+        "contract": { "type": "string", "minLength": 1 }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": ["type"],
+            "properties": { "type": { "const": "local" } }
+          },
+          "then": { "required": ["path"] }
+        },
+        {
+          "if": {
+            "required": ["type"],
+            "properties": { "type": { "const": "git" } }
+          },
+          "then": { "required": ["url"] }
+        }
+      ]
+    }
+  }
+}

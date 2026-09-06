@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "YAML front matter of a memories/*.md file -- see PLAN.md section 10, 11 and internal/domain/memory.go. Only id, scope, and created are required (PLAN section 10: 'Only id, scope, created, and the body are required'); source/updated are optional here even though their Go struct tags lack omitempty, because the engine fills them in on write.",
+  "title": "Memory front matter",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "scope", "created"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^mem_[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "type": {
+      "enum": ["note", "semantic", "behavioral", "testing", "invariant", "environment", "gotcha"]
+    },
+    "scope": {
+      "enum": ["personal", "workspace", "service", "flow"]
+    },
+    "subject": { "$ref": "#/$defs/subject" },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "source": { "$ref": "#/$defs/source" },
+    "status": {
+      "enum": ["active", "promoted", "superseded", "deprecated", "disputed"]
+    },
+    "created": { "type": "string", "format": "date-time" },
+    "updated": { "type": "string", "format": "date-time" },
+    "resolved": { "$ref": "#/$defs/resolved" }
+  },
+  "$defs": {
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "service": { "type": "string", "minLength": 1 },
+        "operation": { "type": "string", "minLength": 1 },
+        "field": { "type": "string", "minLength": 1 },
+        "schema": { "type": "string", "minLength": 1 },
+        "flow": { "type": "string", "minLength": 1 },
+        "step": { "type": "string", "minLength": 1 },
+        "run": { "type": "string", "minLength": 1 },
+        "environment": { "type": "string", "minLength": 1 },
+        "error": { "$ref": "#/$defs/errorRef" },
+        "concept": { "type": "string", "minLength": 1 }
+      }
+    },
+    "errorRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "operation": { "type": "string", "minLength": 1 },
+        "status": { "type": "integer" },
+        "code": { "type": "string", "minLength": 1 }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": { "enum": ["user", "agent", "run", "import", "documentation"] },
+        "client": { "type": "string", "minLength": 1 },
+        "model": { "type": "string", "minLength": 1 },
+        "run_id": { "type": "string", "minLength": 1 },
+        "step_id": { "type": "string", "minLength": 1 },
+        "path": { "type": "string", "minLength": 1 }
+      }
+    },
+    "resolved": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "method": { "type": "string", "minLength": 1 },
+        "path": { "type": "string", "minLength": 1 },
+        "operation_hash": { "type": "string", "minLength": 1 },
+        "resolved_at": { "type": "string", "format": "date-time" },
+        "unresolved": { "type": "boolean" }
+      }
+    }
+  }
+}

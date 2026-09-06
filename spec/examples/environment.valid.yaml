@@ -1,0 +1,11 @@
+version: 1
+name: staging
+production: false
+services:
+  order-service:      { base_url: https://orders.staging.internal }
+  allocation-service: { base_url: https://alloc.staging.internal }
+vars:
+  TEST_CUSTOMER: cust_123
+auth:
+  default: { type: bearer, token: "${secret.STAGING_TOKEN}" }
+  rider-service: { type: header, name: X-Api-Key, value: "${secret.RIDER_KEY}" }

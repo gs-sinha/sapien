@@ -1,0 +1,258 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "*.flow.yaml -- see PLAN.md section 8 and internal/domain/flow.go. Reserved future keys (when, parallel, foreach, retry, use, needs, datasets) are rejected today via additionalProperties: false.",
+  "title": "Flow file",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "steps"
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "description": {
+      "type": "string"
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "inputs": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/inputSpec"
+      }
+    },
+    "setup": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/step"
+      },
+      "description": "Steps run before steps; results addressable as steps.<id>; reused by a resumed run."
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/step"
+      }
+    },
+    "teardown": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/step"
+      },
+      "description": "Steps that always run after steps, even after a failure; their outcome never changes the run's status."
+    }
+  },
+  "$defs": {
+    "inputSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "enum": [
+            "string",
+            "integer",
+            "number",
+            "boolean",
+            "object",
+            "array"
+          ]
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "default": {},
+        "description": {
+          "type": "string"
+        }
+      }
+    },
+    "step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id"
+      ],
+      "anyOf": [
+        {
+          "required": [
+            "call"
+          ]
+        },
+        {
+          "required": [
+            "example"
+          ]
+        }
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-zA-Z_][a-zA-Z0-9_-]*$"
+        },
+        "call": {
+          "type": "string",
+          "pattern": "^[a-z0-9-]+\\.[A-Za-z0-9_-]+$"
+        },
+        "example": {
+          "type": "string",
+          "pattern": "^[a-z0-9._-]+$"
+        },
+        "input": {
+          "type": "object"
+        },
+        "params": {
+          "$ref": "#/$defs/explicitParams"
+        },
+        "body": {},
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "extract": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "assert": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/assertion"
+          }
+        },
+        "until": {
+          "type": "string",
+          "minLength": 1
+        },
+        "poll": {
+          "$ref": "#/$defs/poll"
+        },
+        "timeout": {
+          "type": "string",
+          "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$"
+        }
+      }
+    },
+    "explicitParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "object"
+        },
+        "query": {
+          "type": "object"
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "poll": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "interval": {
+          "type": "string",
+          "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$"
+        },
+        "timeout": {
+          "type": "string",
+          "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$"
+        }
+      }
+    },
+    "assertion": {
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "$ref": "#/$defs/structuredAssertion"
+        }
+      ]
+    },
+    "structuredAssertion": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "status": {
+          "type": "integer"
+        },
+        "latency_ms": {
+          "$ref": "#/$defs/range"
+        },
+        "schema": {
+          "const": "contract"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "eq": {},
+        "neq": {},
+        "exists": {
+          "type": "boolean"
+        },
+        "matches": {
+          "type": "string",
+          "minLength": 1
+        },
+        "contains": {},
+        "message": {
+          "type": "string"
+        },
+        "expr": {
+          "type": "string",
+          "minLength": 1,
+          "description": "A CEL expression, the same as a bare string assertion; accepted so a flow read back through get_flow is valid input."
+        },
+        "soft": {
+          "type": "boolean",
+          "description": "Record a mismatch as a warning on the step instead of failing it."
+        }
+      }
+    },
+    "range": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "lt": {
+          "type": "number"
+        },
+        "lte": {
+          "type": "number"
+        },
+        "gt": {
+          "type": "number"
+        },
+        "gte": {
+          "type": "number"
+        }
+      }
+    }
+  }
+}

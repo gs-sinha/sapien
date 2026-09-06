@@ -1,0 +1,8 @@
+version: 1
+name: order-service
+description: Owns the customer order lifecycle - creation, cancellation, listing, and the delivery timeline.
+owners: [logistics-platform]
+concepts: [orders, delivery timeline, order lifecycle]
+contracts: [openapi.yaml]
+environments:
+  local: { base_url: http://localhost:8081 }

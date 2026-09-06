@@ -1,0 +1,4 @@
+# invalid: "operation" is required
+version: 1
+id: create-qcom-order
+body: { customerId: c1 }

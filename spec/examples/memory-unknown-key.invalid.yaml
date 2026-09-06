@@ -1,0 +1,5 @@
+# invalid: "priority" is not a recognized memory front-matter key
+id: mem_01J8Z5K3W2RQ4X7M9NPQR2T3V8
+scope: workspace
+created: 2026-09-05T10:20:00Z
+priority: high

@@ -1,0 +1,8 @@
+# invalid: structured assertions use "matches" (a regex), not "regex"
+version: 1
+id: order-allocation
+steps:
+  - id: create
+    call: order-service.createOrder
+    assert:
+      - { regex: "^ord_" }

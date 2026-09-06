@@ -1,0 +1,19 @@
+# build
+/bin/
+/dist/
+*.test
+*.out
+coverage*.html
+# workspace state
+.sapien/
+# editors / os
+.DS_Store
+.idea/
+.vscode/
+
+# Internal material kept out of the public repo: field reports from real
+# sessions and the search study's data (real operations and doc text).
+docs/feedback/
+experiments/search-eval/*.json
+experiments/search-eval/*.npy
+experiments/search-eval/queries.yaml
