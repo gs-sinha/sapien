@@ -3,6 +3,9 @@ import { useParams } from 'react-router-dom';
 import { flows, operations } from '../api/client';
 import type { FlowWithSource } from '../api/types-runs';
 import { KeyValue } from '../components/KeyValue';
+import { ActiveRunPanel, stepStatuses } from './flows/ActiveRunPanel';
+import type { ActiveRun } from './flows/ActiveRunPanel';
+import { FlowDescription } from './flows/FlowDescription';
 import { FlowStepCard } from './flows/FlowStepCard';
 import { RecentRuns } from './flows/RecentRuns';
 import { RunPanel } from './flows/RunPanel';
@@ -13,7 +16,7 @@ import type { FlowStepEdits, StepEdit } from './flows/stepEdits';
 import { useAsync } from '../lib/useAsync';
 import { subscribe } from '../state/events';
 import { pushToast } from '../state/toast';
-import type { Operation } from '../api/types';
+import type { Operation, Run } from '../api/types';
 
 // Shown once per browser tab session, the first time "Save to flow" is
 // used: js-yaml's dumper round-trips the data but not the file's comments
@@ -44,6 +47,7 @@ export default function FlowDetailPage() {
   const [edits, setEdits] = useState<FlowStepEdits>({});
   const [savingToFlow, setSavingToFlow] = useState(false);
   const [opsByCallId, setOpsByCallId] = useState<Record<string, Operation>>({});
+  const [activeRun, setActiveRun] = useState<ActiveRun | null>(null);
 
   // Edits are per-flow, persisted in sessionStorage (pages/flows/stepEdits.ts)
   // so navigating to a run and back keeps them; re-seed whenever the route's
@@ -51,6 +55,7 @@ export default function FlowDetailPage() {
   // changes, so this can't be a lazy useState initializer).
   useEffect(() => {
     setEdits(id ? loadStepEdits(id) : {});
+    setActiveRun(null);
   }, [id]);
 
   // Resolve each distinct step.call once the flow (re)loads, so FlowStepCard
@@ -86,6 +91,29 @@ export default function FlowDetailPage() {
       }),
     [id, reload],
   );
+
+  // Live progress for a run started from this page. POST /v1/flows/{id}/run
+  // only answers once the run is over, so the run's id and its per-step
+  // progress both come from the event stream while it's still in flight: the
+  // run.started event names the id, and every run.step after that carries a
+  // step's new status. Both updates go through a functional setState so the
+  // subscription never closes over a stale ActiveRun.
+  useEffect(() => {
+    const un1 = subscribe('run.started', (e) => {
+      if (e.ids.flow_id && e.ids.flow_id !== id) return;
+      setActiveRun((prev) => (prev && prev.phase === 'running' && !prev.runId ? { ...prev, runId: e.ids.run_id } : prev));
+    });
+    const un2 = subscribe('run.step', (e) => {
+      setActiveRun((prev) => {
+        if (!prev || !e.ids.step_id || e.ids.run_id !== prev.runId) return prev;
+        return { ...prev, steps: { ...prev.steps, [e.ids.step_id]: e.status || 'running' } };
+      });
+    });
+    return () => {
+      un1();
+      un2();
+    };
+  }, [id]);
 
   const setStepEdit = (stepId: string, patch: Partial<StepEdit>) => {
     setEdits((prev) => {
@@ -129,18 +157,28 @@ export default function FlowDetailPage() {
     }
   };
 
+  const onRunStart = () => setActiveRun({ phase: 'running', startedAt: Date.now(), steps: {} });
+  const onRunFinish = (run: Run) =>
+    setActiveRun((prev) => ({ phase: 'done', startedAt: prev?.startedAt ?? Date.now(), steps: prev?.steps || {}, runId: run.id, run }));
+  const onRunFail = (message: string) =>
+    setActiveRun((prev) => ({ phase: 'error', startedAt: prev?.startedAt ?? Date.now(), steps: prev?.steps || {}, runId: prev?.runId, message }));
+
   if (loading) return <div className="p-4 text-sm text-slate-400">Loading…</div>;
   if (error) return <div className="p-4 text-sm text-red-600">{error.message}</div>;
   if (!flow) return null;
 
   const dirty = hasAnyEdits(edits);
+  const liveStatuses = activeRun ? stepStatuses(activeRun) : {};
 
+  // Order follows what this page is for: run the flow, watch it, read its
+  // steps. The YAML source and the validator sit at the bottom, collapsed,
+  // rather than between the reader and the Run button.
   return (
-    <div className="grid grid-cols-1 gap-6 p-4 lg:grid-cols-2">
-      <div className="space-y-5">
-        <div>
-          <h1 className="mb-1 text-lg font-semibold">{flow.name || flow.id}</h1>
-          <p className="mb-3 text-sm text-slate-500">{flow.description}</p>
+    <div className="space-y-4 p-4">
+      <div>
+        <h1 className="mb-1 text-lg font-semibold">{flow.name || flow.id}</h1>
+        <FlowDescription text={flow.description} />
+        <div className="max-w-2xl">
           <KeyValue
             pairs={[
               ['id', flow.id],
@@ -150,53 +188,57 @@ export default function FlowDetailPage() {
             ]}
           />
         </div>
+      </div>
 
-        <div>
-          <div className="mb-2 flex items-center justify-between gap-2">
-            <h2 className="text-sm font-semibold">Steps</h2>
-            <button
-              type="button"
-              onClick={saveToFlow}
-              disabled={!dirty || savingToFlow}
-              title={dirty ? undefined : 'No pending edits.'}
-              className="rounded border border-slate-300 px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700"
-            >
-              {savingToFlow ? 'Saving…' : 'Save to flow'}
-            </button>
-          </div>
-          <div className="rounded border border-slate-200 dark:border-slate-800">
-            {(flow.steps || []).map((s) => (
-              <FlowStepCard
-                key={s.id}
-                step={s}
-                edit={edits[s.id]}
-                operation={s.call ? opsByCallId[s.call] : undefined}
-                onChangeEdit={(patch) => setStepEdit(s.id, patch)}
-                onReset={() => resetStep(s.id)}
-              />
-            ))}
-            {(!flow.steps || flow.steps.length === 0) && <div className="p-3 text-sm text-slate-400">No steps.</div>}
-          </div>
-        </div>
-
-        <div>
-          <h2 className="mb-2 text-sm font-semibold">Recent runs</h2>
-          <RecentRuns flowId={flow.id} />
+      <div>
+        <h2 className="mb-2 text-sm font-semibold">Run</h2>
+        <div className="space-y-3">
+          <RunPanel flow={flow} edits={edits} onStart={onRunStart} onFinish={onRunFinish} onFail={onRunFail} />
+          {activeRun && (
+            <ActiveRunPanel active={activeRun} totalSteps={(flow.steps || []).length} onDismiss={() => setActiveRun(null)} />
+          )}
         </div>
       </div>
 
-      <div className="space-y-5">
-        <YamlSourcePanel source={flow.source || ''} />
-
-        <div>
-          <h2 className="mb-2 text-sm font-semibold">Validate</h2>
-          <ValidatePanel source={flow.source || ''} />
+      <div>
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <h2 className="text-sm font-semibold">Steps</h2>
+          <button
+            type="button"
+            onClick={saveToFlow}
+            disabled={!dirty || savingToFlow}
+            title={dirty ? undefined : 'No pending edits.'}
+            className="rounded border border-slate-300 px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700"
+          >
+            {savingToFlow ? 'Saving…' : 'Save to flow'}
+          </button>
         </div>
-
-        <div>
-          <h2 className="mb-2 text-sm font-semibold">Run</h2>
-          <RunPanel flow={flow} edits={edits} />
+        <div className="rounded border border-slate-200 dark:border-slate-800">
+          {(flow.steps || []).map((s) => (
+            <FlowStepCard
+              key={s.id}
+              step={s}
+              edit={edits[s.id]}
+              operation={s.call ? opsByCallId[s.call] : undefined}
+              runStatus={liveStatuses[s.id]}
+              onChangeEdit={(patch) => setStepEdit(s.id, patch)}
+              onReset={() => resetStep(s.id)}
+            />
+          ))}
+          {(!flow.steps || flow.steps.length === 0) && <div className="p-3 text-sm text-slate-400">No steps.</div>}
         </div>
+      </div>
+
+      <div>
+        <h2 className="mb-2 text-sm font-semibold">Recent runs</h2>
+        <RecentRuns flowId={flow.id} />
+      </div>
+
+      <YamlSourcePanel source={flow.source || ''} />
+
+      <div>
+        <h2 className="mb-2 text-sm font-semibold">Validate</h2>
+        <ValidatePanel source={flow.source || ''} />
       </div>
     </div>
   );

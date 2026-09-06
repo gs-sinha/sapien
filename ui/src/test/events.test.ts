@@ -51,6 +51,7 @@ describe('summarize', () => {
       type: 'run.step',
       time: '2026-01-01T00:00:00Z',
       summary: 'run run_1 step call: passed',
+      status: 'passed',
       ids: { run_id: 'run_1', step_id: 'call' },
     });
   });

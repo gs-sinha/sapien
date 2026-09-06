@@ -4,9 +4,19 @@ All notable changes to this project are documented in this file. The
 format loosely follows [Keep a Changelog](https://keepachangelog.com/),
 and phase numbers refer to PLAN.md §34's roadmap.
 
-## [Unreleased]
+## [1.0.1] - 2026-09-06
 
 ### Changed
+- Flow detail page (`/ui/flows/{id}`) is reordered around what it is used
+  for: Run and live run progress at the top, then the steps, recent runs,
+  and last the source. The agent-written description is clamped to two
+  lines behind "Show more" and the flow's YAML is collapsed behind a
+  disclosure that names its line count, so neither stands between the
+  reader and the Run button or the step list. Running no longer navigates
+  away: the run's status, step-by-step progress (live off the event
+  stream), assertion counts, and errors appear in place, each step's card
+  carries its status while the run is going, and "Open run details" links
+  to the run's own page.
 - Module path and distribution names moved from `github.com/growsimplee/sapien`
   to `github.com/gs-sinha/sapien` after the repository transfer: Go import
   path, `go install` target, installer and README URLs, the container image

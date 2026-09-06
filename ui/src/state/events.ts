@@ -16,6 +16,11 @@ export interface StoredEvent {
   type: EventType;
   time: string;
   summary: string;
+  // The run/step status carried by a run.started, run.step, or run.finished
+  // event, kept as its own field (it's already parsed out for `summary`) so a
+  // subscriber can follow a run's progress without re-parsing the summary
+  // line. Undefined for every other event type.
+  status?: string;
   ids: {
     run_id?: string;
     step_id?: string;
@@ -41,6 +46,7 @@ export function summarize(ev: Event): StoredEvent {
   const p = asRecord(ev.payload) || {};
   const ids: StoredEvent['ids'] = {};
   let summary: string = ev.type;
+  let eventStatus: string | undefined;
 
   switch (ev.type) {
     case 'run.started':
@@ -48,6 +54,7 @@ export function summarize(ev: Event): StoredEvent {
       ids.run_id = str(p.id);
       ids.flow_id = str(p.flow_id);
       const status = str(p.status);
+      eventStatus = status;
       const summaryObj = asRecord(p.summary);
       const passed = summaryObj ? Number(summaryObj.steps_passed ?? 0) : undefined;
       const total = summaryObj ? Number(summaryObj.steps_total ?? 0) : undefined;
@@ -59,6 +66,7 @@ export function summarize(ev: Event): StoredEvent {
       ids.run_id = str(p.run_id);
       ids.step_id = str(p.step_id);
       const status = str(p.status);
+      eventStatus = status;
       summary = `run ${ids.run_id ?? ''} step ${ids.step_id ?? ''}: ${status ?? ''}`.trim();
       break;
     }
@@ -94,7 +102,7 @@ export function summarize(ev: Event): StoredEvent {
       summary = ev.type;
   }
 
-  return { type: ev.type, time: ev.time, summary, ids };
+  return { type: ev.type, time: ev.time, summary, status: eventStatus, ids };
 }
 
 type Listener = (e: StoredEvent) => void;

@@ -308,3 +308,14 @@ Fix on the machine: stop 91162, touch the flow file, the live daemon reindexed i
 ## Repository transfer and module rename (2026-09-06)
 
 v1.0.0 was pushed to `growsimplee/sapien` and the GitHub release was assembled by hand (darwin/linux archives plus `checksums.txt`) because the org's Actions were locked for billing; the repository was then transferred to `gs-sinha/sapien`, where the old URL redirects and the same CI run passed on rerun. Every reference followed the move in one commit: the Go module path (`github.com/gs-sinha/sapien`, 364 files), the Makefile and goreleaser ldflags, installer and README URLs, `ghcr.io/gs-sinha/sapien`, the `gs-sinha/tap` formula, and the npm scope. Consequence to remember: `go install github.com/gs-sinha/sapien/cmd/sapien@latest` needs a tag cut after the rename, since v1.0.0's `go.mod` still declares the old path; the release archives and `scripts/install.sh` do not care.
+
+## Flow page reordered around running a flow (2026-09-06)
+
+User feedback from the inspector: the flow page showed a very large YAML block and a long agent-written description, so running the flow meant scrolling past the YAML, reading the steps meant scrolling past the description, and there was no way to watch a run from the page it was started on.
+
+- **Collapsed by default**: the description clamps to two lines with a Show more/less toggle (a character/newline test, not a measured height, so the toggle never flickers); the YAML sits behind a disclosure whose header names its line count and keeps Copy working while closed.
+- **Reordered**: one full-width column — header, Run, live run, steps, recent runs, YAML, validate — instead of two columns whose right-hand side buried the Run button under the source. The two-column split existed to hold the YAML; collapsing it removed the reason.
+- **Run in place**: `POST /v1/flows/{id}/run` answers only when the run is over, so `RunPanel` no longer navigates on submit. It hands the lifecycle to the page, which learns the run id from `run.started` and each step's status from `run.step` while the request is still in flight (`StoredEvent` now carries `status` as its own field). The panel shows status, `done/total` steps with the step currently executing, a progress bar, elapsed time, assertion counts, the run's error, and an "Open run details →" link that works as soon as the id is known; the final `Run` from the response is authoritative for step statuses. Each step's card shows its own status pill while the run is going. When the event socket is not open the panel says so instead of looking stalled.
+- Bundle unchanged in practice: initial chunk 65.0 KB gz, whole app 208.7 KB gz (budget 120 / 300); 75 UI tests green.
+
+Not yet checked in a real browser against a live daemon; the behaviour is covered by tests that drive the event store directly.

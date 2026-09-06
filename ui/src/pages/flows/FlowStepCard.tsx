@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { JsonView } from '../../components/JsonView';
+import { StatusPill } from '../../components/StatusPill';
 import { KeyValueEditor, recordFromRows, rowsFromRecord } from './KeyValueEditor';
 import { SaveStepExampleDialog } from './SaveStepExampleDialog';
 import { bodyToText, isStepModified, mergedBody, mergedHeaders, mergedInput, textToBody } from './stepEdits';
@@ -21,6 +22,7 @@ export function FlowStepCard({
   step,
   edit,
   operation,
+  runStatus,
   onChangeEdit,
   onReset,
 }: {
@@ -34,6 +36,10 @@ export function FlowStepCard({
   // suggestion chips (declared param names, required ones marked).
   // Undefined while loading, on lookup failure, or for an example-only step.
   operation?: Operation;
+  // This step's status in the run currently being watched on this page
+  // (pages/flows/ActiveRunPanel.tsx), fed by run.step events as they arrive.
+  // Undefined when no run is being watched, or before this step reports.
+  runStatus?: string;
   onChangeEdit: (patch: Partial<StepEdit>) => void;
   onReset: () => void;
 }) {
@@ -86,6 +92,7 @@ export function FlowStepCard({
       >
         <span className="w-4 text-slate-400">{open ? '▾' : '▸'}</span>
         <span className="font-mono text-xs">{step.id}</span>
+        {runStatus && <StatusPill status={runStatus} />}
         {modified && (
           <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
             modified
