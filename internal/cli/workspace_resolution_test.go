@@ -109,3 +109,32 @@ func TestMCPConfigWrite_RecordsDefaultWorkspaceOnce(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(data), "default_workspace: "+wsDir)
 }
+
+// `workspace list` merges the registry with the workspace you are standing
+// in. Reaching that same workspace by another path -- lowercase `desktop`
+// on a case-insensitive filesystem, or a symlink as here -- used to add it
+// a second time, so the listing showed a workspace that does not exist and
+// put the "current" marker on the wrong row.
+func TestWorkspaceList_SameWorkspaceViaAnotherPathIsListedOnce(t *testing.T) {
+	t.Setenv("SAPIEN_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
+
+	wsDir := t.TempDir()
+	_, stderr, code := run(t, "init", wsDir)
+	require.Equal(t, 0, code, "stderr: %s", stderr)
+
+	link := filepath.Join(t.TempDir(), "link")
+	require.NoError(t, os.Symlink(wsDir, link))
+
+	// --workspace stands in for "the cwd resolved to this spelling".
+	stdout, stderr, code := run(t, "--workspace", link, "workspace", "list", "--json")
+	require.Equal(t, 0, code, "stderr: %s", stderr)
+
+	var rows []struct {
+		Dir     string `json:"dir"`
+		Current bool   `json:"current"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &rows))
+
+	require.Len(t, rows, 1, "one workspace reached two ways is one row (got %+v)", rows)
+	assert.True(t, rows[0].Current, "the row must be marked current whichever path named it")
+}

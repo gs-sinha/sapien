@@ -17,6 +17,7 @@ import (
 	"github.com/gs-sinha/sapien/internal/engine/remote"
 	"github.com/gs-sinha/sapien/internal/errs"
 	"github.com/gs-sinha/sapien/internal/mcp"
+	"github.com/gs-sinha/sapien/internal/workspaces"
 )
 
 func init() { Register(newMCPCmd) }
@@ -75,12 +76,26 @@ func newMCPCmd(app *App) *cobra.Command {
 				}
 				defer eng.Close()
 
+				// Switching works without a daemon too: the manager opens
+				// each other workspace in this process, taking its lock, so
+				// list_workspaces/switch_workspace behave the same either
+				// way rather than silently disappearing under
+				// SAPIEN_NO_DAEMON.
+				wsMgr := workspaces.New(ws, eng, workspaces.Options{PID: os.Getpid()})
+				defer func() { _ = wsMgr.Close() }()
+
 				paths := mcpConfigPaths(ws)
 				cfg, err := mcp.LoadConfig(paths...)
 				if err != nil {
 					return err
 				}
-				return mcp.ServeStdio(ctx, mcp.Options{Engine: eng, Config: cfg, ConfigPaths: paths, Version: Version})
+				return mcp.ServeStdio(ctx, mcp.Options{
+					Engine:      eng,
+					Workspaces:  wsMgr,
+					Config:      cfg,
+					ConfigPaths: paths,
+					Version:     Version,
+				})
 			}
 
 			info, err := findOrStartDaemon(ctx, ws, Version)
@@ -113,19 +128,31 @@ func newMCPCmd(app *App) *cobra.Command {
 				}
 				return fmt.Sprintf("http://127.0.0.1:%d", info.Port), info.Token, nil
 			}
-			remoteEng, err := remote.New(fmt.Sprintf("http://127.0.0.1:%d", info.Port), info.Token,
-				remote.WithEndpointResolver(resolver))
+			baseURL := fmt.Sprintf("http://127.0.0.1:%d", info.Port)
+			remoteEng, err := remote.New(baseURL, info.Token, remote.WithEndpointResolver(resolver))
 			if err != nil {
 				return err
 			}
 			defer remoteEng.Close()
+
+			// The daemon holds the engines; this bridge switches which one
+			// it talks to by opening a second client against the same
+			// daemon with a different workspace header.
+			switcher := newRemoteSwitcher(baseURL, info.Token, resolver, remoteEng)
+			defer switcher.Close(remoteEng)
 
 			paths := mcpConfigPaths(ws)
 			cfg, err := mcp.LoadConfig(paths...)
 			if err != nil {
 				return err
 			}
-			return mcp.ServeStdio(ctx, mcp.Options{Engine: remoteEng, Config: cfg, ConfigPaths: paths, Version: Version})
+			return mcp.ServeStdio(ctx, mcp.Options{
+				Engine:      remoteEng,
+				Workspaces:  switcher,
+				Config:      cfg,
+				ConfigPaths: paths,
+				Version:     Version,
+			})
 		},
 	}
 

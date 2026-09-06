@@ -27,7 +27,7 @@ func (e *eventAPI) Subscribe(ctx context.Context) (<-chan domain.Event, func()) 
 		u.Path = "/v1/events"
 		conn, _, err := websocket.Dial(subCtx, u.String(), &websocket.DialOptions{
 			HTTPClient: r.client,
-			HTTPHeader: http.Header{"Authorization": []string{"Bearer " + r.currentToken()}},
+			HTTPHeader: wsHeaders(r.currentToken(), r.currentWorkspaceDir()),
 		})
 		if err != nil {
 			return
@@ -51,3 +51,13 @@ func (e *eventAPI) Subscribe(ctx context.Context) (<-chan domain.Event, func()) 
 }
 
 var _ engine.EventAPI = (*eventAPI)(nil)
+
+// wsHeaders builds the WebSocket handshake headers: the bearer token, plus
+// the workspace selector when this client is bound to one.
+func wsHeaders(token, wsDir string) http.Header {
+	h := http.Header{"Authorization": []string{"Bearer " + token}}
+	if wsDir != "" {
+		h.Set(workspaceHeader, wsDir)
+	}
+	return h
+}

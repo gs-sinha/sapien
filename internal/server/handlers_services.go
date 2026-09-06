@@ -7,7 +7,7 @@ import (
 )
 
 func (s *Server) handleServicesList(w http.ResponseWriter, r *http.Request) {
-	out, err := s.engine.Services().List(r.Context())
+	out, err := engineFrom(r.Context()).Services().List(r.Context())
 	if err != nil {
 		writeError(w, err)
 		return
@@ -21,7 +21,7 @@ func (s *Server) handleServiceAdd(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	out, err := s.engine.Services().Add(r.Context(), req.Name, req.Source)
+	out, err := engineFrom(r.Context()).Services().Add(r.Context(), req.Name, req.Source)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -31,7 +31,7 @@ func (s *Server) handleServiceAdd(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleServiceGet(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	out, err := s.engine.Services().Get(r.Context(), id)
+	out, err := engineFrom(r.Context()).Services().Get(r.Context(), id)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -41,7 +41,7 @@ func (s *Server) handleServiceGet(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleServiceRemove(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	if err := s.engine.Services().Remove(r.Context(), id); err != nil {
+	if err := engineFrom(r.Context()).Services().Remove(r.Context(), id); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -49,7 +49,7 @@ func (s *Server) handleServiceRemove(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleServicesSyncAll(w http.ResponseWriter, r *http.Request) {
-	out, err := s.engine.Services().Sync(r.Context(), "")
+	out, err := engineFrom(r.Context()).Services().Sync(r.Context(), "")
 	if err != nil {
 		writeError(w, err)
 		return
@@ -59,7 +59,7 @@ func (s *Server) handleServicesSyncAll(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleServiceSync(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	out, err := s.engine.Services().Sync(r.Context(), id)
+	out, err := engineFrom(r.Context()).Services().Sync(r.Context(), id)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -68,7 +68,7 @@ func (s *Server) handleServiceSync(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleServicesReindex(w http.ResponseWriter, r *http.Request) {
-	if err := s.engine.Services().Reindex(r.Context()); err != nil {
+	if err := engineFrom(r.Context()).Services().Reindex(r.Context()); err != nil {
 		writeError(w, err)
 		return
 	}

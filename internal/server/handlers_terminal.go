@@ -107,12 +107,12 @@ func (s *Server) terminalDirs(ctx context.Context) []terminalDir {
 		dirs = append(dirs, terminalDir{Label: label, Path: clean})
 	}
 
-	ws := s.engine.Workspace()
+	ws := engineFrom(ctx).Workspace()
 	if ws != nil {
 		add("Workspace", ws.Dir)
 	}
 
-	if svcs, err := s.engine.Services().List(ctx); err == nil {
+	if svcs, err := engineFrom(ctx).Services().List(ctx); err == nil {
 		for _, svc := range svcs {
 			add(svc.Name, svc.PackageDir)
 			if svc.Source.Kind == domain.SourceLocal && svc.Source.Path != "" {
@@ -214,7 +214,7 @@ func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
 
 	env := os.Environ()
 	env = append(env, "TERM=xterm-256color")
-	if ws := s.engine.Workspace(); ws != nil {
+	if ws := engineFrom(r.Context()).Workspace(); ws != nil {
 		env = append(env, "SAPIEN_WORKSPACE="+ws.Dir)
 	}
 

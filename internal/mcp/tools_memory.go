@@ -36,7 +36,7 @@ func (s *server) searchMemories(ctx context.Context, req *sdkmcp.CallToolRequest
 	if limit <= 0 {
 		limit = 10
 	}
-	results, err := s.eng.Memories().Search(ctx, domain.MemoryQuery{
+	results, err := s.engine().Memories().Search(ctx, domain.MemoryQuery{
 		Text: in.Query, Operation: in.Operation, Service: in.Service, Limit: limit,
 	})
 	if err != nil {
@@ -78,7 +78,7 @@ func (s *server) getRelevantMemories(ctx context.Context, req *sdkmcp.CallToolRe
 	if limit <= 0 {
 		limit = 15
 	}
-	results, err := s.eng.Memories().Relevant(ctx, in.Subjects, limit)
+	results, err := s.engine().Memories().Relevant(ctx, in.Subjects, limit)
 	if err != nil {
 		return errResult(err), nil, nil
 	}
@@ -122,7 +122,7 @@ func (s *server) createMemory(ctx context.Context, req *sdkmcp.CallToolRequest, 
 	if in.Subject != nil {
 		m.Subject = *in.Subject
 	}
-	created, err := s.eng.Memories().Create(ctx, m)
+	created, err := s.engine().Memories().Create(ctx, m)
 	if err != nil {
 		return errResult(err), nil, nil
 	}
@@ -162,7 +162,7 @@ func (s *server) writeMemoryHints(ctx context.Context, b *strings.Builder, creat
 	if created.Subject.Service != "" {
 		q.Service = created.Subject.Service
 	}
-	if similar, err := s.eng.Memories().Search(ctx, q); err == nil {
+	if similar, err := s.engine().Memories().Search(ctx, q); err == nil {
 		shown := 0
 		for _, r := range similar {
 			if r.Memory.ID == created.ID {
@@ -226,7 +226,7 @@ func (s *server) getPromotionTarget(ctx context.Context, req *sdkmcp.CallToolReq
 	if _, _, denied := s.checkPermission(req.Session, classReadMemories); denied != nil {
 		return denied, nil, nil
 	}
-	target, err := s.eng.Memories().PromotionTarget(ctx, in.MemoryID)
+	target, err := s.engine().Memories().PromotionTarget(ctx, in.MemoryID)
 	if err != nil {
 		return errResult(err), nil, nil
 	}
@@ -263,7 +263,7 @@ func (s *server) rescopeMemory(ctx context.Context, req *sdkmcp.CallToolRequest,
 		return denied, nil, nil
 	}
 
-	mem, err := s.eng.Memories().Get(ctx, in.ID)
+	mem, err := s.engine().Memories().Get(ctx, in.ID)
 	if err != nil {
 		return errResult(err), nil, nil
 	}
@@ -280,7 +280,7 @@ func (s *server) rescopeMemory(ctx context.Context, req *sdkmcp.CallToolRequest,
 		return errResult(err), nil, nil
 	}
 
-	moved, err := s.eng.Memories().Update(ctx, updated)
+	moved, err := s.engine().Memories().Update(ctx, updated)
 	if err != nil {
 		return errResult(err), nil, nil
 	}

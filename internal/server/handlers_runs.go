@@ -16,7 +16,7 @@ func (s *Server) handleRunFlowSource(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	out, err := s.engine.Runner().RunFlowSource(r.Context(), req.YAML, req.Opts.toEngine())
+	out, err := engineFrom(r.Context()).Runner().RunFlowSource(r.Context(), req.YAML, req.Opts.toEngine())
 	if err != nil {
 		writeError(w, err)
 		return
@@ -26,7 +26,7 @@ func (s *Server) handleRunFlowSource(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleRunCancel(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	if err := s.engine.Runner().Cancel(r.Context(), id); err != nil {
+	if err := engineFrom(r.Context()).Runner().Cancel(r.Context(), id); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -41,7 +41,7 @@ func (s *Server) handleRunsList(w http.ResponseWriter, r *http.Request) {
 		Limit:     queryInt(r, "limit", 0),
 		Offset:    queryInt(r, "offset", 0),
 	}
-	out, err := s.engine.Runs().List(r.Context(), filter)
+	out, err := engineFrom(r.Context()).Runs().List(r.Context(), filter)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -51,7 +51,7 @@ func (s *Server) handleRunsList(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleRunGet(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	out, err := s.engine.Runs().Get(r.Context(), id)
+	out, err := engineFrom(r.Context()).Runs().Get(r.Context(), id)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -66,7 +66,7 @@ func (s *Server) handleRunStepGet(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	step := chi.URLParam(r, "step")
 
-	run, err := s.engine.Runs().Get(r.Context(), id)
+	run, err := engineFrom(r.Context()).Runs().Get(r.Context(), id)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -93,7 +93,7 @@ func (s *Server) handleRunPin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	if err := s.engine.Runs().Pin(r.Context(), id, req.Pinned); err != nil {
+	if err := engineFrom(r.Context()).Runs().Pin(r.Context(), id, req.Pinned); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -106,7 +106,7 @@ func (s *Server) handleRunsPurge(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	removed, err := s.engine.Runs().Purge(r.Context(), req.Keep)
+	removed, err := engineFrom(r.Context()).Runs().Purge(r.Context(), req.Keep)
 	if err != nil {
 		writeError(w, err)
 		return

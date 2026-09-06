@@ -6,6 +6,21 @@ import (
 
 // registerTools wires every tool from PLAN §23's table onto s.
 func (srv *server) registerTools(s *sdkmcp.Server) {
+	// Workspace switching is registered only when this server actually has
+	// somewhere to switch to, so a single-workspace host never shows an
+	// agent two tools that can only fail.
+	if srv.switcher != nil {
+		sdkmcp.AddTool(s, &sdkmcp.Tool{
+			Name:        "list_workspaces",
+			Description: "List the workspaces this daemon can serve and mark the current one. Each workspace is a separate catalog, with its own services, flows, memories and runs; ids from one never resolve in another.",
+		}, srv.listWorkspaces)
+
+		sdkmcp.AddTool(s, &sdkmcp.Tool{
+			Name:        "switch_workspace",
+			Description: "Bind this session to another workspace, by directory or by the name list_workspaces reports. Every later tool call acts on it. Switch when the user names a system this workspace does not carry; do not switch mid-task to look something up and forget to switch back.",
+		}, srv.switchWorkspace)
+	}
+
 	sdkmcp.AddTool(s, &sdkmcp.Tool{
 		Name:        "list_services",
 		Description: "List registered services with descriptions and operation counts.",

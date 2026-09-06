@@ -8,6 +8,7 @@
 // events are dropped from the front.
 import { create } from 'zustand';
 import { getRecentEvents } from '../api/client';
+import { currentWorkspace } from './workspace';
 import type { Event, EventType } from '../api/types';
 
 export type ConnectionStatus = 'connecting' | 'open' | 'closed';
@@ -137,6 +138,9 @@ interface EventsState {
   start: () => void;
   stop: () => void;
   markRead: () => void;
+  // restart reconnects the socket after the selected workspace changes,
+  // dropping the previous workspace's buffered events.
+  restart: () => void;
   // exposed for tests
   _append: (e: StoredEvent) => void;
 }
@@ -149,7 +153,12 @@ let stopped = false;
 
 function wsURL(): string {
   const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  return `${proto}//${window.location.host}/v1/events`;
+  // A browser cannot set headers on a WebSocket handshake, so the workspace
+  // selector rides in the query string here; the daemon accepts either
+  // (internal/server/workspacectx.go).
+  const ws = currentWorkspace();
+  const query = ws ? `?workspace=${encodeURIComponent(ws)}` : '';
+  return `${proto}//${window.location.host}/v1/events${query}`;
 }
 
 export const useEvents = create<EventsState>((set, get) => ({
@@ -194,6 +203,17 @@ export const useEvents = create<EventsState>((set, get) => ({
     socket?.close();
     socket = null;
     set({ started: false, status: 'closed' });
+  },
+
+  // restart drops every buffered event and reconnects against whatever
+  // workspace is now selected. Without the flush, a page subscribing by
+  // run or flow id would react to the previous workspace's events, whose
+  // ids can collide across workspaces.
+  restart: () => {
+    const wasStarted = get().started;
+    get().stop();
+    set({ events: [], unreadCount: 0 });
+    if (wasStarted) get().start();
   },
 }));
 

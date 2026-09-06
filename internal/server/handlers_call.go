@@ -12,7 +12,7 @@ func (s *Server) handleCall(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	out, err := s.engine.Runner().Call(r.Context(), req)
+	out, err := engineFrom(r.Context()).Runner().Call(r.Context(), req)
 	if err != nil {
 		writeError(w, err)
 		return

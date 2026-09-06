@@ -7,7 +7,7 @@ import (
 )
 
 func (s *Server) handleEnvironmentsList(w http.ResponseWriter, r *http.Request) {
-	out, err := s.engine.Envs().List(r.Context())
+	out, err := engineFrom(r.Context()).Envs().List(r.Context())
 	if err != nil {
 		writeError(w, err)
 		return
@@ -17,7 +17,7 @@ func (s *Server) handleEnvironmentsList(w http.ResponseWriter, r *http.Request) 
 
 func (s *Server) handleEnvironmentGet(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	out, err := s.engine.Envs().Get(r.Context(), name)
+	out, err := engineFrom(r.Context()).Envs().Get(r.Context(), name)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -26,7 +26,7 @@ func (s *Server) handleEnvironmentGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleEnvironmentDefaultGet(w http.ResponseWriter, r *http.Request) {
-	name, err := s.engine.Envs().Default(r.Context())
+	name, err := engineFrom(r.Context()).Envs().Default(r.Context())
 	if err != nil {
 		writeError(w, err)
 		return
@@ -40,7 +40,7 @@ func (s *Server) handleEnvironmentDefaultSet(w http.ResponseWriter, r *http.Requ
 		writeError(w, err)
 		return
 	}
-	if err := s.engine.Envs().SetDefault(r.Context(), req.Name); err != nil {
+	if err := engineFrom(r.Context()).Envs().SetDefault(r.Context(), req.Name); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -48,7 +48,7 @@ func (s *Server) handleEnvironmentDefaultSet(w http.ResponseWriter, r *http.Requ
 }
 
 func (s *Server) handleSecretsList(w http.ResponseWriter, r *http.Request) {
-	out, err := s.engine.Envs().ListSecrets(r.Context())
+	out, err := engineFrom(r.Context()).Envs().ListSecrets(r.Context())
 	if err != nil {
 		writeError(w, err)
 		return
@@ -63,7 +63,7 @@ func (s *Server) handleSecretSet(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	if err := s.engine.Envs().SetSecret(r.Context(), name, req.Value); err != nil {
+	if err := engineFrom(r.Context()).Envs().SetSecret(r.Context(), name, req.Value); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -72,7 +72,7 @@ func (s *Server) handleSecretSet(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSecretDelete(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	if err := s.engine.Envs().DeleteSecret(r.Context(), name); err != nil {
+	if err := engineFrom(r.Context()).Envs().DeleteSecret(r.Context(), name); err != nil {
 		writeError(w, err)
 		return
 	}

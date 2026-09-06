@@ -385,3 +385,34 @@ func NormalizeLocalPath(ws *domain.Workspace, p string) string {
 	}
 	return rel
 }
+
+// SameDir reports whether two paths name the same workspace directory.
+//
+// String equality is not enough, and the difference is not cosmetic. macOS
+// and Windows are case-insensitive, so "~/Desktop/ws" and "~/desktop/ws"
+// are one directory spelled two ways, and a symlinked parent does the same
+// thing; filepath.Clean collapses neither. Treating those as two workspaces
+// let one daemon open the same directory twice -- two engines, two database
+// handles, two watchers -- and showed a workspace that does not exist in
+// every picker and listing.
+//
+// os.SameFile compares device and inode, so this is correct on a
+// case-insensitive filesystem without merging genuinely distinct paths on a
+// case-sensitive one. A path that cannot be stat'd (a workspace that was
+// deleted or moved) is only comparable by string, which is the right
+// fallback: it stays listed under its own name, with its own error, rather
+// than silently merging into another entry.
+func SameDir(a, b string) bool {
+	if a == b {
+		return true
+	}
+	ai, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	bi, err := os.Stat(b)
+	if err != nil {
+		return false
+	}
+	return os.SameFile(ai, bi)
+}

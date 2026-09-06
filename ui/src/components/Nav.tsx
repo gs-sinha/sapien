@@ -1,4 +1,5 @@
 import { NavLink } from 'react-router-dom';
+import { WorkspacePicker } from './WorkspacePicker';
 
 const links = [
   { to: '/ui/flows', label: 'Flows' },
@@ -15,7 +16,7 @@ const links = [
 export function Nav() {
   return (
     <nav className="flex h-full w-44 shrink-0 flex-col gap-0.5 border-r border-slate-200 p-3 dark:border-slate-800">
-      <div className="mb-3 px-2 text-sm font-semibold tracking-tight">Sapien</div>
+      <WorkspacePicker />
       {links.map((l) => (
         <NavLink
           key={l.to}

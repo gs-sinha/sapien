@@ -53,6 +53,33 @@ explicitly (default: the directory name). Your services' docs and
 contracts do not need to exist yet; they belong to the service repos and
 are registered next.
 
+## Working with more than one workspace
+
+A second workspace is for an unrelated system, and Sapien can hold
+several at once. Commands pick one in this order: `--workspace`, then
+`$SAPIEN_WORKSPACE`, then the nearest `sapien.workspace.yaml` at or above
+the current directory, and finally the default workspace.
+
+```sh
+sapien workspace list          # every registered one; * is this one
+sapien workspace current       # what this directory resolves to
+sapien workspace use platform  # set the default, by name or path
+sapien workspace add ~/other   # register one you already have
+sapien workspace forget ~/old  # unregister (the directory is untouched)
+```
+
+`sapien init` registers what it creates, and so does opening a workspace
+with `--workspace`, so the list mostly fills itself in. `use` sets the
+*fallback*, not an override: inside a workspace, that workspace still
+wins.
+
+One `sapien serve` serves every registered workspace, opening each on
+first use, so the UI's picker (top of the nav) and MCP's
+`switch_workspace` both switch without restarting anything. Each
+workspace keeps its own database, index, and daemon lock — a catalog,
+flow, memory, or run belongs to exactly one workspace, and an id from one
+never resolves in another.
+
 ## Install the MCP server everywhere
 
 `sapien mcp config --client <name> --write` installs the MCP entry for

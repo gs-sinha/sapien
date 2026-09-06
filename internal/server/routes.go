@@ -24,6 +24,10 @@ var routeTable = []routeDef{
 		func(s *Server) http.HandlerFunc { return s.handleOpenAPI }},
 	{http.MethodGet, "/v1/workspace", "getWorkspace", "The current workspace", true,
 		func(s *Server) http.HandlerFunc { return s.handleWorkspace }},
+	{http.MethodGet, "/v1/workspaces", "listWorkspaces", "List workspaces this daemon can serve", true,
+		func(s *Server) http.HandlerFunc { return s.handleWorkspacesList }},
+	{http.MethodPost, "/v1/workspaces", "registerWorkspace", "Register and open another workspace", true,
+		func(s *Server) http.HandlerFunc { return s.handleWorkspaceRegister }},
 
 	{http.MethodGet, "/v1/services", "listServices", "List registered services", true,
 		func(s *Server) http.HandlerFunc { return s.handleServicesList }},

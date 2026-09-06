@@ -15,7 +15,7 @@ import (
 
 // This file implements the example tools (PLAN §34b): list_examples,
 // get_example, create_example, rescope_example, delete_example. All five
-// are backed by engine.ExampleAPI (s.eng.Examples()); the fake in
+// are backed by engine.ExampleAPI (s.engine().Examples()); the fake in
 // fake_engine_test.go is a complete in-memory implementation, so every test
 // here exercises the real tool/permission/merge logic end to end.
 
@@ -64,7 +64,7 @@ func (s *server) listExamples(ctx context.Context, req *sdkmcp.CallToolRequest, 
 	if limit <= 0 {
 		limit = 20
 	}
-	results, err := s.eng.Examples().List(ctx, domain.ExampleQuery{
+	results, err := s.engine().Examples().List(ctx, domain.ExampleQuery{
 		Operation: in.Operation, Service: in.Service, Tag: in.Tag, Text: in.Text, Limit: limit,
 	})
 	if err != nil {
@@ -104,7 +104,7 @@ func (s *server) getExample(ctx context.Context, req *sdkmcp.CallToolRequest, in
 	if _, _, denied := s.checkPermission(req.Session, classReadContracts); denied != nil {
 		return denied, nil, nil
 	}
-	ex, err := s.eng.Examples().Get(ctx, in.ID)
+	ex, err := s.engine().Examples().Get(ctx, in.ID)
 	if err != nil {
 		return errResult(err), nil, nil
 	}
@@ -169,12 +169,12 @@ func (s *server) createExample(ctx context.Context, req *sdkmcp.CallToolRequest,
 	var created *domain.SavedExample
 	var err error
 	if haveRun {
-		created, err = s.eng.Examples().FromRun(ctx, engine.ExampleFromRun{
+		created, err = s.engine().Examples().FromRun(ctx, engine.ExampleFromRun{
 			RunID: in.RunID, StepID: in.StepID, ID: in.ID, Description: in.Description,
 			Scope: scope, Tags: in.Tags, Source: &domain.MemorySource{Kind: "agent", Client: client},
 		})
 	} else {
-		created, err = s.eng.Examples().Create(ctx, domain.SavedExample{
+		created, err = s.engine().Examples().Create(ctx, domain.SavedExample{
 			ID: in.ID, Operation: in.Operation, Description: in.Description, Scope: scope,
 			Input: in.Input, Body: in.Body, Headers: in.Headers, Tags: in.Tags,
 		})
@@ -222,7 +222,7 @@ func (s *server) rescopeExample(ctx context.Context, req *sdkmcp.CallToolRequest
 		return denied, nil, nil
 	}
 
-	ex, err := s.eng.Examples().Get(ctx, in.ID)
+	ex, err := s.engine().Examples().Get(ctx, in.ID)
 	if err != nil {
 		return errResult(err), nil, nil
 	}
@@ -231,7 +231,7 @@ func (s *server) rescopeExample(ctx context.Context, req *sdkmcp.CallToolRequest
 	oldPath := ex.Path
 	updated.Scope = domain.ExampleScope(in.Scope)
 
-	moved, err := s.eng.Examples().Update(ctx, updated)
+	moved, err := s.engine().Examples().Update(ctx, updated)
 	if err != nil {
 		return errResult(err), nil, nil
 	}
@@ -258,7 +258,7 @@ func (s *server) deleteExample(ctx context.Context, req *sdkmcp.CallToolRequest,
 	if _, _, denied := s.checkPermission(req.Session, classWriteExamples); denied != nil {
 		return denied, nil, nil
 	}
-	if err := s.eng.Examples().Delete(ctx, in.ID); err != nil {
+	if err := s.engine().Examples().Delete(ctx, in.ID); err != nil {
 		return errResult(err), nil, nil
 	}
 	out := DeleteExampleOutput{ID: in.ID}

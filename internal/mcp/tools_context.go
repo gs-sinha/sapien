@@ -31,7 +31,7 @@ func (s *server) getContext(ctx context.Context, req *sdkmcp.CallToolRequest, in
 	if budget <= 0 {
 		budget = 8000
 	}
-	bundle, err := s.eng.Context().Build(ctx, domain.ContextRequest{
+	bundle, err := s.engine().Context().Build(ctx, domain.ContextRequest{
 		Intent:       in.Intent,
 		Operations:   in.Operations,
 		BudgetTokens: budget,

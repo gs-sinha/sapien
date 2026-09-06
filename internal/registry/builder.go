@@ -26,6 +26,14 @@ import (
 type Builder struct {
 	ws  *domain.Workspace
 	git *gitsrc.Manager // optional; required for git-sourced services (PLAN §18)
+	// gitFetch resolves git sources with Sync (fetch, then update to the
+	// configured ref) instead of Ensure (reuse the managed clone as-is).
+	// See WithGitFetch.
+	gitFetch bool
+	// gitSynced records that the caller already fetched this source, so
+	// Build must not fetch again but may still describe the clone as
+	// current. See WithGitSynced.
+	gitSynced bool
 }
 
 // NewBuilder returns a Builder that resolves service sources relative to ws.
@@ -38,6 +46,30 @@ func NewBuilder(ws *domain.Workspace) *Builder {
 // before Phase 5's gitsrc package existed.
 func (b *Builder) WithGit(m *gitsrc.Manager) *Builder {
 	b.git = m
+	return b
+}
+
+// WithGitFetch makes Build fetch a git source before reading it, rather
+// than reading whatever the managed clone already holds.
+//
+// Ensure deliberately never touches the network, which is right for the
+// staleness check and the watcher but wrong for a build whose result the
+// user is waiting on: a clone made moments before a package was pushed
+// stays frozen at the older commit, so the build fails, and every retry
+// reuses the same clone and fails identically with nothing to suggest the
+// clone is the problem. Any path where a person just asked for this
+// service should fetch first.
+func (b *Builder) WithGitFetch() *Builder {
+	b.gitFetch = true
+	return b
+}
+
+// WithGitSynced tells Build that the caller has already fetched this
+// source, so it must not fetch again -- but a failure here is still not a
+// staleness problem, and must not be explained as one. The syncer uses it:
+// it calls Sync itself and then builds.
+func (b *Builder) WithGitSynced() *Builder {
+	b.gitSynced = true
 	return b
 }
 
@@ -76,6 +108,7 @@ func (b *Builder) Build(ctx context.Context, ref domain.ServiceRef) (*Snapshot, 
 
 	var root string
 	var gitCommit string
+	var checkout *gitsrc.Checkout
 
 	switch ref.Source.Kind {
 	case domain.SourceGit:
@@ -83,7 +116,12 @@ func (b *Builder) Build(ctx context.Context, ref domain.ServiceRef) (*Snapshot, 
 			return nil, errs.New(errs.NotImplemented, "git sources arrive in Phase 5").
 				WithDetail("service", ref.Name)
 		}
-		checkout, err := b.git.Ensure(ctx, ref.Source)
+		var err error
+		if b.gitFetch {
+			checkout, _, err = b.git.Sync(ctx, ref.Source)
+		} else {
+			checkout, err = b.git.Ensure(ctx, ref.Source)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -101,7 +139,7 @@ func (b *Builder) Build(ctx context.Context, ref domain.ServiceRef) (*Snapshot, 
 
 	pkg, err := DiscoverPackage(root, ref.Source.Contract)
 	if err != nil {
-		return nil, err
+		return nil, describeCheckout(err, checkout, b.gitFetch || b.gitSynced)
 	}
 
 	meta, err := LoadMetadata(pkg)
@@ -593,4 +631,63 @@ func hashFileHex(path string) (string, error) {
 	}
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:]), nil
+}
+
+// describeCheckout adds the managed clone's actual state to an error raised
+// while reading a git-sourced package, so "no API package found under
+// <cache path>" says which commit that path holds and how current it is.
+//
+// The failure this exists for looks like a configuration mistake and is
+// not one: a clone made before the api/ package was pushed has no api/,
+// reports the same error forever, and nothing in the original message
+// points at the clone. Errors from local sources pass through untouched.
+//
+// fetched says whether this build resolved the checkout with Sync, whose
+// view of the remote is current by construction (it either fetched, or
+// made the clone just now). That is the difference between "the package
+// is not there" and "this clone cannot see it yet", and only the caller
+// knows which happened -- a fresh clone has no FETCH_HEAD either.
+func describeCheckout(err error, checkout *gitsrc.Checkout, fetched bool) error {
+	if checkout == nil {
+		return err
+	}
+
+	short := checkout.Commit
+	if len(short) > 8 {
+		short = short[:8]
+	}
+
+	e := errs.As(err).
+		WithDetail("url", checkout.URL).
+		WithDetail("ref", checkout.Ref).
+		WithDetail("commit", checkout.Commit)
+
+	if fetched {
+		return e.
+			WithDetail("current", true).
+			WithHint(fmt.Sprintf(
+				"the clone of %s is at %s on %s and was just brought up to date, so that commit really does not carry this package: add it upstream, or point --subdir/--contract at where it lives",
+				checkout.URL, short, checkout.Ref))
+	}
+
+	e = e.WithDetail("current", false)
+	seen := "it was cloned"
+	if at, ok := lastSawRemote(checkout.Dir); ok {
+		stamp := at.UTC().Format(time.RFC3339)
+		e = e.WithDetail("last_seen", stamp)
+		seen = stamp
+	}
+	return e.WithHint(fmt.Sprintf(
+		"the clone of %s is at %s on %s and has not been fetched since %s, so a package pushed after that is invisible to it; run `sapien service sync` for this service, or delete %s and try again",
+		checkout.URL, short, checkout.Ref, seen, checkout.Dir))
+}
+
+// lastSawRemote reports when a managed clone last had an accurate view of
+// its remote: its last fetch, or -- for a clone that has never fetched --
+// when it was created, since cloning is itself a fetch of everything.
+func lastSawRemote(dir string) (time.Time, bool) {
+	if at, ok := gitsrc.LastFetch(dir); ok {
+		return at, true
+	}
+	return gitsrc.ClonedAt(dir)
 }

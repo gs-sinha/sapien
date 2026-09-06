@@ -40,7 +40,7 @@ func (s *server) executeAPI(ctx context.Context, req *sdkmcp.CallToolRequest, in
 	var ex *domain.SavedExample
 	if in.Example != "" {
 		var err error
-		ex, err = s.eng.Examples().Get(ctx, in.Example)
+		ex, err = s.engine().Examples().Get(ctx, in.Example)
 		if err != nil {
 			return errResult(err), nil, nil
 		}
@@ -50,7 +50,7 @@ func (s *server) executeAPI(ctx context.Context, req *sdkmcp.CallToolRequest, in
 	if opRef == "" {
 		opRef = ex.Operation
 	}
-	op, err := s.eng.Catalog().ResolveOperation(ctx, opRef)
+	op, err := s.engine().Catalog().ResolveOperation(ctx, opRef)
 	if err != nil {
 		return errResult(err), nil, nil
 	}
@@ -76,7 +76,7 @@ func (s *server) executeAPI(ctx context.Context, req *sdkmcp.CallToolRequest, in
 		headers = mergeExampleHeaders(ex.Headers, in.Headers)
 	}
 
-	run, err := s.eng.Runner().Call(ctx, engine.CallRequest{
+	run, err := s.engine().Runner().Call(ctx, engine.CallRequest{
 		Operation:       op.ID,
 		Params:          params,
 		Body:            body,

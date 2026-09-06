@@ -24,7 +24,7 @@ func (s *Server) handleOperationsList(w http.ResponseWriter, r *http.Request) {
 			Limit:             queryInt(r, "limit", 0),
 			IncludeDeprecated: queryBool(r, "include_deprecated", false),
 		}
-		out, err := s.engine.Search().Operations(r.Context(), q, opts)
+		out, err := engineFrom(r.Context()).Search().Operations(r.Context(), q, opts)
 		if err != nil {
 			writeError(w, err)
 			return
@@ -33,7 +33,7 @@ func (s *Server) handleOperationsList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	out, err := s.engine.Catalog().ListOperations(r.Context(), service)
+	out, err := engineFrom(r.Context()).Catalog().ListOperations(r.Context(), service)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -47,7 +47,7 @@ func (s *Server) handleOperationResolve(w http.ResponseWriter, r *http.Request) 
 		writeError(w, errs.New(errs.Invalid, "missing required query parameter %q", "ref"))
 		return
 	}
-	out, err := s.engine.Catalog().ResolveOperation(r.Context(), ref)
+	out, err := engineFrom(r.Context()).Catalog().ResolveOperation(r.Context(), ref)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -57,7 +57,7 @@ func (s *Server) handleOperationResolve(w http.ResponseWriter, r *http.Request) 
 
 func (s *Server) handleOperationGet(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	out, err := s.engine.Catalog().GetOperation(r.Context(), id)
+	out, err := engineFrom(r.Context()).Catalog().GetOperation(r.Context(), id)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -67,7 +67,7 @@ func (s *Server) handleOperationGet(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleOperationFields(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	out, err := s.engine.Catalog().Fields(r.Context(), id)
+	out, err := engineFrom(r.Context()).Catalog().Fields(r.Context(), id)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -78,7 +78,7 @@ func (s *Server) handleOperationFields(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSchemaGet(w http.ResponseWriter, r *http.Request) {
 	service := chi.URLParam(r, "service")
 	name := chi.URLParam(r, "name")
-	out, err := s.engine.Catalog().GetSchema(r.Context(), service, name)
+	out, err := engineFrom(r.Context()).Catalog().GetSchema(r.Context(), service, name)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -95,7 +95,7 @@ func (s *Server) handleDocsList(w http.ResponseWriter, r *http.Request) {
 
 	if q != "" {
 		opts := domain.SearchOptions{Service: service, Limit: queryInt(r, "limit", 0)}
-		out, err := s.engine.Search().Docs(r.Context(), q, opts)
+		out, err := engineFrom(r.Context()).Search().Docs(r.Context(), q, opts)
 		if err != nil {
 			writeError(w, err)
 			return
@@ -104,7 +104,7 @@ func (s *Server) handleDocsList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	out, err := s.engine.Catalog().ListDocs(r.Context(), service)
+	out, err := engineFrom(r.Context()).Catalog().ListDocs(r.Context(), service)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -118,7 +118,7 @@ func (s *Server) handleDocsList(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDocGet(w http.ResponseWriter, r *http.Request) {
 	service := chi.URLParam(r, "service")
 	path := chi.URLParam(r, "*")
-	out, err := s.engine.Catalog().GetDoc(r.Context(), service, path)
+	out, err := engineFrom(r.Context()).Catalog().GetDoc(r.Context(), service, path)
 	if err != nil {
 		writeError(w, err)
 		return

@@ -23,6 +23,7 @@ streamable HTTP on the daemon, for hosts that prefer a URL.
 | `get_schema` | `read_contracts` | a named component schema as flattened fields |
 | `get_dsl_reference` | none | flow/memory/expressions/service reference, ~1.5k tokens per topic |
 | `get_context` | `read_*` | the context builder; recommended first call for authoring |
+| `list_workspaces`, `switch_workspace` | none | only present when the daemon serves more than one workspace; `switch_workspace` rebinds the session, and every later call acts on the new workspace. Ids do not cross workspaces: a flow, run, memory, or operation id from one never resolves in another |
 | `add_service` | `write_services` | registers a service from a repo path or a git url; returns the operation count, sync status, warnings, and the CLAUDE.md/AGENTS.md section to paste; an already-registered service is re-synced instead of failing |
 | `sync_service` | `write_services` | re-reads one service's `api/` package (or every service) and reindexes it; same summary as `add_service` |
 | `execute_api` | `execute_read` (GET/HEAD/OPTIONS) or `execute_mutation` (otherwise); env must be allowed | redacted status/headers/body + run_id; on a failed call, "Might explain it" hints from the contract, docs, and memories; an `example` id may replace `id` (or accompany it, if they agree) as the base request, with `params`/`body`/`headers` overriding it field by field |

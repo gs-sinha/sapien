@@ -8,7 +8,7 @@ import (
 
 func (s *Server) handleFlowsList(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("q")
-	out, err := s.engine.Flows().List(r.Context(), q)
+	out, err := engineFrom(r.Context()).Flows().List(r.Context(), q)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -22,7 +22,7 @@ func (s *Server) handleFlowCreate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	out, err := s.engine.Flows().Create(r.Context(), req.YAML, req.Path)
+	out, err := engineFrom(r.Context()).Flows().Create(r.Context(), req.YAML, req.Path)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -32,7 +32,7 @@ func (s *Server) handleFlowCreate(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleFlowGet(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	out, err := s.engine.Flows().Get(r.Context(), id)
+	out, err := engineFrom(r.Context()).Flows().Get(r.Context(), id)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -47,7 +47,7 @@ func (s *Server) handleFlowUpdate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	out, err := s.engine.Flows().Update(r.Context(), id, req.YAML)
+	out, err := engineFrom(r.Context()).Flows().Update(r.Context(), id, req.YAML)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -57,7 +57,7 @@ func (s *Server) handleFlowUpdate(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleFlowDelete(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	if err := s.engine.Flows().Delete(r.Context(), id); err != nil {
+	if err := engineFrom(r.Context()).Flows().Delete(r.Context(), id); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -70,7 +70,7 @@ func (s *Server) handleFlowValidate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	out, err := s.engine.Flows().Validate(r.Context(), req.YAML)
+	out, err := engineFrom(r.Context()).Flows().Validate(r.Context(), req.YAML)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -84,7 +84,7 @@ func (s *Server) handleFlowParse(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	out, err := s.engine.Flows().Parse(r.Context(), req.YAML)
+	out, err := engineFrom(r.Context()).Flows().Parse(r.Context(), req.YAML)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -94,7 +94,7 @@ func (s *Server) handleFlowParse(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleFlowReference(w http.ResponseWriter, r *http.Request) {
 	topic := r.URL.Query().Get("topic")
-	out, err := s.engine.Flows().Reference(r.Context(), topic)
+	out, err := engineFrom(r.Context()).Flows().Reference(r.Context(), topic)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -116,7 +116,7 @@ func (s *Server) handleFlowRun(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	out, err := s.engine.Runner().RunFlow(r.Context(), id, req.toEngine())
+	out, err := engineFrom(r.Context()).Runner().RunFlow(r.Context(), id, req.toEngine())
 	if err != nil {
 		writeError(w, err)
 		return

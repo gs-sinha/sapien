@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/gs-sinha/sapien/internal/domain"
 	"github.com/gs-sinha/sapien/internal/errs"
@@ -349,4 +350,32 @@ func writeMeta(dir string, meta repoMeta) error {
 		return errs.Wrap(errs.Internal, err, "writing %s", metaPath(dir))
 	}
 	return nil
+}
+
+// LastFetch reports when the managed clone at dir last fetched from its
+// remote. Git records no fetch timestamp of its own, so this uses
+// FETCH_HEAD's modification time, which every fetch rewrites.
+//
+// ok is false when the clone has never fetched since it was created: a
+// clone made by Ensure stays in that state until something calls Sync, so
+// its view of the remote is frozen at clone time. That distinction is what
+// makes "no API package found" diagnosable -- a package pushed after the
+// clone was made is invisible to it, and no amount of retrying changes
+// that (see Builder.Build's error).
+func LastFetch(dir string) (time.Time, bool) {
+	info, err := os.Stat(filepath.Join(dir, ".git", "FETCH_HEAD"))
+	if err != nil {
+		return time.Time{}, false
+	}
+	return info.ModTime(), true
+}
+
+// ClonedAt reports when the managed clone at dir was created, using the
+// birth of its .git directory. Used only to describe a clone in an error.
+func ClonedAt(dir string) (time.Time, bool) {
+	info, err := os.Stat(filepath.Join(dir, ".git"))
+	if err != nil {
+		return time.Time{}, false
+	}
+	return info.ModTime(), true
 }

@@ -24,7 +24,7 @@ func memoryQueryFromRequest(r *http.Request) domain.MemoryQuery {
 }
 
 func (s *Server) handleMemoriesList(w http.ResponseWriter, r *http.Request) {
-	out, err := s.engine.Memories().List(r.Context(), memoryQueryFromRequest(r))
+	out, err := engineFrom(r.Context()).Memories().List(r.Context(), memoryQueryFromRequest(r))
 	if err != nil {
 		writeError(w, err)
 		return
@@ -38,7 +38,7 @@ func (s *Server) handleMemoryCreate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	out, err := s.engine.Memories().Create(r.Context(), mem)
+	out, err := engineFrom(r.Context()).Memories().Create(r.Context(), mem)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -47,7 +47,7 @@ func (s *Server) handleMemoryCreate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleMemoriesSearch(w http.ResponseWriter, r *http.Request) {
-	out, err := s.engine.Memories().Search(r.Context(), memoryQueryFromRequest(r))
+	out, err := engineFrom(r.Context()).Memories().Search(r.Context(), memoryQueryFromRequest(r))
 	if err != nil {
 		writeError(w, err)
 		return
@@ -61,7 +61,7 @@ func (s *Server) handleMemoriesRelevant(w http.ResponseWriter, r *http.Request) 
 		writeError(w, err)
 		return
 	}
-	out, err := s.engine.Memories().Relevant(r.Context(), req.Subjects, req.Limit)
+	out, err := engineFrom(r.Context()).Memories().Relevant(r.Context(), req.Subjects, req.Limit)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -70,7 +70,7 @@ func (s *Server) handleMemoriesRelevant(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleMemoriesReindex(w http.ResponseWriter, r *http.Request) {
-	if err := s.engine.Memories().Reindex(r.Context()); err != nil {
+	if err := engineFrom(r.Context()).Memories().Reindex(r.Context()); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -79,7 +79,7 @@ func (s *Server) handleMemoriesReindex(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleMemoryGet(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	out, err := s.engine.Memories().Get(r.Context(), id)
+	out, err := engineFrom(r.Context()).Memories().Get(r.Context(), id)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -100,7 +100,7 @@ func (s *Server) handleMemoryUpdate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, errs.New(errs.Invalid, "body id %q does not match path id %q", mem.ID, id))
 		return
 	}
-	out, err := s.engine.Memories().Update(r.Context(), mem)
+	out, err := engineFrom(r.Context()).Memories().Update(r.Context(), mem)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -110,7 +110,7 @@ func (s *Server) handleMemoryUpdate(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleMemoryDelete(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	if err := s.engine.Memories().Delete(r.Context(), id); err != nil {
+	if err := engineFrom(r.Context()).Memories().Delete(r.Context(), id); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -119,7 +119,7 @@ func (s *Server) handleMemoryDelete(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleMemoryPromotion(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	out, err := s.engine.Memories().PromotionTarget(r.Context(), id)
+	out, err := engineFrom(r.Context()).Memories().PromotionTarget(r.Context(), id)
 	if err != nil {
 		writeError(w, err)
 		return

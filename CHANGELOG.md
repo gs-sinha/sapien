@@ -4,6 +4,65 @@ All notable changes to this project are documented in this file. The
 format loosely follows [Keep a Changelog](https://keepachangelog.com/),
 and phase numbers refer to PLAN.md §34's roadmap.
 
+## [1.1.0] - 2026-09-06
+
+### Added
+- **Multiple workspaces, switchable from the CLI, the UI, and MCP.** One
+  `sapien serve` now holds many workspaces instead of one daemon per
+  workspace: each request selects one with an `X-Sapien-Workspace` header
+  (or `?workspace=` for WebSockets) and the daemon opens it lazily, taking
+  that workspace's own `daemon.lock` as it does. Every per-workspace
+  on-disk invariant is unchanged — its own `.sapien` state directory,
+  database, and lock — so one process still indexes one workspace, and two
+  daemons can no longer reindex the same directory.
+  - `sapien workspace list | current | use | add | forget` manage the
+    registry, kept as `workspaces:` in the user config beside
+    `default_workspace`. `sapien init` registers the workspace it creates.
+  - `GET /v1/workspaces` lists what a daemon can serve; `POST /v1/workspaces`
+    registers and opens another one.
+  - The UI has a workspace picker in the nav. Because one daemon serves them
+    all, switching stays on one origin and one session cookie — two daemons
+    on `127.0.0.1` would have overwritten each other's, since cookies are
+    not isolated by port.
+  - MCP gains `list_workspaces` and `switch_workspace`; switching rebinds
+    the session, leaving every other tool's schema unchanged. Both are
+    registered only when there is somewhere to switch to.
+
+### Fixed
+- A workspace reached by two spellings of its path is one workspace again.
+  On a case-insensitive filesystem `~/Desktop/ws` and `~/desktop/ws` are
+  the same directory, and keying open workspaces by the path string let one
+  daemon open it twice -- two engines, two database handles, two watchers
+  on one directory, which is the double-indexing hazard the workspace lock
+  exists to prevent, since both "holders" share a pid and each takes the
+  lock from the other. It also showed a phantom extra workspace in the UI
+  picker, `workspace list`, and `list_workspaces`. Identity is now decided
+  by `os.SameFile` (device and inode) in the workspace manager and the
+  registry, which is right on a case-insensitive filesystem without merging
+  genuinely distinct paths on a case-sensitive one. A registered directory
+  that no longer exists is still compared by string, so it stays listed
+  with its own error rather than silently merging with another entry.
+  The comparison lives once, as `workspace.SameDir`, and is used by the
+  workspace manager, the registry, and `sapien workspace list` -- which
+  had the same bug in its own membership check, so running it from a cwd
+  that spelled the path differently listed the workspace you were standing
+  in twice and put the current marker on the wrong row.
+- `sapien service add <git-url>` no longer fails permanently when the
+  managed clone predates the service's `api/` package. Registering a repo
+  moments before the package was pushed left a clone frozen at the older
+  commit, and because the name-derivation pass resolves a git source with
+  `Ensure` (which never fetches), every retry re-read the same tree and
+  failed with the same `no API package found under <cache path>`. That
+  pass now fetches, so `service add <url>` and `service add <url> --name x`
+  behave the same on a stale clone instead of only the named form working.
+- When a git-sourced package genuinely is not found, the error now
+  describes the clone it read: url, ref, commit, and whether that view of
+  the remote is current. A clone that has not been fetched says so and
+  points at `sapien service sync`; one that was just updated says the
+  commit really does not carry the package. Previously the message named
+  only a path under `~/.sapien/repos`, which reads as a configuration
+  mistake in the one case where it is not one.
+
 ## [1.0.1] - 2026-09-06
 
 ### Changed

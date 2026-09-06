@@ -40,14 +40,14 @@ func (s *server) addService(ctx context.Context, req *sdkmcp.CallToolRequest, in
 	if err != nil {
 		return errResult(err), nil, nil
 	}
-	svc, err := s.eng.Services().Add(ctx, strings.TrimSpace(in.Name), src)
+	svc, err := s.engine().Services().Add(ctx, strings.TrimSpace(in.Name), src)
 	if err != nil {
 		if errs.CodeOf(err) == errs.Conflict {
 			return s.addServiceConflictResync(ctx, conflictServiceName(err, in.Name))
 		}
 		return errResult(err), nil, nil
 	}
-	return result(renderServiceAdded(s.eng.Workspace(), svc), AddServiceOutput{Service: *svc}), nil, nil
+	return result(renderServiceAdded(s.engine().Workspace(), svc), AddServiceOutput{Service: *svc}), nil, nil
 }
 
 // conflictServiceName recovers the name an E_CONFLICT error from
@@ -74,7 +74,7 @@ func (s *server) addServiceConflictResync(ctx context.Context, name string) (*sd
 	if name == "" {
 		return errResult(errs.New(errs.Conflict, "service already exists")), nil, nil
 	}
-	svcs, err := s.eng.Services().Sync(ctx, name)
+	svcs, err := s.engine().Services().Sync(ctx, name)
 	if err != nil {
 		return errResult(err), nil, nil
 	}
@@ -82,7 +82,7 @@ func (s *server) addServiceConflictResync(ctx context.Context, name string) (*sd
 		return errResult(errs.New(errs.ServiceNotFound, "service %q not found", name)), nil, nil
 	}
 	svc := svcs[0]
-	text := fmt.Sprintf("already registered as %s; re-synced\n\n", svc.Name) + renderServiceSummary(s.eng.Workspace(), &svc)
+	text := fmt.Sprintf("already registered as %s; re-synced\n\n", svc.Name) + renderServiceSummary(s.engine().Workspace(), &svc)
 	return result(text, AddServiceOutput{Service: svc}), nil, nil
 }
 
@@ -229,11 +229,11 @@ func (s *server) syncService(ctx context.Context, req *sdkmcp.CallToolRequest, i
 	if _, _, denied := s.checkPermission(req.Session, classWriteServices); denied != nil {
 		return denied, nil, nil
 	}
-	svcs, err := s.eng.Services().Sync(ctx, strings.TrimSpace(in.Name))
+	svcs, err := s.engine().Services().Sync(ctx, strings.TrimSpace(in.Name))
 	if err != nil {
 		return errResult(err), nil, nil
 	}
-	return result(renderServicesSynced(s.eng.Workspace(), svcs), SyncServiceOutput{Services: svcs}), nil, nil
+	return result(renderServicesSynced(s.engine().Workspace(), svcs), SyncServiceOutput{Services: svcs}), nil, nil
 }
 
 // renderServicesSynced joins renderServiceSummary's block for each synced

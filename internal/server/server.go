@@ -16,11 +16,17 @@ import (
 	"github.com/gs-sinha/sapien/internal/engine"
 	"github.com/gs-sinha/sapien/internal/terminal"
 	"github.com/gs-sinha/sapien/internal/ui"
+	"github.com/gs-sinha/sapien/internal/workspaces"
 )
 
 // Options configures a Server.
 type Options struct {
 	Engine engine.Engine
+	// Workspaces, when set, lets one server serve many workspaces: each
+	// request selects one with the X-Sapien-Workspace header (see
+	// workspacectx.go) and Engine is the primary/fallback. When nil the
+	// server serves Engine alone, exactly as it always did.
+	Workspaces *workspaces.Manager
 	// Token is the bearer token every request but /v1/health must present.
 	Token string
 	// Version is reported by /v1/health, used by daemon clients to detect a
@@ -35,10 +41,11 @@ type Options struct {
 
 // Server is the local engine HTTP API.
 type Server struct {
-	engine  engine.Engine
-	token   string
-	version string
-	logger  *slog.Logger
+	engine     engine.Engine
+	workspaces *workspaces.Manager
+	token      string
+	version    string
+	logger     *slog.Logger
 
 	idle *idleTracker
 
@@ -63,7 +70,9 @@ func New(opts Options) *Server {
 	}
 
 	s := &Server{
-		engine:   opts.Engine,
+		engine:     opts.Engine,
+		workspaces: opts.Workspaces,
+
 		token:    opts.Token,
 		version:  opts.Version,
 		logger:   logger,
@@ -151,6 +160,7 @@ func (s *Server) newRouter() http.Handler {
 
 	for _, rt := range routeTable {
 		var h http.Handler = rt.Handler(s)
+		h = s.workspaceMiddleware(h)
 		if rt.RequiresAuth {
 			h = s.authMiddleware(h)
 		}

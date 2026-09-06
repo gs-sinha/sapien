@@ -32,6 +32,12 @@ type Remote struct {
 	resolver EndpointResolver
 
 	ws *domain.Workspace // fetched once, in New, and cached for Workspace()
+
+	// wsDir, when set, is sent as X-Sapien-Workspace on every request, so
+	// one daemon serving several workspaces knows which one this client
+	// means. Empty means "the daemon's primary workspace", which is what
+	// every client sent before the daemon could hold more than one.
+	wsDir string
 }
 
 // Option configures a Remote.
@@ -42,6 +48,13 @@ type Option func(*Remote)
 // Events().Subscribe.
 func WithHTTPClient(c *http.Client) Option {
 	return func(r *Remote) { r.client = c }
+}
+
+// WithWorkspace binds this client to one workspace of a daemon that serves
+// several: every request carries server.WorkspaceHeader naming dir, and
+// Workspace() reports that workspace rather than the daemon's primary one.
+func WithWorkspace(dir string) Option {
+	return func(r *Remote) { r.wsDir = dir }
 }
 
 // EndpointResolver returns the daemon endpoint (base URL and bearer token)
@@ -217,6 +230,9 @@ func (r *Remote) attempt(ctx context.Context, method, path string, query url.Val
 		req.Header.Set("Content-Type", "application/json")
 	}
 	req.Header.Set("Authorization", "Bearer "+r.currentToken())
+	if dir := r.currentWorkspaceDir(); dir != "" {
+		req.Header.Set(workspaceHeader, dir)
+	}
 
 	resp, err := r.client.Do(req)
 	if err != nil {
@@ -326,4 +342,17 @@ func decodeError(status int, body []byte) error {
 		return errs.New(errs.Internal, "http %d: %s", status, strings.TrimSpace(string(body)))
 	}
 	return &e
+}
+
+// workspaceHeader mirrors server.WorkspaceHeader. It is duplicated rather
+// than imported because internal/server imports this package's sibling
+// engine interfaces, and a constant is cheaper than the dependency.
+const workspaceHeader = "X-Sapien-Workspace"
+
+// currentWorkspaceDir reads wsDir under the same lock that guards base and
+// token, so a concurrent reconnect() is safe.
+func (r *Remote) currentWorkspaceDir() string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.wsDir
 }

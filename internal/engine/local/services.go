@@ -41,7 +41,14 @@ func (s *serviceAPI) Add(ctx context.Context, name string, src domain.Source) (*
 		// without it, deriving a name for an unnamed git source (peek-ingest
 		// to learn the contract's title) would fail with errs.NotImplemented,
 		// the same as an unconfigured Builder.
-		b := registry.NewBuilder(l.ws).WithGit(l.gitMgr)
+		//
+		// WithGitFetch matters because this peek runs before the service is
+		// registered, and the SyncOne below -- which does fetch -- never
+		// runs if it fails. Without it, `service add <url>` and `service add
+		// <url> --name x` disagree on a stale clone: the named form fetches
+		// and succeeds, the unnamed form reads the old tree and fails with
+		// "no API package found", identically on every retry.
+		b := registry.NewBuilder(l.ws).WithGit(l.gitMgr).WithGitFetch()
 		snap, err := b.Build(ctx, ref)
 		if err != nil {
 			return nil, err

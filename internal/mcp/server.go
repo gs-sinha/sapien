@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sync"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -21,6 +22,10 @@ Resources: sapien://services/{name}(/docs/{path}), operations/{id}, schemas/{ser
 // Options configures a Sapien MCP server.
 type Options struct {
 	Engine engine.Engine
+	// Workspaces, when set, registers list_workspaces and switch_workspace
+	// so an agent can move between workspaces without the host restarting
+	// this server. Nil binds the server to Engine for its lifetime.
+	Workspaces WorkspaceSwitcher
 	// Config is the static permission configuration, used as-is when
 	// ConfigPaths is empty. Existing callers (mainly tests) that never set
 	// ConfigPaths keep this exact behaviour.
@@ -44,14 +49,39 @@ type Options struct {
 
 // server holds the dependencies every tool and resource handler needs.
 type server struct {
-	eng       engine.Engine
+	// mu guards eng, which switch_workspace replaces. Every tool reads it
+	// through engine(), so a switch takes effect on the next call without
+	// any tool holding a stale binding.
+	mu  sync.RWMutex
+	eng engine.Engine
+
+	// switcher, when set, is what list_workspaces and switch_workspace act
+	// on. Nil leaves this server bound to one workspace for its lifetime
+	// and both tools unregistered, which is what a test server (and any
+	// embedding that never wanted switching) gets.
+	switcher WorkspaceSwitcher
+
 	cfg       *configSource
 	reference func(topic string) (string, error)
 	logger    *slog.Logger
 }
 
+// engine returns the currently bound engine.
+func (s *server) engine() engine.Engine {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.eng
+}
+
+// bind points this server at another workspace's engine.
+func (s *server) bind(eng engine.Engine) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.eng = eng
+}
+
 func (s *server) workspaceDir() string {
-	if ws := s.eng.Workspace(); ws != nil {
+	if ws := s.engine().Workspace(); ws != nil {
 		return ws.Dir
 	}
 	return "<workspace>"
@@ -131,7 +161,7 @@ func (s *server) checkEnvironment(ctx context.Context, perm Permissions, envName
 			return errResult(e)
 		}
 	}
-	env, err := s.eng.Envs().Get(ctx, envName)
+	env, err := s.engine().Envs().Get(ctx, envName)
 	if err != nil {
 		return errResult(err)
 	}
@@ -161,13 +191,20 @@ func NewServer(opts Options) *sdkmcp.Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	reference := opts.Reference
-	if reference == nil {
-		reference = func(topic string) (string, error) {
-			return opts.Engine.Flows().Reference(context.Background(), topic)
+	srv := &server{
+		eng:      opts.Engine,
+		switcher: opts.Workspaces,
+		cfg:      newConfigSource(opts.Config, opts.ConfigPaths),
+		logger:   logger,
+	}
+	srv.reference = opts.Reference
+	if srv.reference == nil {
+		// Resolved through srv.engine() rather than opts.Engine so the
+		// reference text follows a switch_workspace.
+		srv.reference = func(topic string) (string, error) {
+			return srv.engine().Flows().Reference(context.Background(), topic)
 		}
 	}
-	srv := &server{eng: opts.Engine, cfg: newConfigSource(opts.Config, opts.ConfigPaths), reference: reference, logger: logger}
 
 	version := opts.Version
 	if version == "" {

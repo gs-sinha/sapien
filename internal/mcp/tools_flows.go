@@ -33,7 +33,7 @@ func (s *server) listFlows(ctx context.Context, req *sdkmcp.CallToolRequest, in 
 	if _, _, denied := s.checkPermission(req.Session, classReadFlows); denied != nil {
 		return denied, nil, nil
 	}
-	flows, err := s.eng.Flows().List(ctx, in.Query)
+	flows, err := s.engine().Flows().List(ctx, in.Query)
 	if err != nil {
 		return errResult(err), nil, nil
 	}
@@ -70,7 +70,7 @@ func (s *server) getFlow(ctx context.Context, req *sdkmcp.CallToolRequest, in Ge
 	if _, _, denied := s.checkPermission(req.Session, classReadFlows); denied != nil {
 		return denied, nil, nil
 	}
-	flow, err := s.eng.Flows().Get(ctx, in.ID)
+	flow, err := s.engine().Flows().Get(ctx, in.ID)
 	if err != nil {
 		return errResult(err), nil, nil
 	}
@@ -150,7 +150,7 @@ func (s *server) validateFlow(ctx context.Context, req *sdkmcp.CallToolRequest, 
 		}
 		src = read
 	}
-	res, err := s.eng.Flows().Validate(ctx, src)
+	res, err := s.engine().Flows().Validate(ctx, src)
 	if err != nil {
 		return errResult(err), nil, nil
 	}
@@ -317,8 +317,8 @@ func (s *server) createFlow(ctx context.Context, req *sdkmcp.CallToolRequest, in
 	// output. Create validates yamlSrc itself and is authoritative on
 	// whether the flow is valid; this call's own result/error is otherwise
 	// unused.
-	valResult, _ := s.eng.Flows().Validate(ctx, in.FlowYAML)
-	flow, err := s.eng.Flows().Create(ctx, in.FlowYAML, in.Path)
+	valResult, _ := s.engine().Flows().Validate(ctx, in.FlowYAML)
+	flow, err := s.engine().Flows().Create(ctx, in.FlowYAML, in.Path)
 	if err != nil {
 		return errResult(err), nil, nil
 	}
@@ -352,8 +352,8 @@ func (s *server) updateFlow(ctx context.Context, req *sdkmcp.CallToolRequest, in
 	if err != nil {
 		return errResult(err), nil, nil
 	}
-	valResult, _ := s.eng.Flows().Validate(ctx, yamlSrc)
-	flow, err := s.eng.Flows().Update(ctx, in.ID, yamlSrc)
+	valResult, _ := s.engine().Flows().Validate(ctx, yamlSrc)
+	flow, err := s.engine().Flows().Update(ctx, in.ID, yamlSrc)
 	if err != nil {
 		return errResult(err), nil, nil
 	}
@@ -397,7 +397,7 @@ func (s *server) patchFlow(ctx context.Context, req *sdkmcp.CallToolRequest, in 
 	if len(in.Ops) == 0 {
 		return errResult(errs.New(errs.Invalid, "patch_flow requires at least one op")), nil, nil
 	}
-	existing, err := s.eng.Flows().Get(ctx, in.ID)
+	existing, err := s.engine().Flows().Get(ctx, in.ID)
 	if err != nil {
 		return errResult(err), nil, nil
 	}
@@ -409,8 +409,8 @@ func (s *server) patchFlow(ctx context.Context, req *sdkmcp.CallToolRequest, in 
 		// agent needs to see to retry.
 		return errResult(errs.New(errs.Invalid, "applying patch to flow %q: %v", in.ID, perr)), nil, nil
 	}
-	valResult, _ := s.eng.Flows().Validate(ctx, patched)
-	flow, err := s.eng.Flows().Update(ctx, in.ID, patched)
+	valResult, _ := s.engine().Flows().Validate(ctx, patched)
+	flow, err := s.engine().Flows().Update(ctx, in.ID, patched)
 	if err != nil {
 		return errResult(err), nil, nil
 	}
@@ -441,13 +441,13 @@ type RunFlowInput struct {
 // runFlow's permission class is execute_read or execute_mutation, whichever
 // the highest-risk step operation requires (PLAN §23).
 func (s *server) runFlow(ctx context.Context, req *sdkmcp.CallToolRequest, in RunFlowInput) (*sdkmcp.CallToolResult, any, error) {
-	flow, err := s.eng.Flows().Get(ctx, in.ID)
+	flow, err := s.engine().Flows().Get(ctx, in.ID)
 	if err != nil {
 		return errResult(err), nil, nil
 	}
 	class := classExecuteRead
 	for _, st := range flow.Steps {
-		op, err := s.eng.Catalog().ResolveOperation(ctx, st.Call)
+		op, err := s.engine().Catalog().ResolveOperation(ctx, st.Call)
 		if err != nil {
 			return errResult(err), nil, nil
 		}
@@ -464,7 +464,7 @@ func (s *server) runFlow(ctx context.Context, req *sdkmcp.CallToolRequest, in Ru
 		return denied, nil, nil
 	}
 
-	run, err := s.eng.Runner().RunFlow(ctx, in.ID, engine.RunOptions{
+	run, err := s.engine().Runner().RunFlow(ctx, in.ID, engine.RunOptions{
 		Environment:     in.Env,
 		Inputs:          in.Inputs,
 		AllowProduction: perm.AllowProduction,
@@ -546,7 +546,7 @@ func (s *server) getRun(ctx context.Context, req *sdkmcp.CallToolRequest, in Get
 	if _, _, denied := s.checkPermission(req.Session, classReadRuns); denied != nil {
 		return denied, nil, nil
 	}
-	run, err := s.eng.Runs().Get(ctx, in.ID)
+	run, err := s.engine().Runs().Get(ctx, in.ID)
 	if err != nil {
 		return errResult(err), nil, nil
 	}

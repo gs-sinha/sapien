@@ -23,6 +23,7 @@ import (
 	"github.com/gs-sinha/sapien/internal/errs"
 	"github.com/gs-sinha/sapien/internal/mcp"
 	"github.com/gs-sinha/sapien/internal/server"
+	"github.com/gs-sinha/sapien/internal/workspaces"
 )
 
 func init() { Register(newServeCmd) }
@@ -73,17 +74,29 @@ func newServeCmd(app *App) *cobra.Command {
 			idleCtx, idleCancel := context.WithCancel(context.Background())
 			defer idleCancel()
 
+			// One daemon, many workspaces (internal/workspaces): this
+			// workspace is the primary -- the one a request that names none
+			// gets, and the one whose lock and engine `serve` owns -- and
+			// the manager opens any other workspace a request selects,
+			// lazily, taking that workspace's own lock as it does.
+			wsMgr := workspaces.New(ws, eng, workspaces.Options{
+				Local: local.Options{Watch: true},
+				PID:   os.Getpid(),
+			})
+			defer func() { _ = wsMgr.Close() }()
+
 			srv := server.New(server.Options{
-				Engine:  eng,
-				Token:   token,
-				Version: Version,
+				Engine:     eng,
+				Workspaces: wsMgr,
+				Token:      token,
+				Version:    Version,
 			})
 
 			mcpCfg, err := loadMCPConfig(ws)
 			if err != nil {
 				return err
 			}
-			mcpHandler := mcp.HTTPHandler(mcp.Options{Engine: eng, Config: mcpCfg, ConfigPaths: mcpConfigPaths(ws), Version: Version})
+			mcpHandler := mcp.HTTPHandler(mcp.Options{Engine: eng, Workspaces: wsMgr, Config: mcpCfg, ConfigPaths: mcpConfigPaths(ws), Version: Version})
 
 			mux := http.NewServeMux()
 			mux.Handle("/mcp", bearerGuard(token, mcpHandler))

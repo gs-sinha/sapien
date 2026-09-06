@@ -24,7 +24,7 @@ func exampleQueryFromRequest(r *http.Request) domain.ExampleQuery {
 }
 
 func (s *Server) handleExamplesList(w http.ResponseWriter, r *http.Request) {
-	out, err := s.engine.Examples().List(r.Context(), exampleQueryFromRequest(r))
+	out, err := engineFrom(r.Context()).Examples().List(r.Context(), exampleQueryFromRequest(r))
 	if err != nil {
 		writeError(w, err)
 		return
@@ -38,7 +38,7 @@ func (s *Server) handleExampleCreate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	out, err := s.engine.Examples().Create(r.Context(), ex)
+	out, err := engineFrom(r.Context()).Examples().Create(r.Context(), ex)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -52,7 +52,7 @@ func (s *Server) handleExampleCreate(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleExamplesForOperations(w http.ResponseWriter, r *http.Request) {
 	operationIDs := r.URL.Query()["op"]
 	limit := queryInt(r, "limit", 0)
-	out, err := s.engine.Examples().ForOperations(r.Context(), operationIDs, limit)
+	out, err := engineFrom(r.Context()).Examples().ForOperations(r.Context(), operationIDs, limit)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -69,7 +69,7 @@ func (s *Server) handleExampleFromRun(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	out, err := s.engine.Examples().FromRun(r.Context(), req)
+	out, err := engineFrom(r.Context()).Examples().FromRun(r.Context(), req)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -78,7 +78,7 @@ func (s *Server) handleExampleFromRun(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleExamplesReindex(w http.ResponseWriter, r *http.Request) {
-	if err := s.engine.Examples().Reindex(r.Context()); err != nil {
+	if err := engineFrom(r.Context()).Examples().Reindex(r.Context()); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -87,7 +87,7 @@ func (s *Server) handleExamplesReindex(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleExampleGet(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	out, err := s.engine.Examples().Get(r.Context(), id)
+	out, err := engineFrom(r.Context()).Examples().Get(r.Context(), id)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -108,7 +108,7 @@ func (s *Server) handleExampleUpdate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, errs.New(errs.Invalid, "body id %q does not match path id %q", ex.ID, id))
 		return
 	}
-	out, err := s.engine.Examples().Update(r.Context(), ex)
+	out, err := engineFrom(r.Context()).Examples().Update(r.Context(), ex)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -118,7 +118,7 @@ func (s *Server) handleExampleUpdate(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleExampleDelete(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	if err := s.engine.Examples().Delete(r.Context(), id); err != nil {
+	if err := engineFrom(r.Context()).Examples().Delete(r.Context(), id); err != nil {
 		writeError(w, err)
 		return
 	}

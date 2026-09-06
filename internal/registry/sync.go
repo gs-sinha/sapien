@@ -182,6 +182,9 @@ func (s *Syncer) syncRef(ctx context.Context, ref domain.ServiceRef) (domain.Ser
 	}
 
 	if ref.Source.Kind == domain.SourceGit && s.git != nil {
+		// Build must not fetch again below, but must also not blame a stale
+		// clone if the package is missing: this just fetched.
+		b = b.WithGitSynced()
 		if _, _, err := s.git.Sync(ctx, ref.Source); err != nil {
 			svc := domain.Service{
 				ID:          ref.Name,

@@ -6,6 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/gs-sinha/sapien/internal/config"
 	"github.com/gs-sinha/sapien/internal/workspace"
 )
 
@@ -27,6 +28,13 @@ func newInitCmd(app *App) *cobra.Command {
 			ws, err := workspace.Init(dir, name)
 			if err != nil {
 				return err
+			}
+
+			// Register it so it shows up in `workspace list`, the UI's
+			// picker, and MCP's list_workspaces without a second command.
+			// A failure here costs discoverability, not the workspace.
+			if regErr := config.AddWorkspace(ws.Dir); regErr != nil {
+				app.Printer.Line("note: could not add %s to the workspace list (%v)", ws.Dir, regErr)
 			}
 
 			if app.Printer.IsJSON() {

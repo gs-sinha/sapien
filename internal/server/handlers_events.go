@@ -26,7 +26,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
-	events, unsubscribe := s.engine.Events().Subscribe(ctx)
+	events, unsubscribe := engineFrom(r.Context()).Events().Subscribe(ctx)
 	defer unsubscribe()
 
 	// The client sends nothing, but frames (pings, close) still need

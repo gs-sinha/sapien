@@ -12,7 +12,7 @@ func (s *Server) handleContextBuild(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	out, err := s.engine.Context().Build(r.Context(), req)
+	out, err := engineFrom(r.Context()).Context().Build(r.Context(), req)
 	if err != nil {
 		writeError(w, err)
 		return

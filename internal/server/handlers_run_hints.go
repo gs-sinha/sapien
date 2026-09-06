@@ -22,7 +22,7 @@ type runHintsResponse struct {
 // distinction. An unknown run id is 404 (from Runs().Get, unchanged).
 func (s *Server) handleRunHints(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	run, err := s.engine.Runs().Get(r.Context(), id)
+	run, err := engineFrom(r.Context()).Runs().Get(r.Context(), id)
 	if err != nil {
 		writeError(w, err)
 		return

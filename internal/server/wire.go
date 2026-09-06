@@ -85,3 +85,8 @@ type defaultEnvironmentResponse struct {
 type setSecretRequest struct {
 	Value string `json:"value"`
 }
+
+// registerWorkspaceRequest is POST /v1/workspaces' body.
+type registerWorkspaceRequest struct {
+	Dir string `json:"dir"`
+}

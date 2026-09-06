@@ -31,7 +31,7 @@ func (s *server) listServices(ctx context.Context, req *sdkmcp.CallToolRequest, 
 	if _, _, denied := s.checkPermission(req.Session, classReadContracts); denied != nil {
 		return denied, nil, nil
 	}
-	services, err := s.eng.Services().List(ctx)
+	services, err := s.engine().Services().List(ctx)
 	if err != nil {
 		return errResult(err), nil, nil
 	}
@@ -73,11 +73,11 @@ func (s *server) getService(ctx context.Context, req *sdkmcp.CallToolRequest, in
 	if _, _, denied := s.checkPermission(req.Session, classReadContracts); denied != nil {
 		return denied, nil, nil
 	}
-	svc, err := s.eng.Services().Get(ctx, in.Name)
+	svc, err := s.engine().Services().Get(ctx, in.Name)
 	if err != nil {
 		return errResult(err), nil, nil
 	}
-	docs, err := s.eng.Catalog().ListDocs(ctx, in.Name)
+	docs, err := s.engine().Catalog().ListDocs(ctx, in.Name)
 	if err != nil {
 		return errResult(err), nil, nil
 	}
@@ -133,7 +133,7 @@ func (s *server) searchAPIs(ctx context.Context, req *sdkmcp.CallToolRequest, in
 	if limit <= 0 {
 		limit = 10
 	}
-	results, err := s.eng.Search().Operations(ctx, in.Query, domain.SearchOptions{Service: in.Service, Method: in.Method, Limit: limit})
+	results, err := s.engine().Search().Operations(ctx, in.Query, domain.SearchOptions{Service: in.Service, Method: in.Method, Limit: limit})
 	if err != nil {
 		return errResult(err), nil, nil
 	}
@@ -193,7 +193,7 @@ func (s *server) getAPI(ctx context.Context, req *sdkmcp.CallToolRequest, in Get
 	if _, _, denied := s.checkPermission(req.Session, classReadContracts); denied != nil {
 		return denied, nil, nil
 	}
-	op, err := s.eng.Catalog().ResolveOperation(ctx, in.ID)
+	op, err := s.engine().Catalog().ResolveOperation(ctx, in.ID)
 	if err != nil {
 		return errResult(err), nil, nil
 	}
@@ -215,7 +215,7 @@ func (s *server) getAPI(ctx context.Context, req *sdkmcp.CallToolRequest, in Get
 	out.Security = securityLines(*op)
 
 	if detail == "fields" || detail == "full" {
-		fields, err := s.eng.Catalog().Fields(ctx, op.ID)
+		fields, err := s.engine().Catalog().Fields(ctx, op.ID)
 		if err != nil {
 			return errResult(err), nil, nil
 		}
@@ -292,7 +292,7 @@ func (s *server) getAPI(ctx context.Context, req *sdkmcp.CallToolRequest, in Get
 // missing one, degrades to no examples rather than failing get_api, which
 // otherwise has nothing to do with the example store's readiness.
 func (s *server) savedExampleSummaries(ctx context.Context, opID string) []ExampleSummary {
-	saved, err := s.eng.Examples().ForOperations(ctx, []string{opID}, 5)
+	saved, err := s.engine().Examples().ForOperations(ctx, []string{opID}, 5)
 	if err != nil {
 		return nil
 	}
@@ -351,7 +351,7 @@ func (s *server) searchDocs(ctx context.Context, req *sdkmcp.CallToolRequest, in
 	if limit <= 0 {
 		limit = 10
 	}
-	results, err := s.eng.Search().Docs(ctx, in.Query, domain.SearchOptions{Service: in.Service, Limit: limit})
+	results, err := s.engine().Search().Docs(ctx, in.Query, domain.SearchOptions{Service: in.Service, Limit: limit})
 	if err != nil {
 		return errResult(err), nil, nil
 	}
@@ -386,7 +386,7 @@ func (s *server) getDoc(ctx context.Context, req *sdkmcp.CallToolRequest, in Get
 	if _, _, denied := s.checkPermission(req.Session, classReadContracts); denied != nil {
 		return denied, nil, nil
 	}
-	doc, err := s.eng.Catalog().GetDoc(ctx, in.Service, in.Path)
+	doc, err := s.engine().Catalog().GetDoc(ctx, in.Service, in.Path)
 	if err != nil {
 		return errResult(err), nil, nil
 	}
@@ -434,7 +434,7 @@ func (s *server) getSchema(ctx context.Context, req *sdkmcp.CallToolRequest, in 
 	if _, _, denied := s.checkPermission(req.Session, classReadContracts); denied != nil {
 		return denied, nil, nil
 	}
-	named, err := s.eng.Catalog().GetSchema(ctx, in.Service, in.Name)
+	named, err := s.engine().Catalog().GetSchema(ctx, in.Service, in.Name)
 	if err != nil {
 		return errResult(err), nil, nil
 	}

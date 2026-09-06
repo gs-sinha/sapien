@@ -11,7 +11,7 @@ type healthResponse struct {
 // handleHealth implements GET /v1/health, the one unauthenticated route.
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	var dir string
-	if ws := s.engine.Workspace(); ws != nil {
+	if ws := engineFrom(r.Context()).Workspace(); ws != nil {
 		dir = ws.Dir
 	}
 	writeJSON(w, http.StatusOK, healthResponse{OK: true, Version: s.version, Workspace: dir})
@@ -19,7 +19,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 // handleWorkspace implements GET /v1/workspace.
 func (s *Server) handleWorkspace(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, s.engine.Workspace())
+	writeJSON(w, http.StatusOK, engineFrom(r.Context()).Workspace())
 }
 
 // handleOpenAPI implements GET /v1/openapi.json: a static, hand-written

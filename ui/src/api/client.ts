@@ -9,6 +9,8 @@
 // details, source, hint. A request that never reaches the server (network
 // failure, daemon not running) is mapped to code "E_NETWORK" so callers can
 // treat every failure uniformly.
+import { currentWorkspace } from '../state/workspace';
+import type { WorkspaceInfo } from '../state/workspace';
 import type {
   AddServiceRequest,
   CallRequest,
@@ -146,12 +148,17 @@ function buildQuery(params: object = {}): string {
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
+  // One daemon serves many workspaces; this header picks which one. Absent
+  // (the default until the user switches) means the daemon's primary
+  // workspace, which is what every route did before switching existed.
+  const ws = currentWorkspace();
   try {
     res = await fetch(path, {
       credentials: 'include',
       headers: {
         ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
         Accept: 'application/json',
+        ...(ws ? { 'X-Sapien-Workspace': ws } : {}),
         ...(init?.headers || {}),
       },
       ...init,
@@ -399,6 +406,13 @@ export const secrets = {
 };
 
 // ---- events ----
+
+// ---- workspaces ----
+
+export const workspacesApi = {
+  list: (): Promise<WorkspaceInfo[]> => orEmpty(get('/v1/workspaces')),
+  register: (dir: string): Promise<WorkspaceInfo> => post('/v1/workspaces', { dir }),
+};
 
 export function getRecentEvents(limit = 200): Promise<Event[]> {
   return orEmpty(get(`/v1/events/recent${buildQuery({ limit })}`));
