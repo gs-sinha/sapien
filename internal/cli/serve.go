@@ -17,12 +17,12 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/growsimplee/sapien/internal/daemon"
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/engine/local"
-	"github.com/growsimplee/sapien/internal/errs"
-	"github.com/growsimplee/sapien/internal/mcp"
-	"github.com/growsimplee/sapien/internal/server"
+	"github.com/gs-sinha/sapien/internal/daemon"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/engine/local"
+	"github.com/gs-sinha/sapien/internal/errs"
+	"github.com/gs-sinha/sapien/internal/mcp"
+	"github.com/gs-sinha/sapien/internal/server"
 )
 
 func init() { Register(newServeCmd) }

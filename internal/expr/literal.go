@@ -3,7 +3,7 @@ package expr
 import (
 	"encoding/json"
 
-	"github.com/growsimplee/sapien/internal/errs"
+	"github.com/gs-sinha/sapien/internal/errs"
 )
 
 // celLiteral renders a Go value as CEL literal source text. JSON's literal

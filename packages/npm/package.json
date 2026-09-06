@@ -1,12 +1,12 @@
 {
-  "name": "@growsimplee/sapien",
+  "name": "@gs-sinha/sapien",
   "version": "0.1.0",
   "description": "Local-first, agent-native API workspace engine (npm wrapper around the sapien binary, for MCP hosts that assume npx)",
   "license": "Apache-2.0",
-  "homepage": "https://github.com/growsimplee/sapien",
+  "homepage": "https://github.com/gs-sinha/sapien",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/growsimplee/sapien.git",
+    "url": "git+https://github.com/gs-sinha/sapien.git",
     "directory": "packages/npm"
   },
   "bin": {

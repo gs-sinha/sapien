@@ -13,9 +13,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/growsimplee/sapien/internal/daemon"
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/errs"
+	"github.com/gs-sinha/sapien/internal/daemon"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/errs"
 )
 
 func init() { Register(newDaemonCmd) }

@@ -5,8 +5,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/errs"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/errs"
 )
 
 // handleOperationsList implements GET /v1/operations?q=&method=&service=&limit=&include_deprecated=.

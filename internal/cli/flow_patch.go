@@ -9,9 +9,9 @@ import (
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/errs"
-	"github.com/growsimplee/sapien/internal/flowpatch"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/errs"
+	"github.com/gs-sinha/sapien/internal/flowpatch"
 )
 
 // flowSaveSummary is what the authoring commands print after a write: enough

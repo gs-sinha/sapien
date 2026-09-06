@@ -9,12 +9,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/engine"
-	"github.com/growsimplee/sapien/internal/errs"
-	"github.com/growsimplee/sapien/internal/example"
-	"github.com/growsimplee/sapien/internal/flow"
-	"github.com/growsimplee/sapien/internal/spec"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/engine"
+	"github.com/gs-sinha/sapien/internal/errs"
+	"github.com/gs-sinha/sapien/internal/example"
+	"github.com/gs-sinha/sapien/internal/flow"
+	"github.com/gs-sinha/sapien/internal/spec"
 )
 
 // exampleAPI implements engine.ExampleAPI over internal/example (PLAN

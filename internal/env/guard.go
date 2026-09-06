@@ -1,8 +1,8 @@
 package env
 
 import (
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/errs"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/errs"
 )
 
 // CheckProduction enforces the production guard (PLAN §20, §28): a

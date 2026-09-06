@@ -10,7 +10,7 @@ import (
 
 	"github.com/zalando/go-keyring"
 
-	"github.com/growsimplee/sapien/internal/errs"
+	"github.com/gs-sinha/sapien/internal/errs"
 )
 
 // keyringService is the go-keyring "service" name every Sapien secret is

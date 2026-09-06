@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/growsimplee/sapien/internal/memory"
+	"github.com/gs-sinha/sapien/internal/memory"
 )
 
 func TestScanSecrets(t *testing.T) {

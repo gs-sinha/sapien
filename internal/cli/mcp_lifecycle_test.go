@@ -15,11 +15,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/growsimplee/sapien/internal/cli"
-	"github.com/growsimplee/sapien/internal/daemon"
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/engine/enginetest"
-	"github.com/growsimplee/sapien/internal/server"
+	"github.com/gs-sinha/sapien/internal/cli"
+	"github.com/gs-sinha/sapien/internal/daemon"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/engine/enginetest"
+	"github.com/gs-sinha/sapien/internal/server"
 )
 
 // stdioMCPClient swaps os.Stdin/os.Stdout for pipes, runs `sapien

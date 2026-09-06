@@ -16,9 +16,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/semantic"
-	"github.com/growsimplee/sapien/internal/store"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/semantic"
+	"github.com/gs-sinha/sapien/internal/store"
 )
 
 // openLocalTestDB opens a fresh, migrated in-memory store for one test --

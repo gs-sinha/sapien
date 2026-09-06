@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/growsimplee/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/domain"
 )
 
 // ExampleResolver is the small, read-only surface Materialize (and, through

@@ -1,6 +1,6 @@
 package runs
 
-import "github.com/growsimplee/sapien/internal/domain"
+import "github.com/gs-sinha/sapien/internal/domain"
 
 // Summarize recomputes a domain.RunSummary from step results. It is a pure
 // function (no I/O) so the runner can call it directly while a run is still

@@ -11,9 +11,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/growsimplee/sapien/internal/cli"
-	"github.com/growsimplee/sapien/internal/daemon"
-	"github.com/growsimplee/sapien/internal/errs"
+	"github.com/gs-sinha/sapien/internal/cli"
+	"github.com/gs-sinha/sapien/internal/daemon"
+	"github.com/gs-sinha/sapien/internal/errs"
 )
 
 // A live holder of the workspace lock that daemon.json no longer names (an

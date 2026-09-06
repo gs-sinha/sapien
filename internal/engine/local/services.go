@@ -3,11 +3,11 @@ package local
 import (
 	"context"
 
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/engine"
-	"github.com/growsimplee/sapien/internal/events"
-	"github.com/growsimplee/sapien/internal/registry"
-	"github.com/growsimplee/sapien/internal/workspace"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/engine"
+	"github.com/gs-sinha/sapien/internal/events"
+	"github.com/gs-sinha/sapien/internal/registry"
+	"github.com/gs-sinha/sapien/internal/workspace"
 )
 
 // serviceAPI implements engine.ServiceAPI over a Local.

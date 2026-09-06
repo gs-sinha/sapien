@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/growsimplee/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/domain"
 )
 
 const redactedPlaceholder = "[REDACTED]"

@@ -13,12 +13,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/engine"
-	"github.com/growsimplee/sapien/internal/engine/enginetest"
-	"github.com/growsimplee/sapien/internal/engine/remote"
-	"github.com/growsimplee/sapien/internal/errs"
-	"github.com/growsimplee/sapien/internal/server"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/engine"
+	"github.com/gs-sinha/sapien/internal/engine/enginetest"
+	"github.com/gs-sinha/sapien/internal/engine/remote"
+	"github.com/gs-sinha/sapien/internal/errs"
+	"github.com/gs-sinha/sapien/internal/server"
 )
 
 const testToken = "test-token"

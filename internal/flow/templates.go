@@ -3,8 +3,8 @@ package flow
 import (
 	"sort"
 
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/expr"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/expr"
 )
 
 // templates extracts the inner text of every `${...}` interpolation in s,

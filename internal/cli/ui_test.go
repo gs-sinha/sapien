@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/growsimplee/sapien/internal/cli"
+	"github.com/gs-sinha/sapien/internal/cli"
 )
 
 func TestUI_NoOpen_Human(t *testing.T) {

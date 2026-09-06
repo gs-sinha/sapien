@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/growsimplee/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/domain"
 )
 
 // traceTimer accumulates httptrace callback timestamps for one request and

@@ -7,10 +7,10 @@ import (
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/growsimplee/sapien/internal/diagnose"
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/engine"
-	"github.com/growsimplee/sapien/internal/errs"
+	"github.com/gs-sinha/sapien/internal/diagnose"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/engine"
+	"github.com/gs-sinha/sapien/internal/errs"
 )
 
 // ExecuteAPIInput is execute_api's arguments. ID may be omitted when Example

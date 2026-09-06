@@ -11,7 +11,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/growsimplee/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/domain"
 )
 
 func TestParseDocFusionConfig(t *testing.T) {

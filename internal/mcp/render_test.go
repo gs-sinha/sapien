@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/growsimplee/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/domain"
 )
 
 // TestBuildRunView_ReusedAndWarnings covers a resumed run (engine.RunOptions

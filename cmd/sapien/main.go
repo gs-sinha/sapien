@@ -6,7 +6,7 @@ package main
 import (
 	"os"
 
-	"github.com/growsimplee/sapien/internal/cli"
+	"github.com/gs-sinha/sapien/internal/cli"
 )
 
 func main() {

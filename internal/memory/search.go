@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/errs"
-	"github.com/growsimplee/sapien/internal/store"
-	"github.com/growsimplee/sapien/internal/textutil"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/errs"
+	"github.com/gs-sinha/sapien/internal/store"
+	"github.com/gs-sinha/sapien/internal/textutil"
 )
 
 // Scoring weights (PLAN.md §13): score = structural + w_l*bm25_norm +

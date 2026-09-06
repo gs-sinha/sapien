@@ -3,7 +3,7 @@ package server
 import (
 	"net/http"
 
-	"github.com/growsimplee/sapien/internal/engine"
+	"github.com/gs-sinha/sapien/internal/engine"
 )
 
 func (s *Server) handleCall(w http.ResponseWriter, r *http.Request) {

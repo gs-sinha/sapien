@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/engine"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/engine"
 )
 
 // recentEventsCap bounds the ring buffer behind GET /v1/events/recent

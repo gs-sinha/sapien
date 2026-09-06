@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/growsimplee/sapien/internal/errs"
+	"github.com/gs-sinha/sapien/internal/errs"
 )
 
 // HostClients lists the MCP hosts HostConfig can render an entry for.

@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/growsimplee/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/domain"
 )
 
 // Code is a stable, machine-readable error code.

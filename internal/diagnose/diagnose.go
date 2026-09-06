@@ -20,8 +20,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/engine"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/engine"
 )
 
 // Kind classifies where a Hint's explanation came from.

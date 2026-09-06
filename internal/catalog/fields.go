@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/store"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/store"
 )
 
 // Fields returns every field of operationID, ordered by field path.

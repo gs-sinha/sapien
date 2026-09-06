@@ -9,9 +9,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/example"
-	"github.com/growsimplee/sapien/internal/workspace"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/example"
+	"github.com/gs-sinha/sapien/internal/workspace"
 )
 
 // A memory or example committed inside a service repo must be visible to a

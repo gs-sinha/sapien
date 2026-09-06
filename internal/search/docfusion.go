@@ -23,7 +23,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/growsimplee/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/domain"
 )
 
 // docFusionMode selects whether/how the docs ranker is fused in.

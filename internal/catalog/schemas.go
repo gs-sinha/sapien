@@ -6,8 +6,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/store"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/store"
 )
 
 // GetSchema returns the named component schema for service, or (nil, nil) if

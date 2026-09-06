@@ -3,7 +3,7 @@ package retrieval
 import (
 	"strings"
 
-	"github.com/growsimplee/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/domain"
 )
 
 // maxDescriptionRunes is the length an operation description is truncated

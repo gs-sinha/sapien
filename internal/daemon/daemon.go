@@ -17,8 +17,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/errs"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/errs"
 )
 
 // Info is the persisted contents of daemon.json.

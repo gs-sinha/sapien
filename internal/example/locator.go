@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/errs"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/errs"
 )
 
 // ExamplesDir is the subdirectory name examples live under, workspace or

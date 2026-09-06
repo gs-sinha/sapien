@@ -8,8 +8,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/growsimplee/sapien/internal/catalog"
-	"github.com/growsimplee/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/catalog"
+	"github.com/gs-sinha/sapien/internal/domain"
 )
 
 func TestApply_Large1000Operations(t *testing.T) {

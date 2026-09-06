@@ -27,9 +27,9 @@ builds:
       - arm64
     ldflags:
       - -s -w
-      - -X github.com/growsimplee/sapien/internal/cli.Version={{ .Version }}
-      - -X github.com/growsimplee/sapien/internal/cli.Commit={{ .ShortCommit }}
-      - -X github.com/growsimplee/sapien/internal/cli.Date={{ .Date }}
+      - -X github.com/gs-sinha/sapien/internal/cli.Version={{ .Version }}
+      - -X github.com/gs-sinha/sapien/internal/cli.Commit={{ .ShortCommit }}
+      - -X github.com/gs-sinha/sapien/internal/cli.Date={{ .Date }}
 
 archives:
   - id: sapien
@@ -72,26 +72,26 @@ changelog:
 
 release:
   github:
-    owner: growsimplee
+    owner: gs-sinha
     name: sapien
   # Grouped changelog above is the release body; nothing else to add.
 
-# Publishes Formula/sapien.rb to github.com/growsimplee/homebrew-tap on every
+# Publishes Formula/sapien.rb to github.com/gs-sinha/homebrew-tap on every
 # non-prerelease tag. HOMEBREW_TAP_TOKEN needs `contents: write` on that repo
 # (see .github/workflows/release.yml). Formula/sapien.rb in *this* repo is a
 # reference copy only — goreleaser regenerates the tap's copy from the
 # archives built above, it does not read the checked-in file.
 brews:
-  - skip_upload: true  # set false once growsimplee/homebrew-tap exists and HOMEBREW_TAP_TOKEN is configured
+  - skip_upload: true  # set false once gs-sinha/homebrew-tap exists and HOMEBREW_TAP_TOKEN is configured
     name: sapien
     ids: [sapien]
     repository:
-      owner: growsimplee
+      owner: gs-sinha
       name: homebrew-tap
       branch: main
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     directory: Formula
-    homepage: "https://github.com/growsimplee/sapien"
+    homepage: "https://github.com/gs-sinha/sapien"
     description: "Local-first, agent-native API workspace engine"
     license: "Apache-2.0"
     test: |
@@ -111,11 +111,11 @@ dockers:
     dockerfile: Dockerfile
     use: buildx
     image_templates:
-      - "ghcr.io/growsimplee/sapien:{{ .Version }}-amd64"
-      - "ghcr.io/growsimplee/sapien:latest-amd64"
+      - "ghcr.io/gs-sinha/sapien:{{ .Version }}-amd64"
+      - "ghcr.io/gs-sinha/sapien:latest-amd64"
     build_flag_templates:
       - "--platform=linux/amd64"
-      - "--label=org.opencontainers.image.source=https://github.com/growsimplee/sapien"
+      - "--label=org.opencontainers.image.source=https://github.com/gs-sinha/sapien"
       - "--label=org.opencontainers.image.version={{ .Version }}"
       - "--label=org.opencontainers.image.licenses=Apache-2.0"
   - id: sapien-linux-arm64
@@ -125,20 +125,20 @@ dockers:
     dockerfile: Dockerfile
     use: buildx
     image_templates:
-      - "ghcr.io/growsimplee/sapien:{{ .Version }}-arm64"
-      - "ghcr.io/growsimplee/sapien:latest-arm64"
+      - "ghcr.io/gs-sinha/sapien:{{ .Version }}-arm64"
+      - "ghcr.io/gs-sinha/sapien:latest-arm64"
     build_flag_templates:
       - "--platform=linux/arm64"
-      - "--label=org.opencontainers.image.source=https://github.com/growsimplee/sapien"
+      - "--label=org.opencontainers.image.source=https://github.com/gs-sinha/sapien"
       - "--label=org.opencontainers.image.version={{ .Version }}"
       - "--label=org.opencontainers.image.licenses=Apache-2.0"
 
 docker_manifests:
-  - name_template: "ghcr.io/growsimplee/sapien:{{ .Version }}"
+  - name_template: "ghcr.io/gs-sinha/sapien:{{ .Version }}"
     image_templates:
-      - "ghcr.io/growsimplee/sapien:{{ .Version }}-amd64"
-      - "ghcr.io/growsimplee/sapien:{{ .Version }}-arm64"
-  - name_template: "ghcr.io/growsimplee/sapien:latest"
+      - "ghcr.io/gs-sinha/sapien:{{ .Version }}-amd64"
+      - "ghcr.io/gs-sinha/sapien:{{ .Version }}-arm64"
+  - name_template: "ghcr.io/gs-sinha/sapien:latest"
     image_templates:
-      - "ghcr.io/growsimplee/sapien:latest-amd64"
-      - "ghcr.io/growsimplee/sapien:latest-arm64"
+      - "ghcr.io/gs-sinha/sapien:latest-amd64"
+      - "ghcr.io/gs-sinha/sapien:latest-arm64"

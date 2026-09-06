@@ -5,7 +5,7 @@ import (
 
 	v3 "github.com/pb33f/libopenapi/datamodel/high/v3"
 
-	"github.com/growsimplee/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/domain"
 )
 
 // buildDocs extracts the contract-embedded documentation PLAN.md §5 calls out:

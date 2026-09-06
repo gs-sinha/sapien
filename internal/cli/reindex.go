@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/growsimplee/sapien/internal/catalog"
+	"github.com/gs-sinha/sapien/internal/catalog"
 )
 
 func init() { Register(newReindexCmd) }

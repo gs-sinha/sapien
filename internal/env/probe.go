@@ -7,7 +7,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/growsimplee/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/domain"
 )
 
 // ProbeResult is one service's reachability check, as produced by Probe.

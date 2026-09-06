@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/store"
-	"github.com/growsimplee/sapien/internal/textutil"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/store"
+	"github.com/gs-sinha/sapien/internal/textutil"
 )
 
 // DocSectionInput is one doc section to embed (IndexDocs), carrying just

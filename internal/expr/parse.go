@@ -6,7 +6,7 @@ import (
 
 	celast "cel.dev/cel-go/common/ast"
 
-	"github.com/growsimplee/sapien/internal/errs"
+	"github.com/gs-sinha/sapien/internal/errs"
 )
 
 // Parse checks expr for syntax errors only; it does not require roots to be

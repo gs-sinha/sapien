@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/errs"
-	"github.com/growsimplee/sapien/internal/workspace"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/errs"
+	"github.com/gs-sinha/sapien/internal/workspace"
 )
 
 // availableNames lists the environments known to ws, for EnvNotFound

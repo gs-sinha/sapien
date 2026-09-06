@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/growsimplee/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/domain"
 )
 
 // Parse splits markdown into sections and extracts refs per opts.

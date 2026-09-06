@@ -4,7 +4,7 @@ import (
 	"context"
 	"math"
 
-	"github.com/growsimplee/sapien/internal/textutil"
+	"github.com/gs-sinha/sapien/internal/textutil"
 )
 
 // feedbackWeight scales a matching operation's total log1p(count) usage

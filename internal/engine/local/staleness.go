@@ -11,10 +11,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/example"
-	"github.com/growsimplee/sapien/internal/registry"
-	"github.com/growsimplee/sapien/internal/workspace"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/example"
+	"github.com/gs-sinha/sapien/internal/registry"
+	"github.com/gs-sinha/sapien/internal/workspace"
 )
 
 // staleCheck implements PLAN §4's one-shot CLI rule: for every registered

@@ -26,7 +26,7 @@ now. See [`CHANGELOG.md`](CHANGELOG.md) for the deliverable list and
 From source (works today; needs Go 1.25+):
 
 ```sh
-git clone https://github.com/growsimplee/sapien.git && cd sapien
+git clone https://github.com/gs-sinha/sapien.git && cd sapien
 make build                                   # writes bin/sapien
 ln -s "$PWD/bin/sapien" /usr/local/bin/sapien   # or add bin/ to PATH
 sapien version
@@ -35,10 +35,10 @@ sapien version
 Once a tagged release ships, these will work too:
 
 ```sh
-brew install growsimplee/tap/sapien
-curl -fsSL https://raw.githubusercontent.com/growsimplee/sapien/main/scripts/install.sh | sh
-npx @growsimplee/sapien version
-go install github.com/growsimplee/sapien/cmd/sapien@latest
+brew install gs-sinha/tap/sapien
+curl -fsSL https://raw.githubusercontent.com/gs-sinha/sapien/main/scripts/install.sh | sh
+npx @gs-sinha/sapien version
+go install github.com/gs-sinha/sapien/cmd/sapien@latest
 ```
 
 ## Make it operational
@@ -199,7 +199,7 @@ fixture's full seed data and success scenario.
 For agent hosts that assume `npx`:
 
 ```sh
-npx @growsimplee/sapien mcp --workspace .
+npx @gs-sinha/sapien mcp --workspace .
 ```
 
 or, with `sapien` installed, `sapien mcp --workspace .`. `sapien mcp

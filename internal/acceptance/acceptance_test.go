@@ -34,15 +34,15 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/growsimplee/sapien/fixtures/logistics/mock"
-	"github.com/growsimplee/sapien/internal/cli"
-	"github.com/growsimplee/sapien/internal/daemon"
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/engine/local"
-	"github.com/growsimplee/sapien/internal/env"
-	sapienmcp "github.com/growsimplee/sapien/internal/mcp"
-	"github.com/growsimplee/sapien/internal/server"
-	"github.com/growsimplee/sapien/internal/workspace"
+	"github.com/gs-sinha/sapien/fixtures/logistics/mock"
+	"github.com/gs-sinha/sapien/internal/cli"
+	"github.com/gs-sinha/sapien/internal/daemon"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/engine/local"
+	"github.com/gs-sinha/sapien/internal/env"
+	sapienmcp "github.com/gs-sinha/sapien/internal/mcp"
+	"github.com/gs-sinha/sapien/internal/server"
+	"github.com/gs-sinha/sapien/internal/workspace"
 )
 
 // --- fixture plumbing -------------------------------------------------

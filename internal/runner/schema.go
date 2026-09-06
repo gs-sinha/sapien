@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"sort"
 
-	"github.com/growsimplee/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/domain"
 )
 
 // ValidateSchema validates value against the normalized domain.Schema s, for

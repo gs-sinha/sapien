@@ -12,7 +12,7 @@ package search
 import (
 	"testing"
 
-	"github.com/growsimplee/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/domain"
 )
 
 func TestFinalizeLexicalScores_ProportionalNotClamped(t *testing.T) {

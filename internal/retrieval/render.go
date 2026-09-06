@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/growsimplee/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/domain"
 )
 
 // RenderOperation compresses op into the compact, agent-ready rendering

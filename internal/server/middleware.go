@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/growsimplee/sapien/internal/errs"
+	"github.com/gs-sinha/sapien/internal/errs"
 )
 
 // isLocalHostname reports whether h (already stripped of any port and

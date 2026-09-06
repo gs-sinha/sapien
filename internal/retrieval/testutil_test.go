@@ -10,14 +10,14 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/growsimplee/sapien/internal/catalog"
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/memory"
-	"github.com/growsimplee/sapien/internal/registry"
-	"github.com/growsimplee/sapien/internal/retrieval"
-	"github.com/growsimplee/sapien/internal/runs"
-	"github.com/growsimplee/sapien/internal/search"
-	"github.com/growsimplee/sapien/internal/store"
+	"github.com/gs-sinha/sapien/internal/catalog"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/memory"
+	"github.com/gs-sinha/sapien/internal/registry"
+	"github.com/gs-sinha/sapien/internal/retrieval"
+	"github.com/gs-sinha/sapien/internal/runs"
+	"github.com/gs-sinha/sapien/internal/search"
+	"github.com/gs-sinha/sapien/internal/store"
 )
 
 // fixtureServices is the fixed set of services under fixtures/logistics.

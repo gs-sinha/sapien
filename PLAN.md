@@ -870,7 +870,7 @@ Promotion paths are explicit and human-reviewed: memory → OpenAPI description 
 | 5 | NL authoring | **Decided: external agents via MCP; no LLM in the engine; BYO-key UI panel only after MCP is proven** (§24) |
 | 6 | Flow DSL: flat `input:` + `body:`, `until`/`poll` in V1 | **Built as proposed** (§8); `${…}` also interpolates inside structured assertion values |
 | 7 | Desktop stack (Tauri + React) | Deferred to Phase 7; engine (Phases 0–6) complete 2026-09-05 |
-| 8 | Product framing (internal vs general) | Deferred; packaging written for a public GitHub org placeholder, now `growsimplee` |
+| 8 | Product framing (internal vs general) | Deferred; packaging written for a public GitHub org placeholder, now `gs-sinha` |
 | Examples as a workspace-layer primitive (§34b): one operation each, `verified` only from runs, scope = storage and sharing | Built 2026-09-05 (engine, flow `example:`, CLI, MCP, context tier, acceptance test) |
 | Phase 7a live inspector UI (§34c): browser app served by the daemon, no Electron, enforced bundle budget | Built 2026-09-05; 64 KB initial / 118 KB total gzipped; Phase 7b agent pane next |
 | Search: fold doc and memory text into the operations index, learn from use, and blend a docs-mediated ranker (§16) rather than ship an embedding model | Built 2026-09-05; measured on `experiments/search-eval`: weighted column alone neutral, docs-mediated blend 0.7/0.3 lifts R@1 0.72 -> 0.80 with no category worse; static embeddings alone 0.49, revisited only as an optional re-ranker |

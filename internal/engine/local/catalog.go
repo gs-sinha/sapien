@@ -3,8 +3,8 @@ package local
 import (
 	"context"
 
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/engine"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/engine"
 )
 
 // catalogAPI implements engine.CatalogAPI as a direct pass-through to

@@ -7,8 +7,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/growsimplee/sapien/internal/diagnose"
-	"github.com/growsimplee/sapien/internal/engine"
+	"github.com/gs-sinha/sapien/internal/diagnose"
+	"github.com/gs-sinha/sapien/internal/engine"
 )
 
 const softFlowV1 = `version: 1

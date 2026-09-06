@@ -3,8 +3,8 @@ package local
 import (
 	"context"
 
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/engine"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/engine"
 )
 
 // contextAPI implements engine.ContextAPI as a pass-through to

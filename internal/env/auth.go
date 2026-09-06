@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"sort"
 
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/errs"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/errs"
 )
 
 // ApplyAuth applies an auth rule to an outgoing request. Every field of auth

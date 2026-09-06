@@ -1,6 +1,6 @@
 package catalog
 
-import "github.com/growsimplee/sapien/internal/domain"
+import "github.com/gs-sinha/sapien/internal/domain"
 
 // Snapshot is the fully-ingested, normalized representation of one service,
 // as produced by the registry from an ingest run. Apply upserts it into the

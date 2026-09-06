@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/growsimplee/sapien/internal/ingest/docs"
+	"github.com/gs-sinha/sapien/internal/ingest/docs"
 )
 
 func TestSlug(t *testing.T) {

@@ -5,7 +5,7 @@ import (
 
 	"github.com/oklog/ulid/v2"
 
-	"github.com/growsimplee/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/domain"
 )
 
 // Seed populates f with a small, consistent sample workspace: 2 services, 4

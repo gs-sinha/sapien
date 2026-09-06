@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/growsimplee/sapien/internal/errs"
+	"github.com/gs-sinha/sapien/internal/errs"
 )
 
 // templatePart is one piece of a split template: either literal text, or the

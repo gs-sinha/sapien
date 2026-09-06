@@ -7,8 +7,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/store"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/store"
 )
 
 // wrapf wraps err (if non-nil) with a "search: <what>" prefix.

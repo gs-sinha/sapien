@@ -49,7 +49,7 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/growsimplee/sapien/internal/store"
+	"github.com/gs-sinha/sapien/internal/store"
 )
 
 // Catalog reads and writes the normalized catalog tables described above and

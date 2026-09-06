@@ -13,9 +13,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/growsimplee/sapien/internal/engine"
-	"github.com/growsimplee/sapien/internal/terminal"
-	"github.com/growsimplee/sapien/internal/ui"
+	"github.com/gs-sinha/sapien/internal/engine"
+	"github.com/gs-sinha/sapien/internal/terminal"
+	"github.com/gs-sinha/sapien/internal/ui"
 )
 
 // Options configures a Server.

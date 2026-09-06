@@ -7,7 +7,7 @@ import (
 	"github.com/pb33f/libopenapi/orderedmap"
 	yaml "go.yaml.in/yaml/v4"
 
-	"github.com/growsimplee/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/domain"
 )
 
 // schemaCtx carries the state needed while normalizing a schema tree: the chain of

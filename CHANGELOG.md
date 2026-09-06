@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file. The
 format loosely follows [Keep a Changelog](https://keepachangelog.com/),
 and phase numbers refer to PLAN.md §34's roadmap.
 
+## [Unreleased]
+
+### Changed
+- Module path and distribution names moved from `github.com/growsimplee/sapien`
+  to `github.com/gs-sinha/sapien` after the repository transfer: Go import
+  path, `go install` target, installer and README URLs, the container image
+  (`ghcr.io/gs-sinha/sapien`), the Homebrew tap (`gs-sinha/tap`), and the npm
+  package (`@gs-sinha/sapien`). `go install ...@latest` resolves to this path
+  from the next tagged release; v1.0.0 archives are unaffected.
+
 ## [1.0.0] - 2026-09-06
 
 Phases 0–6 are engine-only and, together, produce a releasable product

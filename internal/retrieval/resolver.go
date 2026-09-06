@@ -3,9 +3,9 @@ package retrieval
 import (
 	"context"
 
-	"github.com/growsimplee/sapien/internal/catalog"
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/memory"
+	"github.com/gs-sinha/sapien/internal/catalog"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/memory"
 )
 
 // CatalogResolver adapts a *catalog.Catalog to memory.Resolver. The engine

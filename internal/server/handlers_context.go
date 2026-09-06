@@ -3,7 +3,7 @@ package server
 import (
 	"net/http"
 
-	"github.com/growsimplee/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/domain"
 )
 
 func (s *Server) handleContextBuild(w http.ResponseWriter, r *http.Request) {

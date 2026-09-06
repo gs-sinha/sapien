@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/growsimplee/sapien/internal/semantic"
+	"github.com/gs-sinha/sapien/internal/semantic"
 )
 
 func TestCosine(t *testing.T) {

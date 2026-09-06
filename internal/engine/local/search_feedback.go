@@ -26,8 +26,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/search"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/search"
 )
 
 // searchRingCap bounds how many recent searches each *Local remembers.

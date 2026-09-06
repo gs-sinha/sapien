@@ -3,7 +3,7 @@
 Running record of the autonomous build (Phases 0–4 of PLAN.md). Newest phase last. Each phase records: what was built, test/coverage results, deviations from PLAN.md, and open issues.
 
 Conventions fixed before Phase 0:
-- Module path `github.com/growsimplee/sapien` (placeholder; change with a single sed when the real repo exists).
+- Module path `github.com/gs-sinha/sapien` (placeholder; change with a single sed when the real repo exists).
 - Go 1.25.7 in go.mod (libopenapi requires ≥1.25.7); toolchain auto-downloads go1.26.8. Dev machine has go1.23 installed; `go` switches toolchains automatically.
 - cel-go is imported as `cel.dev/cel-go` (the module moved off github.com/google/cel-go).
 - Contracts every package builds on: `internal/domain` (types), `internal/errs` (error model, exit codes), `internal/engine` (Engine facade interface with Local/Remote implementations to come).
@@ -182,7 +182,7 @@ Known gaps and follow-ups (none block agent use):
 - `sapien secret set` has no hidden interactive prompt (no x/term); use `--stdin` or `--value`.
 - Release pipeline (`.goreleaser.yaml`, brew tap, npm wrapper, install script, Docker) is written but has not been run against a real tag; `goreleaser check` not executed locally.
 - Phase 7 (desktop) and Phase 8 (in-app BYO-key authoring) not started, per plan.
-- Repo is local-only; module path `github.com/growsimplee/sapien` and the `growsimplee` org in packaging are placeholders.
+- Repo is local-only; module path `github.com/gs-sinha/sapien` and the `gs-sinha` org in packaging are placeholders.
 
 ## Onboarding journey (2026-09-05, after the closing summary)
 
@@ -304,3 +304,7 @@ Fix on the machine: stop 91162, touch the flow file, the live daemon reindexed i
 - **Workspace lock** (`internal/daemon/lock.go`): `sapien serve` holds `<ws>/.sapien/daemon.lock` (pid inside) for its lifetime; a live holder blocks a plain `serve` with `E_CONFLICT` naming the pid, `serve --restart` stops it; `findOrStartDaemon` stops an orphan holder before spawning; `replaceStaleDaemon` stops the lock holder as well as the `daemon.json` pid.
 - **Reindex never drops a flow it failed to parse**: the previous row is kept (matched by path, then id), a warning is logged with the file and error; `get_flow` on a broken file then reports the parse error instead of "not found". A deleted file still drops its row.
 - **Daemon log**: a spawned daemon's stderr goes to `<ws>/.sapien/daemon.log`, so warnings like a failed reindex are findable.
+
+## Repository transfer and module rename (2026-09-06)
+
+v1.0.0 was pushed to `growsimplee/sapien` and the GitHub release was assembled by hand (darwin/linux archives plus `checksums.txt`) because the org's Actions were locked for billing; the repository was then transferred to `gs-sinha/sapien`, where the old URL redirects and the same CI run passed on rerun. Every reference followed the move in one commit: the Go module path (`github.com/gs-sinha/sapien`, 364 files), the Makefile and goreleaser ldflags, installer and README URLs, `ghcr.io/gs-sinha/sapien`, the `gs-sinha/tap` formula, and the npm scope. Consequence to remember: `go install github.com/gs-sinha/sapien/cmd/sapien@latest` needs a tag cut after the rename, since v1.0.0's `go.mod` still declares the old path; the release archives and `scripts/install.sh` do not care.

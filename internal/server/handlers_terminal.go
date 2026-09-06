@@ -10,9 +10,9 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/errs"
-	"github.com/growsimplee/sapien/internal/terminal"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/errs"
+	"github.com/gs-sinha/sapien/internal/terminal"
 )
 
 // Phase 7b (PLAN §34c): an agent pane that spawns the user's own `claude`

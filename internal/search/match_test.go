@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/growsimplee/sapien/internal/search"
+	"github.com/gs-sinha/sapien/internal/search"
 )
 
 func TestBuildMatch(t *testing.T) {

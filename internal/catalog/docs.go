@@ -6,8 +6,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/errs"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/errs"
 )
 
 // DocSectionRef is a doc section matched by DocsReferencing, together with

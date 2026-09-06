@@ -8,9 +8,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/store"
-	"github.com/growsimplee/sapien/internal/textutil"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/store"
+	"github.com/gs-sinha/sapien/internal/textutil"
 )
 
 // openTestDB opens a fresh, migrated in-memory store for one test.

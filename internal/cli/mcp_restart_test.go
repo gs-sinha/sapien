@@ -8,8 +8,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/growsimplee/sapien/internal/cli"
-	"github.com/growsimplee/sapien/internal/daemon"
+	"github.com/gs-sinha/sapien/internal/cli"
+	"github.com/gs-sinha/sapien/internal/daemon"
 )
 
 // After `make build`, the MCP entry still points at the same binary path

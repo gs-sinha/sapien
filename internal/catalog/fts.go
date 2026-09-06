@@ -3,8 +3,8 @@ package catalog
 import (
 	"strings"
 
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/textutil"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/textutil"
 )
 
 // operationsFTSRow is the row shape for operations_fts. See the catalog

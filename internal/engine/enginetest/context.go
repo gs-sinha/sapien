@@ -4,8 +4,8 @@ import (
 	"context"
 	"sort"
 
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/engine"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/engine"
 )
 
 func estimateTokens(b *domain.ContextBundle) int {

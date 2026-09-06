@@ -7,7 +7,7 @@ failed flow into a failed build.
 
 ## GitHub Actions
 
-Use the CI-use Docker image (`ghcr.io/growsimplee/sapien`, distroless,
+Use the CI-use Docker image (`ghcr.io/gs-sinha/sapien`, distroless,
 `sapien` as the entrypoint) so the job needs no Go toolchain:
 
 ```yaml
@@ -21,7 +21,7 @@ jobs:
   flows:
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/growsimplee/sapien:latest
+      image: ghcr.io/gs-sinha/sapien:latest
     steps:
       - uses: actions/checkout@v4
 
@@ -45,7 +45,7 @@ Or, without the container, using the binary directly on the runner:
 
 ```yaml
       - name: Install sapien
-        run: curl -fsSL https://raw.githubusercontent.com/growsimplee/sapien/main/scripts/install.sh | sh -s -- --prefix "$HOME/.local/bin"
+        run: curl -fsSL https://raw.githubusercontent.com/gs-sinha/sapien/main/scripts/install.sh | sh -s -- --prefix "$HOME/.local/bin"
 
       - name: Run flows
         env:

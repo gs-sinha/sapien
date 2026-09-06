@@ -5,9 +5,9 @@ import (
 	"sort"
 	"time"
 
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/engine"
-	"github.com/growsimplee/sapien/internal/errs"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/engine"
+	"github.com/gs-sinha/sapien/internal/errs"
 )
 
 func (s *serviceAPI) List(ctx context.Context) ([]domain.Service, error) {

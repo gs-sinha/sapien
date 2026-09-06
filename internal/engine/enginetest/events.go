@@ -4,8 +4,8 @@ import (
 	"context"
 	"sync"
 
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/engine"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/engine"
 )
 
 // subscriberBuffer is the channel buffer size for each subscriber, generous

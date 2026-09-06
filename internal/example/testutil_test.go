@@ -5,8 +5,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/growsimplee/sapien/internal/example"
-	"github.com/growsimplee/sapien/internal/store"
+	"github.com/gs-sinha/sapien/internal/example"
+	"github.com/gs-sinha/sapien/internal/store"
 )
 
 // openTestDB opens an in-memory SQLite database (migrated), closing it on

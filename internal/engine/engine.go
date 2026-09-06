@@ -8,7 +8,7 @@ import (
 	"context"
 	"io"
 
-	"github.com/growsimplee/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/domain"
 )
 
 // Engine is the facade.

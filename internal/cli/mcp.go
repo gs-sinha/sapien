@@ -11,12 +11,12 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/growsimplee/sapien/internal/config"
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/engine/local"
-	"github.com/growsimplee/sapien/internal/engine/remote"
-	"github.com/growsimplee/sapien/internal/errs"
-	"github.com/growsimplee/sapien/internal/mcp"
+	"github.com/gs-sinha/sapien/internal/config"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/engine/local"
+	"github.com/gs-sinha/sapien/internal/engine/remote"
+	"github.com/gs-sinha/sapien/internal/errs"
+	"github.com/gs-sinha/sapien/internal/mcp"
 )
 
 func init() { Register(newMCPCmd) }

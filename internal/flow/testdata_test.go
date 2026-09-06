@@ -4,7 +4,7 @@ import (
 	"context"
 	"sort"
 
-	"github.com/growsimplee/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/domain"
 )
 
 // fakeCatalog is a small, hand-built stand-in for internal/catalog (which

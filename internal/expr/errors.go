@@ -6,7 +6,7 @@ import (
 
 	"cel.dev/cel-go/cel"
 
-	"github.com/growsimplee/sapien/internal/errs"
+	"github.com/gs-sinha/sapien/internal/errs"
 )
 
 // celErr is the per-issue error type cel-go's Issues carry (parse/check

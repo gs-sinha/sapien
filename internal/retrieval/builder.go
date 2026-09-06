@@ -7,11 +7,11 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/growsimplee/sapien/internal/catalog"
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/memory"
-	"github.com/growsimplee/sapien/internal/search"
-	"github.com/growsimplee/sapien/internal/textutil"
+	"github.com/gs-sinha/sapien/internal/catalog"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/memory"
+	"github.com/gs-sinha/sapien/internal/search"
+	"github.com/gs-sinha/sapien/internal/textutil"
 )
 
 // examplesPerOperation caps how many saved examples buildExamples fetches

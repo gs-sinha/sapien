@@ -1,6 +1,6 @@
-# @growsimplee/sapien
+# @gs-sinha/sapien
 
-npm wrapper around the [sapien](https://github.com/growsimplee/sapien) binary.
+npm wrapper around the [sapien](https://github.com/gs-sinha/sapien) binary.
 Sapien is a local-first, agent-native API workspace engine, written in Go
 and shipped as a single static binary — this package exists only so MCP
 hosts and quick scripts that assume `npx` can launch it without a separate
@@ -9,8 +9,8 @@ install step.
 ## Usage
 
 ```sh
-npx @growsimplee/sapien version
-npx @growsimplee/sapien mcp --workspace .
+npx @gs-sinha/sapien version
+npx @gs-sinha/sapien mcp --workspace .
 ```
 
 The first invocation downloads the matching `sapien` release binary for
@@ -24,7 +24,7 @@ Homebrew or `scripts/install.sh`), point at it instead of downloading a
 second copy:
 
 ```sh
-SAPIEN_BINARY=/usr/local/bin/sapien npx @growsimplee/sapien mcp --workspace .
+SAPIEN_BINARY=/usr/local/bin/sapien npx @gs-sinha/sapien mcp --workspace .
 ```
 
 ## MCP host configuration
@@ -39,13 +39,13 @@ machine that runs the host:
   "mcpServers": {
     "sapien": {
       "command": "npx",
-      "args": ["-y", "@growsimplee/sapien", "mcp", "--workspace", "/path/to/workspace"]
+      "args": ["-y", "@gs-sinha/sapien", "mcp", "--workspace", "/path/to/workspace"]
     }
   }
 }
 ```
 
-See [`docs/mcp.md`](https://github.com/growsimplee/sapien/blob/main/docs/mcp.md)
+See [`docs/mcp.md`](https://github.com/gs-sinha/sapien/blob/main/docs/mcp.md)
 in the main repo for the full host setup guide, including the
 `sapien mcp config --client <name>` helper that prints this snippet (and
 the binary-path equivalent) for you.

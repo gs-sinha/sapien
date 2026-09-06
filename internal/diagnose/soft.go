@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/engine"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/engine"
 )
 
 // SoftChange is one soft assertion whose outcome differs from the previous

@@ -7,13 +7,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/growsimplee/sapien/internal/env"
-	"github.com/growsimplee/sapien/internal/errs"
-	"github.com/growsimplee/sapien/internal/gitsrc"
+	"github.com/gs-sinha/sapien/internal/env"
+	"github.com/gs-sinha/sapien/internal/errs"
+	"github.com/gs-sinha/sapien/internal/gitsrc"
 
 	"github.com/spf13/cobra"
 
-	"github.com/growsimplee/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/domain"
 )
 
 func init() { Register(newServiceCmd) }

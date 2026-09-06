@@ -6,8 +6,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/growsimplee/sapien/internal/memory"
-	"github.com/growsimplee/sapien/internal/retrieval"
+	"github.com/gs-sinha/sapien/internal/memory"
+	"github.com/gs-sinha/sapien/internal/retrieval"
 )
 
 // TestCatalogResolver_Operation checks CatalogResolver.Operation's

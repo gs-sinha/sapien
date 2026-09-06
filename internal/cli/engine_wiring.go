@@ -6,12 +6,12 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/growsimplee/sapien/internal/daemon"
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/engine"
-	"github.com/growsimplee/sapien/internal/engine/local"
-	"github.com/growsimplee/sapien/internal/engine/remote"
-	"github.com/growsimplee/sapien/internal/errs"
+	"github.com/gs-sinha/sapien/internal/daemon"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/engine"
+	"github.com/gs-sinha/sapien/internal/engine/local"
+	"github.com/gs-sinha/sapien/internal/engine/remote"
+	"github.com/gs-sinha/sapien/internal/errs"
 )
 
 // noDaemonEnv, when set to "1", forces every one-shot CLI invocation (and

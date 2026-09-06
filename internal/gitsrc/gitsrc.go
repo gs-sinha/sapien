@@ -24,7 +24,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/growsimplee/sapien/internal/errs"
+	"github.com/gs-sinha/sapien/internal/errs"
 )
 
 // defaultTimeout is the per-git-invocation budget used when Options.Timeout

@@ -5,11 +5,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/env"
-	"github.com/growsimplee/sapien/internal/workspace"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/env"
+	"github.com/gs-sinha/sapien/internal/workspace"
 
-	"github.com/growsimplee/sapien/fixtures/logistics/mock"
+	"github.com/gs-sinha/sapien/fixtures/logistics/mock"
 )
 
 // mockEnv bundles the running fixture mock servers and the *Local opened

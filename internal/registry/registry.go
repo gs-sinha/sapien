@@ -12,7 +12,7 @@ package registry
 import (
 	"context"
 
-	"github.com/growsimplee/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/domain"
 )
 
 // Snapshot is the normalized, ready-to-index view of one service, mirroring

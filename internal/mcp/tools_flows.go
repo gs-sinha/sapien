@@ -3,7 +3,7 @@ package mcp
 import (
 	"context"
 	"fmt"
-	"github.com/growsimplee/sapien/internal/diagnose"
+	"github.com/gs-sinha/sapien/internal/diagnose"
 	"os"
 	"path/filepath"
 	"sort"
@@ -11,10 +11,10 @@ import (
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/engine"
-	"github.com/growsimplee/sapien/internal/errs"
-	"github.com/growsimplee/sapien/internal/flowpatch"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/engine"
+	"github.com/gs-sinha/sapien/internal/errs"
+	"github.com/gs-sinha/sapien/internal/flowpatch"
 )
 
 // --- list_flows -----------------------------------------------------

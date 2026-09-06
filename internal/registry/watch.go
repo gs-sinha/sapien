@@ -12,8 +12,8 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/errs"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/errs"
 )
 
 // defaultDebounce is used when NewWatcher is given a non-positive debounce.

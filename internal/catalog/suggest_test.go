@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/growsimplee/sapien/internal/catalog"
+	"github.com/gs-sinha/sapien/internal/catalog"
 )
 
 func TestSuggestOperationIDs_Ranking(t *testing.T) {

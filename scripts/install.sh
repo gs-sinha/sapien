@@ -1,7 +1,7 @@
 #!/bin/sh
 # Install the sapien CLI from GitHub Releases.
 #
-#   curl -fsSL https://raw.githubusercontent.com/growsimplee/sapien/main/scripts/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/gs-sinha/sapien/main/scripts/install.sh | sh
 #
 # Env vars:
 #   SAPIEN_VERSION   version to install, e.g. "v0.3.0" (default: latest release)
@@ -16,7 +16,7 @@
 # containers).
 set -eu
 
-REPO="growsimplee/sapien"
+REPO="gs-sinha/sapien"
 VERSION="${SAPIEN_VERSION:-}"
 PREFIX="${SAPIEN_PREFIX:-}"
 

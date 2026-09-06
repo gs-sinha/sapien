@@ -3,8 +3,8 @@ package env
 import (
 	"sort"
 
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/workspace"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/workspace"
 )
 
 // MissingForService returns, sorted, every environment name svc declares

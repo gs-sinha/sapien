@@ -7,7 +7,7 @@ import (
 	celast "cel.dev/cel-go/common/ast"
 	"cel.dev/cel-go/parser"
 
-	"github.com/growsimplee/sapien/internal/errs"
+	"github.com/gs-sinha/sapien/internal/errs"
 )
 
 // Evaluator compiles and evaluates CEL expressions against a Scope. It

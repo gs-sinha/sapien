@@ -4,9 +4,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/registry"
-	"github.com/growsimplee/sapien/internal/workspace"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/registry"
+	"github.com/gs-sinha/sapien/internal/workspace"
 )
 
 // watchDebounce mirrors PLAN §17's default fsnotify debounce.

@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/growsimplee/sapien/internal/semantic"
+	"github.com/gs-sinha/sapien/internal/semantic"
 )
 
 // hashEmbed deterministically embeds text into 16 dims by hashing its

@@ -8,7 +8,7 @@
 // small hand-rolled sectioner keeps behavior predictable and dependency-free.
 package docs
 
-import "github.com/growsimplee/sapien/internal/domain"
+import "github.com/gs-sinha/sapien/internal/domain"
 
 // KnownRefs is the catalog of names ExtractRefs looks for in doc text. All
 // slices/maps are optional; a nil or empty KnownRefs simply yields no refs.

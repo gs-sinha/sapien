@@ -3,10 +3,10 @@ package cli
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/growsimplee/sapien/internal/diagnose"
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/engine"
-	"github.com/growsimplee/sapien/internal/errs"
+	"github.com/gs-sinha/sapien/internal/diagnose"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/engine"
+	"github.com/gs-sinha/sapien/internal/errs"
 )
 
 // newRunResumeCmd is `sapien run resume <run-id> [--from <step>] [--until

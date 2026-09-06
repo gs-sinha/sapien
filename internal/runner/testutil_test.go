@@ -9,11 +9,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/env"
-	"github.com/growsimplee/sapien/internal/errs"
-	"github.com/growsimplee/sapien/internal/expr"
-	"github.com/growsimplee/sapien/internal/ingest/openapi"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/env"
+	"github.com/gs-sinha/sapien/internal/errs"
+	"github.com/gs-sinha/sapien/internal/expr"
+	"github.com/gs-sinha/sapien/internal/ingest/openapi"
 )
 
 // newTestEvaluator returns a fresh expr.Evaluator for tests exercising

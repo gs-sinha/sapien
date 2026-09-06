@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/store"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/store"
 )
 
 // exampleCols is the column list (in scan order) used by every SELECT

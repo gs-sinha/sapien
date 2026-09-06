@@ -12,10 +12,10 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/growsimplee/sapien/internal/config"
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/search"
-	"github.com/growsimplee/sapien/internal/semantic"
+	"github.com/gs-sinha/sapien/internal/config"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/search"
+	"github.com/gs-sinha/sapien/internal/semantic"
 )
 
 // semanticQueueSize bounds the background indexing queue. A full queue

@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/growsimplee/sapien/internal/errs"
+	"github.com/gs-sinha/sapien/internal/errs"
 )
 
 var pathParamRe = regexp.MustCompile(`\{([^{}]+)\}`)

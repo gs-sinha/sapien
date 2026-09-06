@@ -5,10 +5,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/errs"
-	"github.com/growsimplee/sapien/internal/events"
-	"github.com/growsimplee/sapien/internal/gitsrc"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/errs"
+	"github.com/gs-sinha/sapien/internal/events"
+	"github.com/gs-sinha/sapien/internal/gitsrc"
 )
 
 // defaultGitSyncInterval is the daemon's background git sync period

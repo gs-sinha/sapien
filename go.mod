@@ -1,4 +1,4 @@
-module github.com/growsimplee/sapien
+module github.com/gs-sinha/sapien
 
 go 1.25.7
 

@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/growsimplee/sapien/internal/cli"
+	"github.com/gs-sinha/sapien/internal/cli"
 )
 
 // run executes cli.Execute with args and returns (stdout, stderr, exit code).

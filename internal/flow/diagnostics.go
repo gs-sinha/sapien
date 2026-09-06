@@ -5,8 +5,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/spec"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/spec"
 )
 
 // Diagnostic codes (domain.Diagnostic.Code), grouped by the pass that

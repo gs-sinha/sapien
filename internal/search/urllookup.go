@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/textutil"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/textutil"
 )
 
 // Scores for the ways a pasted path can relate to an operation's path

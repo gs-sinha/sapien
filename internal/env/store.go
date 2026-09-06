@@ -9,8 +9,8 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/errs"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/errs"
 )
 
 // SecretStore stores and retrieves named secret values.

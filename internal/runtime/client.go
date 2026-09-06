@@ -17,7 +17,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/growsimplee/sapien/internal/errs"
+	"github.com/gs-sinha/sapien/internal/errs"
 )
 
 const (

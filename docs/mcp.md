@@ -194,7 +194,7 @@ args = ["mcp", "--workspace", "/path/to/workspace"]
 
 If you don't want a `sapien` binary installed on the host machine, swap
 `"command": "sapien"`, or the shell snippet above, for `npx
-@growsimplee/sapien`. See
+@gs-sinha/sapien`. See
 [`packages/npm/README.md`](../packages/npm/README.md).
 
 Verify with `claude mcp list` and, in a new Claude Code session

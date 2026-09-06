@@ -15,7 +15,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/growsimplee/sapien/fixtures/logistics/mock"
+	"github.com/gs-sinha/sapien/fixtures/logistics/mock"
 )
 
 func main() {

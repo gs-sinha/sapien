@@ -6,8 +6,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/growsimplee/sapien/internal/memory"
-	"github.com/growsimplee/sapien/internal/store"
+	"github.com/gs-sinha/sapien/internal/memory"
+	"github.com/gs-sinha/sapien/internal/store"
 )
 
 // fakeResolver is a table-driven, in-memory memory.Resolver used across this

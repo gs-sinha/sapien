@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/store"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/store"
 )
 
 // ListFlows returns the flows owned by (ownerKind, ownerID). ownerKind == ""

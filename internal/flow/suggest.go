@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/growsimplee/sapien/internal/textutil"
+	"github.com/gs-sinha/sapien/internal/textutil"
 )
 
 // NearestSuggestions is nearestSuggestions, exported for callers outside

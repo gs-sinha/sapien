@@ -10,11 +10,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/env"
-	"github.com/growsimplee/sapien/internal/errs"
-	"github.com/growsimplee/sapien/internal/expr"
-	"github.com/growsimplee/sapien/internal/runtime"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/env"
+	"github.com/gs-sinha/sapien/internal/errs"
+	"github.com/gs-sinha/sapien/internal/expr"
+	"github.com/gs-sinha/sapien/internal/runtime"
 )
 
 const (

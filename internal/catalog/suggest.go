@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/growsimplee/sapien/internal/textutil"
+	"github.com/gs-sinha/sapien/internal/textutil"
 )
 
 type opCandidate struct {

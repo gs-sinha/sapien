@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/store"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/store"
 )
 
 // Apply upserts snap.Service and replaces its catalog contents in one

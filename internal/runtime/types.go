@@ -3,7 +3,7 @@ package runtime
 import (
 	"time"
 
-	"github.com/growsimplee/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/domain"
 )
 
 // Request is a fully-formed HTTP request ready to send.

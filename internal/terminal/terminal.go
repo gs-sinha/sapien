@@ -19,7 +19,7 @@ import (
 
 	"github.com/creack/pty"
 
-	"github.com/growsimplee/sapien/internal/errs"
+	"github.com/gs-sinha/sapien/internal/errs"
 )
 
 // Defaults for Manager.MaxSessions and Manager.IdleTimeout, used when the

@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 
-	"github.com/growsimplee/sapien/internal/domain"
-	"github.com/growsimplee/sapien/internal/textutil"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/textutil"
 )
 
 // docHit accumulates a doc section's running score and its FTS snippet.

@@ -5,7 +5,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/growsimplee/sapien/internal/diagnose"
+	"github.com/gs-sinha/sapien/internal/diagnose"
 )
 
 // runHintsResponse is the wire shape of GET /v1/runs/{id}/hints.
