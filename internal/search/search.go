@@ -502,7 +502,25 @@ func (s *Searcher) lexicalLookup(ctx context.Context, query string, opts domain.
 		}
 
 		if !docFusionActive {
-			list = finalizeLexicalScores(list, limit, tokens, metas, ops)
+			if len(taskIDsFiltered) > 0 {
+				// A task hit is an authored retrieval contract, not just
+				// another additive signal to be outweighed by a big enough
+				// pile of incidental op_id/tag/trigram boosts (the same
+				// scale-mismatch problem semantic/doc fusion solve below):
+				// fuse it by rank via RRF, same as the semanticActive and
+				// docFusionActive branches already do.
+				lexRanked := sortScored(append([]scoredID{}, list...), len(list))
+				list = rrf(idsOf(lexRanked), taskIDsFiltered)
+				if len(list) > 0 && list[0].score > 0 {
+					top := list[0].score
+					for i := range list {
+						list[i].score /= top
+					}
+				}
+				list = sortScored(list, limit)
+			} else {
+				list = finalizeLexicalScores(list, limit, tokens, metas, ops)
+			}
 			results, err = s.buildResults(ctx, list, tokens)
 			if err != nil {
 				return nil, err

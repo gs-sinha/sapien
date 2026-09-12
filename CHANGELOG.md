@@ -6,6 +6,8 @@ and phase numbers refer to PLAN.md §34's roadmap.
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-09-13
+
 ### Added
 - **`/debug/pprof/*` and `/debug/memstats` on the daemon**, behind the same
   loopback Host check and bearer token as every other route, and
@@ -108,8 +110,20 @@ and phase numbers refer to PLAN.md §34's roadmap.
   in use falls back to a random one rather than refusing to start.
 
 ### Fixed
-- **The daemon no longer allocates gigabytes a minute while an agent writes
-  documentation.** A single `sapien serve` was measured at a 13-18 GB
+- **Every parsed contract used to be retained for the life of the daemon.**
+  libopenapi memoizes node hashes, built schemas and JSON paths in eight
+  process-global maps, keyed by pointers into the document being parsed, and
+  nothing evicts them -- so each parse pinned its whole yaml tree and schema
+  graph permanently. Parsing one 1.2 MB contract repeatedly and dropping
+  every reference to it grew the live heap by 16.9 MB each time, still there
+  after a forced GC; a daemon minutes old sat on a 1 GB heap of which 54%
+  was retained libopenapi objects that nothing in Sapien could reach. The
+  library exposes `ClearAllCaches` for precisely this ("call this between
+  document lifecycles in long-running processes"), and `openapi.Ingest`
+  returns nothing but domain types, so it now releases them once the last
+  concurrent ingest is done. On a daemon indexing three services across two
+  workspaces and then taking fourteen contract edits: 385 MB after the
+  startup index and 1562 MB after the edits, down to 19 MB and 21 MB.
   physical footprint after three hours, still climbing at ~4 GB/min, with
   only ~69 MB resident: allocation churn, not a leak. The file watcher
   answers any change under a service package -- `api/docs/*.md` included --

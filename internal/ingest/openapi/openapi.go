@@ -96,6 +96,13 @@ func Ingest(src []byte, opts Options) (*Result, error) {
 		maxDepth = defaultMaxDepth
 	}
 
+	// Everything below builds libopenapi's models, and everything this
+	// function returns is a domain type, so libopenapi's process-global
+	// memoization has nothing left to serve once we return. Release it, or
+	// it pins this document's whole parse tree forever (parsercache.go).
+	retainParserCaches()
+	defer releaseParserCaches()
+
 	doc, err := libopenapi.NewDocument(src)
 	if err != nil {
 		return nil, parseError(err, opts.File)
