@@ -160,7 +160,18 @@ func (l *Local) indexServiceSemantics(ctx context.Context, service string) {
 		}
 		fields[op.ID] = fs
 	}
-	if _, err := l.semIdx.IndexOperations(ctx, ops, fields); err != nil {
+	taskPhrases := map[string][]string{}
+	tasks, err := l.cat.ListTasks(ctx, service)
+	if err != nil {
+		l.logger.Warn("semantic: list tasks failed", "service", service, "error", err)
+	} else {
+		for _, task := range tasks {
+			for _, target := range task.Targets {
+				taskPhrases[target.Operation] = append(taskPhrases[target.Operation], task.Phrases...)
+			}
+		}
+	}
+	if _, err := l.semIdx.IndexOperationsWithTasks(ctx, ops, fields, taskPhrases); err != nil {
 		l.logger.Warn("semantic: index operations failed", "service", service, "error", err)
 	}
 

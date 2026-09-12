@@ -122,6 +122,48 @@ workspace folder is separate from the service repos and can be its own
 git repo, so the flows, memories, and environments you build up are
 versioned too.
 
+## Optional semantic search
+
+Sapien uses its local SQLite task, operation, and documentation indexes by
+default. This needs no model and is the appropriate mode for smaller machines.
+Semantic search is an optional addition to the same `search_apis` results; it
+helps match paraphrases and reports `semantic` in `matched_on` when it
+contributes.
+
+To enable it with a local Ollama model:
+
+```sh
+brew install ollama                  # skip if already installed
+brew services start ollama
+ollama pull nomic-embed-text
+```
+
+Add this to `<workspace>/.sapien/config.yaml`:
+
+```yaml
+semantic:
+  enabled: true
+  kind: ollama
+  base_url: http://127.0.0.1:11434
+  model: nomic-embed-text
+  batch_size: 8
+```
+
+Restart the workspace daemon so it loads the setting:
+
+```sh
+sapien --workspace /absolute/path/to/workspace daemon stop
+sapien --workspace /absolute/path/to/workspace ui
+```
+
+The first start builds vectors in one background worker; later starts reuse
+them. Authored `tasks:` phrases enrich their target operation's existing
+vector rather than creating extra task vectors. Put the same configuration in
+`~/.sapien/config.yaml` to make it the user default for every workspace. A
+workspace can opt out with `semantic: {enabled: false}`. Removing the block or
+setting `enabled: false` leaves all SQLite search behavior available and starts
+no embedding worker.
+
 ## Onboarding services
 
 Most services are not documented well enough for Sapien to index

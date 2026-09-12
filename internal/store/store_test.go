@@ -36,6 +36,9 @@ var expectedTables = []string{
 	"run_steps",
 	"environments",
 	"settings",
+	"tasks",
+	"task_targets",
+	"tasks_fts",
 	"schema_migrations",
 }
 

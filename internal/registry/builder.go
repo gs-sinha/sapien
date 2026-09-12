@@ -219,6 +219,7 @@ func (b *Builder) Build(ctx context.Context, ref domain.ServiceRef) (*Snapshot, 
 	if err != nil {
 		return nil, err
 	}
+	tasks, taskCoverage, taskWarnings := normalizeTasks(name, meta.Tasks, merged.Operations)
 
 	description := meta.Description
 	if description == "" {
@@ -235,9 +236,10 @@ func (b *Builder) Build(ctx context.Context, ref domain.ServiceRef) (*Snapshot, 
 	// read-only cache entry (ingestcache.go), and appending would write into
 	// its backing array -- benign for this Build, a data race for a
 	// concurrent one.
-	allWarnings := make([]domain.LintWarning, 0, len(merged.Warnings)+len(covWarnings))
+	allWarnings := make([]domain.LintWarning, 0, len(merged.Warnings)+len(covWarnings)+len(taskWarnings))
 	allWarnings = append(allWarnings, merged.Warnings...)
 	allWarnings = append(allWarnings, covWarnings...)
+	allWarnings = append(allWarnings, taskWarnings...)
 	unaccepted, accepted := partitionWarnings(allWarnings, meta.AcceptedWarnings)
 
 	svc := domain.Service{
@@ -246,6 +248,7 @@ func (b *Builder) Build(ctx context.Context, ref domain.ServiceRef) (*Snapshot, 
 		Description:      description,
 		Owners:           meta.Owners,
 		Concepts:         meta.Concepts,
+		Tasks:            tasks,
 		Source:           ref.Source,
 		PackageDir:       pkg.Dir,
 		ContractFiles:    relContracts,
@@ -254,9 +257,11 @@ func (b *Builder) Build(ctx context.Context, ref domain.ServiceRef) (*Snapshot, 
 		Warnings:         unaccepted,
 		AcceptedWarnings: accepted,
 		Coverage:         &cov,
+		TaskCoverage:     &taskCoverage,
 		LastIndexed:      time.Now(),
 		Commit:           gitCommit,
 		OperationCount:   len(merged.Operations),
+		WarningRules:     meta.AcceptedWarnings,
 	}
 
 	return &Snapshot{
@@ -267,6 +272,7 @@ func (b *Builder) Build(ctx context.Context, ref domain.ServiceRef) (*Snapshot, 
 		Aliases:       merged.Aliases,
 		Docs:          finalDocs,
 		Flows:         flows,
+		Tasks:         tasks,
 		ContractFiles: contractHashes,
 	}, nil
 }

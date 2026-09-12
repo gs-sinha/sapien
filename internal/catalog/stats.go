@@ -14,6 +14,7 @@ func (c *Catalog) Stats(ctx context.Context) (Stats, error) {
 	}{
 		{&s.Services, `SELECT COUNT(*) FROM services`},
 		{&s.Operations, `SELECT COUNT(*) FROM operations`},
+		{&s.Tasks, `SELECT COUNT(*) FROM tasks`},
 		{&s.Fields, `SELECT COUNT(*) FROM fields`},
 		{&s.Docs, `SELECT COUNT(*) FROM docs`},
 		{&s.Sections, `SELECT COUNT(*) FROM doc_sections`},

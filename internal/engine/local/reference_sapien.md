@@ -54,6 +54,31 @@ guess is exactly what these tools exist to prevent. And when you get a
 call working, save it -- `create_example(run_id)` -- so the next agent
 starts from a payload instead of a schema.
 
+### Choosing whether to use embeddings
+
+`search_apis` always uses the local SQLite index, including authored `tasks:`
+phrases. That path needs no model and is the default. If the machine has spare
+capacity and paraphrase matching would help, semantic search can be enabled in
+the workspace's `.sapien/config.yaml`:
+
+```yaml
+semantic:
+  enabled: true
+  kind: ollama
+  base_url: http://localhost:11434
+  model: nomic-embed-text
+  batch_size: 8
+```
+
+When enabled, one background worker embeds operations and docs. Task phrases
+enrich their target operation's existing vector, so they do not create a
+second vector per task. Results helped by embeddings include `semantic` in
+`matched_on`. Set `enabled: false` or omit the block for SQLite-only search;
+then Sapien starts no semantic worker and makes no embedding calls. The same
+block in `~/.sapien/config.yaml` supplies a user default, and a workspace can
+override it with `semantic: {enabled: false}`. Restart the Sapien daemon after
+changing this setting.
+
 ## Calling through Sapien rather than your own script
 
 A shell script with curl does work. Doing it through `execute_api` (or

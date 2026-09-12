@@ -31,6 +31,7 @@ three (see "Coverage"):
 | the contract | what exists, what it takes, what it returns | `api/openapi.yaml` |
 | the docs | when to call it, what it means, what breaks | `api/docs/*.md` |
 | the examples | what a call that works actually looks like | `example:` in the contract, `api/examples/` |
+| the task index | how callers describe work when they do not know an endpoint name | `tasks:` in `api/service.yaml` |
 
 ## Layout
 
@@ -108,6 +109,15 @@ name: allocation-service            # kebab-case; the prefix of every operation 
 description: Finds eligible riders and creates allocations for orders.
 owners: [allocation-platform]       # teams or people
 concepts: [rider allocation, dispatch, matching, qcom]   # domain terms callers search for
+tasks:
+  - id: allocate-rider
+    phrases: [allocate a rider, dispatch an order, find a courier]
+    targets:
+      - operation: allocate
+    tests:                         # held-out queries; tests are checked, never indexed
+      - query: assign someone to collect this order
+        expect_any: [allocate]
+        top_k: 3
 contracts: [openapi.yaml]           # relative to api/; more than one is allowed
 environments:
   local: { base_url: http://localhost:8082 }
@@ -119,11 +129,27 @@ words a caller would type when they do not know the endpoint name; they
 feed search and link documentation to the service. `environments` are
 hints: the workspace's own environment files decide what actually runs.
 
+`summary` and `description` are indexed by `search_apis`; write them in the
+caller's vocabulary. `tasks` is the operation-level intent index. `phrases`
+contains language callers really use, `targets` maps that language to one or
+more operations, and `when` distinguishes multiple valid targets. Bare
+operation IDs are expanded to `<service>.<operationId>`. A concise task may
+use `phrase: mark delivered, proof of delivery` and `operation: completeTrip`.
+Use `tests` for paraphrases that are not present in `phrases`; after sync,
+Sapien runs each query and emits `UNDISCOVERABLE_OPERATION` when none of
+`expect_any` appears in the top `top_k` results.
+
+Task phrases also enrich their target operation's vector when the workspace
+has optional semantic search enabled. This adds no extra vector per task.
+Semantic search is disabled by default in `.sapien/config.yaml`; task phrase
+and FTS5 retrieval continue to work without it.
+
 ## docs/*.md
 
 One Markdown file per domain area, split by `##` headings. Each heading
-becomes a searchable section, so make headings specific ("QCOM
-allocation rules", not "Rules"). Two files are not optional:
+becomes a searchable section, so write it in the caller's words as well as
+making it specific ("How QCOM orders get a rider", not "derivedStatus state
+machine" or "Rules"). Two files are not optional:
 
 - **`overview.md`** -- the service in one page, for a reader who arrived
   from a search result: what this service owns and what it deliberately
@@ -437,10 +463,12 @@ MCP tools: `get_service("<service-name>")`, `search_apis`, and
    wire faithfully, or the gap is deliberate, accept it in
    `service.yaml`'s `accepted_warnings` with a reason instead of editing
    the contract to silence it (see "Warnings" above).
-6. Confirm from the outside: `get_service`, then a `search_apis` query a
-   caller would plausibly type, then `get_api` on your most important
-   operation to check the request example it now returns is one you would
-   be happy to be handed.
+6. Test retrieval from the outside. Run both `search_apis` and `search_docs`
+   with several phrases a caller would plausibly type. Put important
+   operation queries under `tasks[].tests`; if sync reports
+   `UNDISCOVERABLE_OPERATION`, improve the task phrases, operation summary,
+   or docs and sync again. Then call `get_api` on the important operation and
+   check that its request example is one you would be happy to be handed.
 7. Add the "Sapien" section above to the repo's `CLAUDE.md` or
    `AGENTS.md`, so the next change to the code updates `api/` too.
 8. Record anything you learned that does not belong in the contract or

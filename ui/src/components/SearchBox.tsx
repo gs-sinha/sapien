@@ -8,7 +8,7 @@ export function SearchBox() {
   const go = () => {
     const q = value.trim();
     if (!q) return;
-    navigate(`/ui/operations?intent=${encodeURIComponent(q)}`);
+    navigate(`/ui/operations?q=${encodeURIComponent(q)}`);
   };
 
   return (

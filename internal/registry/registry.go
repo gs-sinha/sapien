@@ -26,6 +26,7 @@ type Snapshot struct {
 	Aliases       []domain.Alias
 	Docs          []domain.Doc
 	Flows         []domain.FlowSummary
+	Tasks         []domain.Task
 	ContractFiles map[string]string // relative path -> sha256 hex digest
 }
 
@@ -35,4 +36,22 @@ type Indexer interface {
 	Apply(ctx context.Context, snap Snapshot) (domain.CatalogChange, error)
 	MarkServiceError(ctx context.Context, svc domain.Service, msg string) error
 	RemoveService(ctx context.Context, id string) error
+}
+
+// TaskReviewer is an optional second phase implemented by an indexer that
+// can run held-out task assertions through the production search path after
+// Apply has made the new task index visible.
+type TaskReviewer interface {
+	ReviewTasks(ctx context.Context, snap Snapshot) (domain.Service, error)
+}
+
+// AcceptWarning applies one service.yaml warning rule set to a warning.
+func AcceptWarning(w domain.LintWarning, rules []domain.AcceptedWarning) (domain.AcceptedLintWarning, bool) {
+	reason, ok := firstMatchingReason(w, rules)
+	return domain.AcceptedLintWarning{LintWarning: w, Reason: reason}, ok
+}
+
+// WarningMatches reports whether a service.yaml acceptance rule matches a warning.
+func WarningMatches(w domain.LintWarning, rule domain.AcceptedWarning) bool {
+	return warningMatchesRule(w, rule)
 }

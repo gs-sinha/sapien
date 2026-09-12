@@ -225,6 +225,16 @@ func (s *Searcher) lexicalLookup(ctx context.Context, query string, opts domain.
 	tokens := filterStopWords(allTokens)
 
 	combined := map[string]float64{}
+	taskScores, taskMatches, err := s.taskOperationRanking(ctx, tokens, opts.Service)
+	if err != nil {
+		return nil, err
+	}
+	for id, score := range taskScores {
+		// Authored task phrases are explicit retrieval contracts. Give them a
+		// stronger contribution than a single operation-text ranker hit while
+		// retaining the normal filters and semantic/doc fusion below.
+		combined[id] += score * 2
+	}
 
 	andRaw, err := s.ftsOperationsRaw(ctx, BuildMatch(tokens, "and"))
 	if err != nil {
@@ -262,7 +272,6 @@ func (s *Searcher) lexicalLookup(ctx context.Context, query string, opts domain.
 	for id := range combined {
 		lexicalIDs = append(lexicalIDs, id)
 	}
-
 	// Usage feedback (search ranking tuning task, part 2): load
 	// search_feedback rows for this query's non-generic tokens and
 	// aggregate per operation. An operation with enough total feedback
@@ -273,7 +282,7 @@ func (s *Searcher) lexicalLookup(ctx context.Context, query string, opts domain.
 	// top score" it's capped relative to is known, right before scoring
 	// (see the feedbackApplied block after the filters loop).
 	feedbackByOp := map[string]feedbackAgg{}
-	if feedbackTerms := nonGenericTokens(tokens); len(feedbackTerms) > 0 {
+	if feedbackTerms := nonGenericTokens(tokens); !opts.Deterministic && len(feedbackTerms) > 0 {
 		feedbackRows, ferr := s.loadFeedback(ctx, feedbackTerms)
 		if ferr != nil {
 			return nil, ferr
@@ -290,7 +299,8 @@ func (s *Searcher) lexicalLookup(ctx context.Context, query string, opts domain.
 	// "nothing matched" check, so a query lexical search misses entirely
 	// can still surface semantic-only hits.
 	var semHits []SemanticHit
-	if s.sem != nil {
+	semanticActive := s.sem != nil && !opts.Deterministic
+	if semanticActive {
 		var serr error
 		semHits, serr = s.sem.Query(ctx, "operation", query, limit*2)
 		if serr != nil {
@@ -309,6 +319,9 @@ func (s *Searcher) lexicalLookup(ctx context.Context, query string, opts domain.
 	// search misses entirely can still surface an operation the docs ranker
 	// alone found.
 	fusionCfg := effectiveDocFusionConfig()
+	if opts.Deterministic {
+		fusionCfg.mode = docFusionOff
+	}
 	var docRanking docOpRanking
 	if fusionCfg.mode != docFusionOff {
 		docRanking, err = s.docFusionRanking(ctx, tokens, fusionCfg.scope)
@@ -437,6 +450,17 @@ func (s *Searcher) lexicalLookup(ctx context.Context, query string, opts domain.
 			combined[id] *= 0.5
 		}
 	}
+	taskRanked := make([]scoredID, 0, len(taskScores))
+	for id, score := range taskScores {
+		if _, ok := combined[id]; ok {
+			taskRanked = append(taskRanked, scoredID{id: id, score: score})
+		}
+	}
+	taskRanked = sortScored(taskRanked, len(taskRanked))
+	taskIDsFiltered := make([]string, len(taskRanked))
+	for idx, item := range taskRanked {
+		taskIDsFiltered[idx] = item.id
+	}
 
 	// Apply the usage-feedback boost now that "the top score" (every other
 	// boost and filter already applied, feedback not yet added) is known.
@@ -471,7 +495,7 @@ func (s *Searcher) lexicalLookup(ctx context.Context, query string, opts domain.
 	}
 
 	var results []domain.SearchResult
-	if s.sem == nil {
+	if !semanticActive {
 		list := make([]scoredID, 0, len(combined))
 		for id, score := range combined {
 			list = append(list, scoredID{id: id, score: score})
@@ -490,7 +514,7 @@ func (s *Searcher) lexicalLookup(ctx context.Context, query string, opts domain.
 			switch fusionCfg.mode {
 			case docFusionRRF:
 				lexRanked := sortScored(append([]scoredID{}, list...), len(list))
-				finalList = rrf(idsOf(lexRanked), docIDsFiltered)
+				finalList = rrf(idsOf(lexRanked), taskIDsFiltered, docIDsFiltered)
 				if len(finalList) > 0 && finalList[0].score > 0 {
 					top := finalList[0].score
 					for i := range finalList {
@@ -554,14 +578,14 @@ func (s *Searcher) lexicalLookup(ctx context.Context, query string, opts domain.
 
 		var fused []scoredID
 		if !docFusionActive {
-			fused = rrf(lexIDs, semIDs)
+			fused = rrf(lexIDs, semIDs, taskIDsFiltered)
 		} else {
-			preFusionRank = rankIndex(rrf(lexIDs, semIDs))
+			preFusionRank = rankIndex(rrf(lexIDs, semIDs, taskIDsFiltered))
 			switch fusionCfg.mode {
 			case docFusionRRF:
-				fused = rrf(lexIDs, semIDs, docIDsFiltered)
+				fused = rrf(lexIDs, semIDs, taskIDsFiltered, docIDsFiltered)
 			case docFusionWeighted:
-				base := rrf(lexIDs, semIDs)
+				base := rrf(lexIDs, semIDs, taskIDsFiltered)
 				normalizeScores(base)
 				merged := weightedFuseScores(scoreMap(base), filteredDocScore, fusionCfg.weight)
 				fused = make([]scoredID, 0, len(merged))
@@ -611,6 +635,12 @@ func (s *Searcher) lexicalLookup(ctx context.Context, query string, opts domain.
 		}
 		for i := range results {
 			id := results[i].Operation.ID
+			if matches := taskMatches[id]; len(matches) > 0 {
+				results[i].Tasks = matches
+				for _, match := range matches {
+					results[i].MatchedOn = appendMatchedOnUnique(results[i].MatchedOn, "task:"+match.ID)
+				}
+			}
 			if docHits[id] {
 				results[i].MatchedOn = append(results[i].MatchedOn, "docs")
 			}

@@ -3,24 +3,18 @@ import { useSearchParams } from 'react-router-dom';
 import { IntentBundle } from './operations/IntentBundle';
 import { KeywordSearch } from './operations/KeywordSearch';
 
-function wordCount(s: string): number {
-  return s.trim().split(/\s+/).filter(Boolean).length;
-}
-
 // looksLikePath: a pasted URL or path ("/v1/orders", "POST /v1/orders/123",
-// "https://host/base/v1/orders?x=1", "v1/orders") is a keyword lookup, never
-// an intent, however many words it has; the daemon resolves it against the
-// operations' path templates.
+// "https://host/base/v1/orders?x=1", "v1/orders") is resolved by the same
+// operation search endpoint as natural-language text.
 export function looksLikePath(s: string): boolean {
   const t = s.trim();
   return /^(?:[A-Za-z]+\s+)?(?:https?:\/\/|\/|[\w.-]+\/[\w{}.-])/.test(t) && !/\s.*\s/.test(t.replace(/^[A-Za-z]+\s+/, ''));
 }
 
-// Operations page with intent search (build brief item 3): one search box.
-// More than two words (or an explicit ?intent=, e.g. from the layout's own
-// SearchBox) builds a context bundle; otherwise it's a plain keyword/catalog
-// search. The URL is the source of truth for which mode is active and what
-// was searched, so a result is always a shareable link.
+// Operations page with one search box. Every submitted query, including a
+// natural-language intent, first uses ranked operation search. Building the
+// broader context bundle is an explicit action represented by ?intent=, so a
+// search never unexpectedly expands into docs, memories, flows and runs.
 export default function OperationsPage() {
   const [params, setParams] = useSearchParams();
   const intentParam = params.get('intent') || '';
@@ -36,7 +30,7 @@ export default function OperationsPage() {
   const [method, setMethod] = useState(methodParam);
 
   // Keep the form in sync when the URL changes from outside this form
-  // (back/forward navigation, or the layout's SearchBox setting ?intent=).
+  // (back/forward navigation, or the layout's SearchBox setting ?q=).
   useEffect(() => {
     setText(isIntent ? intentParam : effectiveQ);
     setService(serviceParam);
@@ -49,15 +43,17 @@ export default function OperationsPage() {
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = text.trim();
-    if (wordCount(trimmed) > 2 && !looksLikePath(trimmed)) {
-      setParams({ intent: trimmed });
-      return;
-    }
     const next: Record<string, string> = {};
     if (trimmed) next.q = trimmed;
     if (service.trim()) next.service = service.trim();
     if (method.trim()) next.method = method.trim();
     setParams(next);
+  };
+
+  const buildContext = () => {
+    const trimmed = text.trim();
+    if (!trimmed || looksLikePath(trimmed)) return;
+    setParams({ intent: trimmed });
   };
 
   return (
@@ -89,11 +85,19 @@ export default function OperationsPage() {
         <button type="submit" className="rounded border border-slate-300 px-3 py-1 text-sm dark:border-slate-700">
           Search
         </button>
+        <button
+          type="button"
+          onClick={buildContext}
+          disabled={!text.trim() || looksLikePath(text)}
+          className="rounded border border-slate-300 px-3 py-1 text-sm disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700"
+        >
+          Build context
+        </button>
       </form>
       <p className="mb-3 text-xs text-slate-400">
         {isIntent
-          ? 'Intent mode: building an agent-ready context bundle.'
-          : 'Keyword mode. Type more than two words to search by intent instead.'}
+          ? 'Context mode: building an agent-ready bundle for this intent.'
+          : 'Search mode: keywords, paths, and natural-language intents use ranked operation search.'}
       </p>
 
       {isIntent ? <IntentBundle intent={intentParam} /> : <KeywordSearch query={effectiveQ} service={serviceParam} method={methodParam} />}

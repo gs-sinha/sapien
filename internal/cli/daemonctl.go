@@ -208,6 +208,13 @@ var (
 	findDaemonAttempts = 3
 	// findDaemonRetryDelay is the pause between them.
 	findDaemonRetryDelay = 1 * time.Second
+	// spawnDaemonHandshakeTimeout covers Local.Open's synchronous startup
+	// work before serve can publish daemon.json. Large workspaces can spend
+	// more than ten seconds checking and refreshing their catalog, especially
+	// on the first start after enabling semantic search. The child is healthy
+	// and keeps starting during that work, so timing out early only leaves an
+	// orphan that the user's next command has to rediscover.
+	spawnDaemonHandshakeTimeout = 60 * time.Second
 )
 
 // findDaemon is daemon.Find with a bounded retry for the one outcome worth
@@ -339,7 +346,7 @@ func spawnDaemon(ctx context.Context, ws *domain.Workspace, version string) (*da
 			return nil, h.err
 		}
 		return h.info, nil
-	case <-time.After(10 * time.Second):
+	case <-time.After(spawnDaemonHandshakeTimeout):
 		return nil, errs.New(errs.Internal, "timed out waiting for the spawned daemon's handshake")
 	case <-ctx.Done():
 		return nil, ctx.Err()

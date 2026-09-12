@@ -23,6 +23,7 @@ type Snapshot struct {
 	// Service.ID). Workspace-owned flows are managed separately via
 	// Catalog.UpsertFlows("workspace", "", flows).
 	Flows []domain.FlowSummary
+	Tasks []domain.Task
 
 	// ContractFiles maps a contract file's path (relative to the service
 	// package) to its content hash.

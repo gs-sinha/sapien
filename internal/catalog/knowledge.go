@@ -246,6 +246,9 @@ func (c *Catalog) Reindex(ctx context.Context) error {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM operations_trigram`); err != nil {
 			return fmt.Errorf("catalog: reindex: clear operations_trigram: %w", err)
 		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM tasks_fts`); err != nil {
+			return fmt.Errorf("catalog: reindex: clear tasks_fts: %w", err)
+		}
 
 		rows, err := tx.QueryContext(ctx, `
 			SELECT o.id, o.doc_json, sv.name
@@ -307,6 +310,32 @@ func (c *Catalog) Reindex(ctx context.Context) error {
 
 			ids = append(ids, r.id)
 		}
+
+		taskRows, err := tx.QueryContext(ctx, `SELECT t.id, t.doc_json, sv.name FROM tasks t JOIN services sv ON sv.id = t.service_id`)
+		if err != nil {
+			return fmt.Errorf("catalog: reindex: list tasks: %w", err)
+		}
+		for taskRows.Next() {
+			var id, docJSON, serviceName string
+			if err := taskRows.Scan(&id, &docJSON, &serviceName); err != nil {
+				taskRows.Close()
+				return fmt.Errorf("catalog: reindex: scan task: %w", err)
+			}
+			var task domain.Task
+			if err := store.UnmarshalJSON(docJSON, &task); err != nil {
+				taskRows.Close()
+				return fmt.Errorf("catalog: reindex: unmarshal task %q: %w", id, err)
+			}
+			if _, err := tx.ExecContext(ctx, `INSERT INTO tasks_fts (task_id, service, phrases) VALUES (?, ?, ?)`, id, serviceName, strings.Join(task.Phrases, " ")); err != nil {
+				taskRows.Close()
+				return fmt.Errorf("catalog: reindex: insert tasks_fts %q: %w", id, err)
+			}
+		}
+		if err := taskRows.Err(); err != nil {
+			taskRows.Close()
+			return fmt.Errorf("catalog: reindex: iterate tasks: %w", err)
+		}
+		taskRows.Close()
 
 		return c.refreshOperationKnowledgeTx(ctx, tx, ids)
 	})

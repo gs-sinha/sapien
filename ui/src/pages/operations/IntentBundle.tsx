@@ -1,7 +1,7 @@
 // Renders a POST /v1/context bundle in tiers (PLAN §14 / PRD §43): contract
 // (operations), documentation, examples, memories, then flows and runs if
-// the bundle carries any. Used by OperationsPage when the search box's text
-// looks like an intent (more than two words) or ?intent= is set.
+// the bundle carries any. Used by OperationsPage after the explicit
+// "Build context" action, represented by ?intent= in the shareable URL.
 import { Link } from 'react-router-dom';
 import { buildContext } from '../../api/client';
 import { useAsync } from '../../lib/useAsync';

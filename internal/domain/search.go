@@ -2,9 +2,10 @@ package domain
 
 // SearchResult is one operation hit.
 type SearchResult struct {
-	Operation Operation `json:"operation"`
-	Score     float64   `json:"score"`
-	MatchedOn []string  `json:"matched_on,omitempty"` // "op_id", "path", "summary", "field:qcomSkill", ...
+	Operation Operation   `json:"operation"`
+	Score     float64     `json:"score"`
+	MatchedOn []string    `json:"matched_on,omitempty"` // "op_id", "path", "summary", "field:qcomSkill", ...
+	Tasks     []TaskMatch `json:"tasks,omitempty"`
 }
 
 // DocSearchResult is one doc-section hit.
@@ -26,6 +27,10 @@ type SearchOptions struct {
 	Method            string
 	Limit             int
 	IncludeDeprecated bool
+	// Deterministic disables mutable/optional rankers (usage feedback,
+	// semantic vectors, and experimental doc fusion). Task retrieval tests
+	// use it so the same service.yaml produces the same diagnostics.
+	Deterministic bool
 }
 
 // ContextRequest asks the context builder for an agent-ready bundle (PLAN §14).

@@ -13,7 +13,9 @@ package local
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/gs-sinha/sapien/internal/catalog"
@@ -148,7 +150,7 @@ func Open(ws *domain.Workspace, opts Options) (*Local, error) {
 	cat := catalog.New(db)
 	srch := search.New(db)
 	bus := events.New()
-	syncer := registry.NewSyncer(ws, &catalogIndexer{cat: cat}, bus)
+	syncer := registry.NewSyncer(ws, &catalogIndexer{cat: cat, srch: srch}, bus)
 
 	gitCacheDir := opts.GitCacheDir
 	if gitCacheDir == "" {
@@ -306,7 +308,78 @@ func (l *Local) Close() error {
 // and catalog.Snapshot mirror each other field-for-field (same field names,
 // order, and types), so the conversion is a plain struct conversion.
 type catalogIndexer struct {
-	cat *catalog.Catalog
+	cat  *catalog.Catalog
+	srch *search.Searcher
+}
+
+func (i *catalogIndexer) ReviewTasks(ctx context.Context, snap registry.Snapshot) (domain.Service, error) {
+	svc, err := i.cat.GetService(ctx, snap.Service.ID)
+	if err != nil {
+		return domain.Service{}, err
+	}
+	// Builder ran acceptance before runtime retrieval assertions existed.
+	// Recompute stale acceptances now that both static and runtime warnings
+	// are known.
+	filtered := svc.Warnings[:0]
+	for _, warning := range svc.Warnings {
+		if warning.Code != "STALE_ACCEPTANCE" {
+			filtered = append(filtered, warning)
+		}
+	}
+	svc.Warnings = filtered
+	matchedRules := make([]bool, len(snap.Service.WarningRules))
+	for ri, rule := range snap.Service.WarningRules {
+		for _, accepted := range svc.AcceptedWarnings {
+			if registry.WarningMatches(accepted.LintWarning, rule) {
+				matchedRules[ri] = true
+			}
+		}
+	}
+
+	coverage := domain.TaskCoverage{Tasks: len(snap.Tasks)}
+	for _, task := range snap.Tasks {
+		for _, test := range task.Tests {
+			coverage.Assertions++
+			results, err := i.srch.Operations(ctx, test.Query, domain.SearchOptions{Service: svc.Name, Limit: test.TopK, Deterministic: true})
+			if err != nil {
+				return domain.Service{}, err
+			}
+			found := false
+			for _, result := range results {
+				for _, expected := range test.ExpectAny {
+					if result.Operation.ID == expected {
+						found = true
+					}
+				}
+			}
+			if found {
+				coverage.Discoverable++
+				continue
+			}
+			warning := domain.LintWarning{Code: "UNDISCOVERABLE_OPERATION", Message: fmt.Sprintf("task %q query %q did not return any of %s in the top %d", task.ID, test.Query, strings.Join(test.ExpectAny, ", "), test.TopK), Source: &domain.SourceLoc{File: "service.yaml", Pointer: "/tasks/" + task.ID + "/tests"}}
+			accepted, ok := registry.AcceptWarning(warning, snap.Service.WarningRules)
+			if ok {
+				svc.AcceptedWarnings = append(svc.AcceptedWarnings, accepted)
+				for ri, rule := range snap.Service.WarningRules {
+					if registry.WarningMatches(warning, rule) {
+						matchedRules[ri] = true
+					}
+				}
+			} else {
+				svc.Warnings = append(svc.Warnings, warning)
+			}
+		}
+	}
+	for ri, rule := range snap.Service.WarningRules {
+		if !matchedRules[ri] {
+			svc.Warnings = append(svc.Warnings, domain.LintWarning{Code: "STALE_ACCEPTANCE", Message: fmt.Sprintf("accepted_warnings entry for %s (match %q) matches no warning; remove it", rule.Code, rule.Match)})
+		}
+	}
+	svc.TaskCoverage = &coverage
+	if err := i.cat.UpdateServiceDiagnostics(ctx, *svc); err != nil {
+		return domain.Service{}, err
+	}
+	return *svc, nil
 }
 
 func (i *catalogIndexer) Apply(ctx context.Context, snap registry.Snapshot) (domain.CatalogChange, error) {

@@ -116,6 +116,35 @@ Supported clients:
 Codex and Cursor configs are global by nature, so both are available
 everywhere too, the same as `claude-code` with `--scope user`.
 
+### Optional semantic search
+
+Sapien's SQLite task, operation, and documentation search runs without an
+embedding model. Semantic search is opt-in and is disabled by default, which
+is usually the right setting for a smaller machine or for a catalog whose
+authored task phrases already retrieve well.
+
+Enable it for one workspace in `<workspace>/.sapien/config.yaml`, or use the
+same block in `~/.sapien/config.yaml` to enable it by default for every
+workspace:
+
+```yaml
+semantic:
+  enabled: true
+  kind: ollama
+  base_url: http://localhost:11434
+  model: nomic-embed-text
+  batch_size: 8
+```
+
+Set `enabled: false` or remove the block to use SQLite-only retrieval. A
+workspace setting overrides the user setting, so a smaller machine can put
+`semantic: {enabled: false}` in that workspace even when the user default is
+enabled. When disabled, Sapien starts no semantic worker and makes no embedding
+calls. When enabled, one background worker embeds operations and docs; authored
+task phrases enrich their target operation's existing vector and do not add
+extra vectors. Search results that semantic retrieval helped carry
+`matched_on: semantic`. Restart the Sapien daemon after changing this setting.
+
 Verify with:
 
 ```sh

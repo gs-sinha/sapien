@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import OperationsPage from '../pages/OperationsPage';
 import type { ContextBundle, Operation, SearchResult } from '../api/types';
 
@@ -26,7 +26,8 @@ const searchHit: SearchResult = {
     hash: 'h2',
   },
   score: 0.87,
-  matched_on: ['summary'],
+  matched_on: ['task:allocate-rider'],
+  tasks: [{ id: 'allocate-rider', phrase: 'allocate a rider', when: 'the order is ready for dispatch' }],
 };
 
 const bundle: ContextBundle = {
@@ -49,17 +50,29 @@ const bundle: ContextBundle = {
   estimated_tokens: 123,
 };
 
+const { searchOperations, buildContext } = vi.hoisted(() => ({
+  searchOperations: vi.fn(),
+  buildContext: vi.fn(),
+}));
+
 vi.mock('../api/client', () => ({
   operations: {
-    search: vi.fn(async (params: { query?: string }): Promise<SearchResult[] | Operation[]> => {
-      if (params.query) return [searchHit];
-      return [listOp];
-    }),
+    search: searchOperations,
   },
-  buildContext: vi.fn(async (): Promise<ContextBundle> => bundle),
+  buildContext,
 }));
 
 describe('OperationsPage', () => {
+  beforeEach(() => {
+    searchOperations.mockReset();
+    searchOperations.mockImplementation(async (params: { query?: string }): Promise<SearchResult[] | Operation[]> => {
+      if (params.query) return [searchHit];
+      return [listOp];
+    });
+    buildContext.mockReset();
+    buildContext.mockImplementation(async (): Promise<ContextBundle> => bundle);
+  });
+
   it('defaults to keyword/list mode', async () => {
     render(
       <MemoryRouter initialEntries={['/ui/operations']}>
@@ -68,10 +81,10 @@ describe('OperationsPage', () => {
     );
 
     await waitFor(() => expect(screen.getByText('orders.listOrders')).toBeInTheDocument());
-    expect(screen.getByText(/keyword mode/i)).toBeInTheDocument();
+    expect(screen.getByText(/search mode/i)).toBeInTheDocument();
   });
 
-  it('switches to intent mode and renders bundle tiers when the search text looks like an intent', async () => {
+  it('uses ranked operation search for natural-language intent text', async () => {
     const user = userEvent.setup();
     render(
       <MemoryRouter initialEntries={['/ui/operations']}>
@@ -84,8 +97,27 @@ describe('OperationsPage', () => {
     await user.clear(input);
     await user.type(input, 'allocate a rider to this order{Enter}');
 
-    await waitFor(() => expect(screen.getByText(/intent mode/i)).toBeInTheDocument());
-    await waitFor(() => expect(screen.getByRole('link', { name: /orders\.createOrder/ })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getAllByRole('link', { name: /orders\.createOrder/ })).not.toHaveLength(0));
+    expect(searchOperations).toHaveBeenLastCalledWith({ query: 'allocate a rider to this order', service: undefined, method: undefined });
+    expect(buildContext).not.toHaveBeenCalled();
+    expect(screen.getByText('task: allocate-rider')).toBeInTheDocument();
+    expect(screen.getByText('allocate a rider')).toBeInTheDocument();
+    expect(screen.getByText('When: the order is ready for dispatch')).toBeInTheDocument();
+  });
+
+  it('builds the broader context bundle only after the explicit action', async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter initialEntries={['/ui/operations?q=allocate+a+rider+to+this+order']}>
+        <OperationsPage />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(screen.getAllByRole('link', { name: /orders\.createOrder/ })).not.toHaveLength(0));
+    await user.click(screen.getByRole('button', { name: 'Build context' }));
+
+    await waitFor(() => expect(screen.getByText(/context mode/i)).toBeInTheDocument());
+    await waitFor(() => expect(buildContext).toHaveBeenCalledWith({ intent: 'allocate a rider to this order', budget_tokens: 6000 }));
     expect(screen.getByText(/allocation/i)).toBeInTheDocument();
     expect(screen.getByText('ex1')).toBeInTheDocument();
     expect(screen.getByText(/watch out for timeouts/i)).toBeInTheDocument();

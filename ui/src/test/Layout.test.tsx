@@ -23,7 +23,7 @@ describe('layout shell', () => {
     }
   });
 
-  it('search box navigates to /ui/operations?intent=<text>', async () => {
+  it('search box navigates to ranked operation search', async () => {
     const user = userEvent.setup();
     let current = '';
     render(
@@ -36,6 +36,6 @@ describe('layout shell', () => {
     const input = screen.getByPlaceholderText(/search intent/i);
     await user.type(input, 'allocate rider{Enter}');
 
-    expect(current).toBe('/ui/operations?intent=allocate%20rider');
+    expect(current).toBe('/ui/operations?q=allocate%20rider');
   });
 });

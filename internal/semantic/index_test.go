@@ -130,6 +130,32 @@ func TestIndexOperations_FieldsContributeToText(t *testing.T) {
 	assert.Equal(t, 1, n, "dropping the field leaves changes the embedded text")
 }
 
+func TestIndexOperations_TaskPhrasesContributeWithoutExtraVectors(t *testing.T) {
+	db := openTestDB(t)
+	emb := newFakeEmbedder("m")
+	idx := semantic.NewIndex(db, emb)
+	ctx := context.Background()
+	op := riderOp()
+
+	n, err := idx.IndexOperationsWithTasks(ctx, []domain.Operation{op}, nil, map[string][]string{
+		op.ID: {"mark a delivery as delivered", "proof of delivery"},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 1, n)
+	stats, err := idx.Stats(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, 1, stats.ByKind[semantic.KindOperation], "task phrases enrich the operation vector instead of adding vectors")
+
+	n, err = idx.IndexOperationsWithTasks(ctx, []domain.Operation{op}, nil, map[string][]string{
+		op.ID: {"record proof of delivery"},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 1, n, "changing task phrases must refresh the existing operation vector")
+	stats, err = idx.Stats(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, 1, stats.ByKind[semantic.KindOperation])
+}
+
 func TestIndexOperations_ModelChangeForcesReembed(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()

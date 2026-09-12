@@ -64,6 +64,7 @@ type GetServiceOutput struct {
 	Description      string                       `json:"description,omitempty"`
 	Owners           []string                     `json:"owners,omitempty"`
 	Concepts         []string                     `json:"concepts,omitempty"`
+	Tasks            []domain.Task                `json:"tasks,omitempty"`
 	Environments     map[string]domain.EnvHint    `json:"environments,omitempty"`
 	Docs             []string                     `json:"docs,omitempty"`
 	OperationCount   int                          `json:"operation_count"`
@@ -86,7 +87,7 @@ func (s *server) getService(ctx context.Context, req *sdkmcp.CallToolRequest, in
 	}
 	out := GetServiceOutput{
 		Name: svc.Name, Description: svc.Description, Owners: svc.Owners,
-		Concepts: svc.Concepts, Environments: svc.Environments, OperationCount: svc.OperationCount,
+		Concepts: svc.Concepts, Tasks: svc.Tasks, Environments: svc.Environments, OperationCount: svc.OperationCount,
 		Coverage: svc.Coverage, Warnings: svc.Warnings, AcceptedWarnings: svc.AcceptedWarnings,
 	}
 	for _, d := range docs {
@@ -108,7 +109,7 @@ func (s *server) getService(ctx context.Context, req *sdkmcp.CallToolRequest, in
 
 // SearchAPIsInput is search_apis' arguments.
 type SearchAPIsInput struct {
-	Query   string `json:"query" jsonschema:"full-text query over operation id, path, summary, description, tags, params, and field names"`
+	Query   string `json:"query" jsonschema:"caller intent or full-text query over authored task phrases, operation id, path, summary, description, tags, params, and field names"`
 	Service string `json:"service,omitempty" jsonschema:"restrict results to this service name"`
 	Method  string `json:"method,omitempty" jsonschema:"restrict results to this HTTP method (GET, POST, ...)"`
 	Limit   int    `json:"limit,omitempty" jsonschema:"maximum number of results; default 10"`
@@ -116,12 +117,13 @@ type SearchAPIsInput struct {
 
 // APIHit is one search_apis result.
 type APIHit struct {
-	ID        string   `json:"id"`
-	Method    string   `json:"method"`
-	Path      string   `json:"path"`
-	Summary   string   `json:"summary,omitempty"`
-	Score     float64  `json:"score"`
-	MatchedOn []string `json:"matched_on,omitempty"`
+	ID        string             `json:"id"`
+	Method    string             `json:"method"`
+	Path      string             `json:"path"`
+	Summary   string             `json:"summary,omitempty"`
+	Score     float64            `json:"score"`
+	MatchedOn []string           `json:"matched_on,omitempty"`
+	Tasks     []domain.TaskMatch `json:"tasks,omitempty"`
 }
 
 // SearchAPIsOutput is search_apis' structured output.
@@ -146,9 +148,16 @@ func (s *server) searchAPIs(ctx context.Context, req *sdkmcp.CallToolRequest, in
 	for _, r := range results {
 		out.Results = append(out.Results, APIHit{
 			ID: r.Operation.ID, Method: methodOf(r.Operation), Path: pathOf(r.Operation),
-			Summary: r.Operation.Summary, Score: r.Score, MatchedOn: r.MatchedOn,
+			Summary: r.Operation.Summary, Score: r.Score, MatchedOn: r.MatchedOn, Tasks: r.Tasks,
 		})
 		fmt.Fprintf(&b, "- %s %s %s — %s (score %.2f)\n", methodOf(r.Operation), pathOf(r.Operation), r.Operation.ID, r.Operation.Summary, r.Score)
+		for _, task := range r.Tasks {
+			fmt.Fprintf(&b, "  task %s: %s", task.ID, task.Phrase)
+			if task.When != "" {
+				fmt.Fprintf(&b, " (when %s)", task.When)
+			}
+			b.WriteByte('\n')
+		}
 	}
 	if len(out.Results) == 0 {
 		b.WriteString("no matches\n")

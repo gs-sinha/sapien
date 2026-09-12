@@ -112,6 +112,7 @@ func (c *Catalog) ensureKnowledgeSchema(ctx context.Context) {
 type Stats struct {
 	Services   int `json:"services"`
 	Operations int `json:"operations"`
+	Tasks      int `json:"tasks"`
 	Fields     int `json:"fields"`
 	Docs       int `json:"docs"`
 	Sections   int `json:"sections"`

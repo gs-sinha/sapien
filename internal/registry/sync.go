@@ -274,6 +274,17 @@ func (s *Syncer) syncRef(ctx context.Context, ref domain.ServiceRef, fetch bool)
 		s.fail(ctx, svc, err)
 		return svc, err
 	}
+	if reviewer, ok := s.idx.(TaskReviewer); ok {
+		reviewed, reviewErr := reviewer.ReviewTasks(ctx, *snap)
+		if reviewErr != nil {
+			svc := snap.Service
+			svc.Status = domain.SyncError
+			svc.Error = reviewErr.Error()
+			s.fail(ctx, svc, reviewErr)
+			return svc, reviewErr
+		}
+		snap.Service = reviewed
+	}
 
 	s.emit(domain.EventCatalogChanged, change)
 	return snap.Service, nil

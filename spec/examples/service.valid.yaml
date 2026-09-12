@@ -3,6 +3,15 @@ name: allocation-service
 description: Finds eligible riders and creates allocations.
 owners: [allocation-platform]
 concepts: [rider allocation, dispatch, matching]
+tasks:
+  - id: allocate-rider
+    phrases: [allocate a rider, dispatch an order]
+    targets:
+      - operation: allocate
+    tests:
+      - query: assign a courier to this order
+        expect_any: [allocate]
+        top_k: 3
 contracts: [openapi.yaml]
 environments:
   local:   { base_url: http://localhost:8080 }

@@ -41,6 +41,7 @@ type ServiceMetadata struct {
 	Description      string             `yaml:"description,omitempty" json:"description,omitempty"`
 	Owners           []string           `yaml:"owners,omitempty" json:"owners,omitempty"`
 	Concepts         []string           `yaml:"concepts,omitempty" json:"concepts,omitempty"`
+	Tasks            []Task             `yaml:"tasks,omitempty" json:"tasks,omitempty"`
 	Contracts        []string           `yaml:"contracts,omitempty" json:"contracts,omitempty"`
 	Environments     map[string]EnvHint `yaml:"environments,omitempty" json:"environments,omitempty"`
 	AcceptedWarnings []AcceptedWarning  `yaml:"accepted_warnings,omitempty" json:"accepted_warnings,omitempty"`
@@ -76,6 +77,7 @@ type Service struct {
 	Description      string                `json:"description,omitempty"`
 	Owners           []string              `json:"owners,omitempty"`
 	Concepts         []string              `json:"concepts,omitempty"`
+	Tasks            []Task                `json:"tasks,omitempty"`
 	Source           Source                `json:"source"`
 	PackageDir       string                `json:"package_dir"` // absolute path of the resolved API package directory
 	ContractFiles    []string              `json:"contract_files,omitempty"`
@@ -85,9 +87,11 @@ type Service struct {
 	Warnings         []LintWarning         `json:"warnings,omitempty"`
 	AcceptedWarnings []AcceptedLintWarning `json:"accepted_warnings,omitempty"`
 	Coverage         *DocCoverage          `json:"coverage,omitempty"`
+	TaskCoverage     *TaskCoverage         `json:"task_coverage,omitempty"`
 	LastIndexed      time.Time             `json:"last_indexed,omitempty"`
 	Commit           string                `json:"commit,omitempty"` // git sources: resolved commit
 	OperationCount   int                   `json:"operation_count"`
+	WarningRules     []AcceptedWarning     `json:"-" yaml:"-"`
 }
 
 // LintWarning is a non-fatal problem found while ingesting a contract.

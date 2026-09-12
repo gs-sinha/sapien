@@ -26,6 +26,9 @@ version: 1
 name: allocation-service
 owners: [allocation-platform]
 concepts: [rider allocation]
+tasks:
+  - phrase: allocate a rider, dispatch an order
+    operation: allocate
 environments:
   local: { base_url: http://localhost:8080 }
 `
@@ -174,6 +177,8 @@ func TestLoadMetadata_Valid(t *testing.T) {
 	assert.Equal(t, "allocation-service", meta.Name)
 	assert.Equal(t, []string{"allocation-platform"}, meta.Owners)
 	assert.Equal(t, []string{"rider allocation"}, meta.Concepts)
+	require.Len(t, meta.Tasks, 1)
+	assert.Equal(t, "allocate", meta.Tasks[0].Operation)
 	require.Contains(t, meta.Environments, "local")
 	assert.Equal(t, "http://localhost:8080", meta.Environments["local"].BaseURL)
 }

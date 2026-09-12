@@ -55,6 +55,7 @@ export interface Service {
   description?: string;
   owners?: string[];
   concepts?: string[];
+  tasks?: Task[];
   source: Source;
   package_dir: string;
   contract_files?: string[];
@@ -63,9 +64,34 @@ export interface Service {
   error?: string;
   warnings?: LintWarning[];
   accepted_warnings?: AcceptedLintWarning[];
+  task_coverage?: TaskCoverage;
   last_indexed?: string;
   commit?: string;
   operation_count: number;
+}
+
+export interface TaskTarget {
+  operation: string;
+  when?: string;
+}
+
+export interface TaskTest {
+  query: string;
+  expect_any: string[];
+  top_k?: number;
+}
+
+export interface Task {
+  id: string;
+  phrases: string[];
+  targets: TaskTarget[];
+  tests?: TaskTest[];
+}
+
+export interface TaskCoverage {
+  tasks: number;
+  assertions: number;
+  discoverable: number;
 }
 
 // ---- operation.go ----
@@ -659,6 +685,7 @@ export interface SearchResult {
   operation: Operation;
   score: number;
   matched_on?: string[];
+  tasks?: Array<{ id: string; phrase?: string; when?: string }>;
 }
 
 export interface DocSearchResult {

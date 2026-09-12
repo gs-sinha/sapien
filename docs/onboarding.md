@@ -199,9 +199,10 @@ to your codebase: read the diff before you commit it.
   list of things the agent could not establish, and it is usually the
   shortest useful to-do list you will get about your own service.
 - Check `api/service.yaml` for a sensible `name`, `description`,
-  `owners`, and `concepts`. `concepts` are the words someone would type
+  `owners`, `concepts`, and `tasks`. `concepts` are the words someone would type
   when they do not know the operation name, so make sure they match how
-  your team actually talks about the service.
+  your team actually talks about the service. Tasks map caller phrases to
+  specific operations and can carry held-out top-K retrieval tests.
 - Run `get_service` and a couple of `search_apis` queries yourself, in
   the agent session or with `sapien search` from a terminal, to confirm
   the service reads the way you expect.

@@ -49,9 +49,17 @@ func NewIndex(db *store.DB, emb Embedder) *Index {
 // OperationID); it need not contain an entry for every op. It returns how
 // many rows were (re)written.
 func (x *Index) IndexOperations(ctx context.Context, ops []domain.Operation, fields map[string][]domain.Field) (int, error) {
+	return x.IndexOperationsWithTasks(ctx, ops, fields, nil)
+}
+
+// IndexOperationsWithTasks adds authored caller phrases for each operation
+// to the operation's existing embedding text. It does not create additional
+// vectors: one operation still owns one vector. Task tests are intentionally
+// absent from taskPhrases so held-out assertions cannot train on themselves.
+func (x *Index) IndexOperationsWithTasks(ctx context.Context, ops []domain.Operation, fields map[string][]domain.Field, taskPhrases map[string][]string) (int, error) {
 	return x.upsert(ctx, KindOperation, len(ops), func(i int) (id, text string) {
 		op := ops[i]
-		return op.ID, operationText(op, fields[op.ID])
+		return op.ID, operationText(op, fields[op.ID], taskPhrases[op.ID])
 	})
 }
 
@@ -76,7 +84,7 @@ func (x *Index) IndexMemories(ctx context.Context, mems []domain.Memory) (int, e
 // operationText builds the text embedded for one operation (PLAN §16):
 // summary, description, the tokenized path, its leaf field names, and its
 // tags.
-func operationText(op domain.Operation, fields []domain.Field) string {
+func operationText(op domain.Operation, fields []domain.Field, taskPhrases []string) string {
 	var path string
 	if op.HTTP != nil {
 		path = op.HTTP.Path
@@ -93,6 +101,7 @@ func operationText(op domain.Operation, fields []domain.Field) string {
 		textutil.Join(textutil.Tokens(path)),
 		strings.Join(leaves, " "),
 		strings.Join(op.Tags, " "),
+		strings.Join(taskPhrases, " "),
 	}, " ")
 }
 

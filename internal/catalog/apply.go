@@ -62,6 +62,9 @@ func (c *Catalog) Apply(ctx context.Context, snap Snapshot) (domain.CatalogChang
 		if err := upsertFlowsTx(ctx, tx, "service", svc.ID, snap.Flows, now); err != nil {
 			return err
 		}
+		if err := replaceTasksTx(ctx, tx, svc.ID, snap.Tasks, snap.Operations); err != nil {
+			return err
+		}
 		if err := replaceContractFilesTx(ctx, tx, svc.ID, snap.ContractFiles, now); err != nil {
 			return err
 		}
@@ -427,6 +430,9 @@ func (c *Catalog) MarkServiceError(ctx context.Context, svc domain.Service, msg 
 // key, since a flow's owner may be "workspace" or "service").
 func (c *Catalog) RemoveService(ctx context.Context, id string) error {
 	return c.db.Write(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM tasks_fts WHERE service = ?`, id); err != nil {
+			return fmt.Errorf("catalog: delete tasks_fts for %q: %w", id, err)
+		}
 		opRows, err := tx.QueryContext(ctx, `SELECT id FROM operations WHERE service_id = ?`, id)
 		if err != nil {
 			return fmt.Errorf("catalog: query operations for %q: %w", id, err)

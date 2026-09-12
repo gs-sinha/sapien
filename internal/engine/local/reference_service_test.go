@@ -19,6 +19,7 @@ func TestReference_Service(t *testing.T) {
 		"add_service", "sapien service add", "Onboarding checklist",
 		"## Keeping docs current", "CLAUDE.md", "AGENTS.md", "in the same change",
 		"## Warnings", "accepted_warnings", "STALE_ACCEPTANCE",
+		"tasks:", "UNDISCOVERABLE_OPERATION", "summary", "description", "search_docs",
 		"Never silence a warning by misdescribing the wire",
 		"sync_service", "re-reads",
 	} {
@@ -121,7 +122,8 @@ func TestReference_Sapien(t *testing.T) {
 		"get_context", "search_apis", "get_api", "request_example",
 		"search_docs", "get_relevant_memories", "list_examples", "execute_api",
 		"create_example(run_id)", `get_dsl_reference("service")`,
-		`get_dsl_reference("flow")`, "another repository",
+		`get_dsl_reference("flow")`, "another repository", "SQLite-only search",
+		"semantic:", "enabled: true", "starts no semantic worker", "matched_on",
 	} {
 		assert.Contains(t, text, want)
 	}
