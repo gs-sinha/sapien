@@ -4,6 +4,11 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Sapien</title>
+    <!-- PNG rather than an SVG data URI: Safari does not render SVG
+         favicons, and the inspector is meant to work in whatever browser
+         is the system default. -->
+    <link rel="icon" type="image/png" href="/ui/favicon.png" />
+    <link rel="apple-touch-icon" href="/ui/apple-touch-icon.png" />
   </head>
   <body class="bg-white text-slate-900 dark:bg-slate-950 dark:text-slate-100">
     <div id="root"></div>

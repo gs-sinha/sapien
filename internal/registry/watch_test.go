@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -224,6 +225,61 @@ func TestWatcher_IgnoresEditorTempFiles(t *testing.T) {
 	// (incorrectly) going to.
 	time.Sleep(300 * time.Millisecond)
 	assert.Empty(t, rec.snapshot())
+}
+
+// A trailing debounce that is only ever reset never fires while the writing
+// continues, so a file being written without a pause longer than the
+// debounce window starves indexing for as long as the writing lasts. The
+// max delay (debounce * maxDelayFactor -- 2s for the 80ms used here) bounds
+// that: a Change must arrive while the writer is still going.
+func TestWatcher_ContinuousWritesStillFlush(t *testing.T) {
+	ws, _ := newTestWorkspace(t)
+
+	pkgDir := filepath.Join(ws.Dir, "svc-e")
+	writeFile(t, filepath.Join(pkgDir, "openapi.yaml"), minimalOpenAPI)
+	pkg, err := registry.DiscoverPackage(pkgDir, "")
+	require.NoError(t, err)
+
+	rec := &changeRecorder{}
+	w, err := registry.NewWatcher(ws, map[string]*registry.Package{"svc-e": pkg}, 80*time.Millisecond, rec.onChange)
+	require.NoError(t, err)
+	defer w.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	require.NoError(t, w.Start(ctx))
+	time.Sleep(50 * time.Millisecond)
+
+	// Write far faster than the debounce window, so it is reset before it
+	// can ever expire, for longer than the max delay.
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		target := filepath.Join(pkgDir, "docs", "streaming.md")
+		require.NoError(t, os.MkdirAll(filepath.Dir(target), 0o755))
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			_ = os.WriteFile(target, []byte(strings.Repeat("x", i%50+1)), 0o644)
+			time.Sleep(10 * time.Millisecond)
+		}
+	}()
+	defer func() { close(stop); <-done }()
+
+	waitFor(t, 4*time.Second, func() bool {
+		for _, c := range rec.snapshot() {
+			for _, s := range c.Services {
+				if s == "svc-e" {
+					return true
+				}
+			}
+		}
+		return false
+	})
 }
 
 func TestNewWatcher_DefaultDebounce(t *testing.T) {

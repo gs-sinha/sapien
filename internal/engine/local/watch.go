@@ -94,7 +94,11 @@ func (l *Local) onWatchChange(ch registry.Change) {
 	ctx := context.Background()
 
 	for _, name := range ch.Services {
-		svc, err := l.syncer.SyncOne(ctx, name)
+		// From disk, never fetching: the watcher fired because files here
+		// changed, which says nothing about the remote, and fetching would
+		// also `git reset --hard` the clone -- discarding the very edits
+		// that woke us. See registry.Syncer.SyncOneFromDisk.
+		svc, err := l.syncer.SyncOneFromDisk(ctx, name)
 		if err == nil {
 			if ref, ok := findRef(l.ws, name); ok {
 				l.refreshFingerprint(ctx, ref)

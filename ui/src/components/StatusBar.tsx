@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getWorkspace } from '../api/client';
+import { useDaemon } from '../state/daemon';
 import { useEvents } from '../state/events';
 import { useTheme } from '../state/theme';
 
@@ -10,10 +11,18 @@ function Dot({ ok }: { ok: boolean }) {
 
 // Daemon reachability is checked once on mount (GET /v1/workspace), not
 // polled: the event stream's own WebSocket status is the live signal after
-// that, per "no polling anywhere; the WebSocket pushes."
+// that, per "no polling anywhere; the WebSocket pushes." state/daemon.ts
+// re-checks only when reconnecting has already failed, and its verdict
+// wins here once it has one.
 export function StatusBar() {
   const [workspaceName, setWorkspaceName] = useState<string | null>(null);
-  const [daemonState, setDaemonState] = useState<'checking' | 'ok' | 'unreachable'>('checking');
+  const [initialCheck, setInitialCheck] = useState<'checking' | 'ok' | 'unreachable'>('checking');
+  // state/daemon.ts learns later than this component's one-shot check --
+  // when reconnecting fails -- so its answer supersedes it. Without this
+  // the dot stayed green beside a banner saying the daemon was gone.
+  const probed = useDaemon((s) => s.state);
+  const daemonState: 'checking' | 'ok' | 'unreachable' =
+    probed === 'gone' ? 'unreachable' : probed === 'ok' || probed === 'replaced' ? 'ok' : initialCheck;
   const status = useEvents((s) => s.status);
   const unreadCount = useEvents((s) => s.unreadCount);
   const markRead = useEvents((s) => s.markRead);
@@ -26,10 +35,10 @@ export function StatusBar() {
       .then((ws) => {
         if (cancelled) return;
         setWorkspaceName(ws.name);
-        setDaemonState('ok');
+        setInitialCheck('ok');
       })
       .catch(() => {
-        if (!cancelled) setDaemonState('unreachable');
+        if (!cancelled) setInitialCheck('unreachable');
       });
     return () => {
       cancelled = true;

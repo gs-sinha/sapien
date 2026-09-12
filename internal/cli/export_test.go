@@ -39,3 +39,16 @@ func SetFindDaemonRetry(attempts int, delay time.Duration) func() {
 		findDaemonAttempts, findDaemonRetryDelay = oldAttempts, oldDelay
 	}
 }
+
+// ListenLoopback exposes serve's binder, so a test can prove the
+// stable-port fallback without starting a daemon.
+var ListenLoopback = listenLoopback
+
+// Test-only exports for the macOS launcher bundle (ui_installapp.go).
+var (
+	InstallAppBundle     = installAppBundle
+	LauncherScript       = launcherScript
+	PlistVersion         = plistVersion
+	ShellQuote           = shellQuote
+	RemoveExistingBundle = removeExistingBundle
+)

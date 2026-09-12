@@ -8,6 +8,7 @@
 // events are dropped from the front.
 import { create } from 'zustand';
 import { getRecentEvents } from '../api/client';
+import { useDaemon } from './daemon';
 import { currentWorkspace } from './workspace';
 import type { Event, EventType } from '../api/types';
 
@@ -252,6 +253,15 @@ function connect(get: () => EventsState) {
 
 function scheduleReconnect(get: () => EventsState) {
   if (stopped) return;
+  // One failed connect is ordinary -- a daemon restarting, a laptop
+  // waking. A second means the socket is not coming back on its own, and
+  // the interesting question becomes *why*: the daemon is gone, or it was
+  // replaced by a build that no longer serves this tab's UI. Asking here,
+  // rather than on a timer, keeps the "no polling" rule: this fires only
+  // while reconnection is already failing, and stops as soon as it works.
+  if (reconnectDelayMs > 1000) {
+    void useDaemon.getState().probe();
+  }
   if (reconnectTimer) clearTimeout(reconnectTimer);
   reconnectTimer = setTimeout(() => {
     if (!stopped) connect(get);

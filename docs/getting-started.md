@@ -288,7 +288,44 @@ sapien ui
 opens a browser at its `/ui/session` URL, which exchanges the daemon's
 bearer token for an HttpOnly session cookie and redirects into the app at
 `/ui/`. `--no-open` prints the URL instead of launching a browser; `--json`
-prints `{"url", "port"}`.
+prints `{"url", "port"}`. The browser is whichever one you have set as the
+system default -- `sapien ui` shells out to `open` (macOS) or `xdg-open`
+(Linux) and names no browser of its own.
+
+### A launcher instead of a terminal
+
+```sh
+sapien ui --install-app
+```
+
+writes `~/Applications/Sapien.app`, a launcher for this workspace's UI, so
+it can be opened from Spotlight, the Dock, or a Raycast/Alfred hotkey. It
+is a shim that runs `sapien ui`, not a bookmark, because a URL cannot
+survive: the daemon mints a fresh bearer token on every start, and it exits
+after thirty minutes with nothing connected. Going through the CLI
+re-resolves the port and the session every time.
+
+Re-run the command to repoint the launcher at another workspace, or after
+moving the `sapien` binary (the bundle records the absolute path it was
+installed from, since an app launched by Finder inherits none of your
+shell's `PATH`). A launch that fails leaves a line in
+`~/Library/Logs/Sapien/launch.log`. The bundle carries the same 🗿 the
+browser tab shows, so the Dock tile and the tab match. macOS only; on Linux, write a
+`.desktop` entry that runs `sapien ui`.
+
+### Several tabs at once
+
+The workspace picker is per tab: ⌘-click any link to open a second tab,
+switch it to another workspace, and the two stay independent across
+reloads. A new tab starts in whichever workspace you last chose.
+
+The daemon binds `127.0.0.1:7717` by default rather than a random port, so
+those tabs share one stable origin. When an upgrade replaces the daemon --
+the UI is embedded in the binary, so the two always move together -- open
+tabs show a banner telling you to reload rather than silently failing every
+request; one `sapien ui` relaunch revives the whole set. `--port` on
+`sapien serve` overrides the default, and a port already in use falls back
+to a random one.
 
 The UI is served by the daemon itself, not a separate process: it shows
 flows, runs (with every step's request, response, and timings), services,

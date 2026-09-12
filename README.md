@@ -91,11 +91,14 @@ call, and onboard your services.
    sapien ui
    ```
 
-   This opens a browser tab served by the daemon: flows the agent created,
-   every run with its payloads, services, operations with intent search, a
-   try-it form, examples, and memories, all updating live as agents work.
-   Then, in a new Claude Code session, ask it to "list the Sapien
-   services".
+   This opens a tab in your default browser, served by the daemon: flows
+   the agent created, every run with its payloads, services, operations
+   with intent search, a try-it form, examples, and memories, all updating
+   live as agents work. Then, in a new Claude Code session, ask it to
+   "list the Sapien services".
+
+   `sapien ui --install-app` installs `~/Applications/Sapien.app` so you can
+   open the inspector from Spotlight or the Dock instead of a terminal.
 
    Verify the MCP entry itself with:
 

@@ -1,6 +1,6 @@
 // Package config loads Sapien's engine-level settings (PLAN.md §16, §18,
 // §21): whether/how semantic search is enabled, git managed-clone
-// behavior, and the daemon's idle-exit timeout.
+// behavior, and the daemon's idle-exit timeout and heap ceiling.
 //
 // Settings live in two YAML files, merged with the workspace winning over
 // the user level:
@@ -18,8 +18,11 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -41,6 +44,23 @@ const (
 	defaultGitSyncIntervalStr = "10m"
 	defaultDaemonIdleTimeoutS = "30m"
 )
+
+// defaultDaemonMemoryLimit is the daemon's default soft heap ceiling
+// (GOMEMLIMIT), applied by `sapien serve` unless the operator overrides it
+// in config or in the environment.
+//
+// The number is chosen from what the daemon actually needs. Its steady
+// state is small -- the catalog lives in SQLite, not on the heap, so an
+// idle daemon serving several workspaces sits in the tens of megabytes.
+// The peak is transient and comes from parsing one service's OpenAPI
+// contract, which for a 1.2 MB document costs a few hundred megabytes of
+// live heap while it runs. 2 GiB leaves room for several of those at once
+// (two workspaces re-indexing concurrently, say) and still stops a runaway
+// well short of the 18 GB footprint that made this a bug. It is a *soft*
+// limit: Go never fails an allocation because of it, it only collects more
+// aggressively as the heap approaches it, so an unusually large workspace
+// gets slower rather than broken -- and can raise the number.
+const defaultDaemonMemoryLimit = "2GiB"
 
 // Semantic configures the optional semantic-search layer (internal/semantic,
 // PLAN §16). Off by default.
@@ -72,6 +92,11 @@ type Git struct {
 type Daemon struct {
 	// IdleTimeout is a Go duration string; empty defaults to 30m.
 	IdleTimeout string `yaml:"idle_timeout"`
+	// MemoryLimit is the daemon's soft heap ceiling, written the way Go's
+	// own GOMEMLIMIT is ("2GiB", "512MiB", "1073741824"). Empty defaults to
+	// 2GiB; "0" or "off" leaves the runtime unbounded, as it was before
+	// this setting existed. See MemoryLimitBytes.
+	MemoryLimit string `yaml:"memory_limit"`
 }
 
 // Config is Sapien's merged engine-level configuration.
@@ -86,7 +111,7 @@ type Config struct {
 func Defaults() Config {
 	return Config{
 		Git:    Git{SyncInterval: defaultGitSyncIntervalStr},
-		Daemon: Daemon{IdleTimeout: defaultDaemonIdleTimeoutS},
+		Daemon: Daemon{IdleTimeout: defaultDaemonIdleTimeoutS, MemoryLimit: defaultDaemonMemoryLimit},
 	}
 }
 
@@ -116,6 +141,63 @@ func (d Daemon) IdleTimeoutDuration() time.Duration {
 		return dur
 	}
 	return defaultDaemonIdleTimeout
+}
+
+// MemoryLimitBytes parses d.MemoryLimit into a byte count for
+// runtime/debug.SetMemoryLimit, returning 0 for "no limit" -- which is what
+// an explicit "0"/"off" means, and also what an unparsable value falls back
+// to (Load rejects those before they get here, so this only matters for a
+// Daemon built by hand). An empty value takes the 2 GiB default.
+func (d Daemon) MemoryLimitBytes() int64 {
+	if d.MemoryLimit == "" {
+		n, _ := parseByteSize(defaultDaemonMemoryLimit)
+		return n
+	}
+	n, err := parseByteSize(d.MemoryLimit)
+	if err != nil {
+		return 0
+	}
+	return n
+}
+
+// byteSuffixes are the units parseByteSize accepts, longest first so "MiB"
+// is matched before "B". They are exactly the ones Go's own GOMEMLIMIT
+// accepts, so the same string works in either place.
+var byteSuffixes = []struct {
+	suffix string
+	scale  int64
+}{
+	{"KiB", 1 << 10},
+	{"MiB", 1 << 20},
+	{"GiB", 1 << 30},
+	{"TiB", 1 << 40},
+	{"B", 1},
+}
+
+// parseByteSize parses a GOMEMLIMIT-style byte size: a non-negative integer
+// with an optional B/KiB/MiB/GiB/TiB suffix, or the words "off"/"none" for
+// no limit (0).
+func parseByteSize(s string) (int64, error) {
+	t := strings.TrimSpace(s)
+	switch strings.ToLower(t) {
+	case "", "0", "off", "none", "unlimited":
+		return 0, nil
+	}
+	for _, u := range byteSuffixes {
+		if !strings.HasSuffix(t, u.suffix) {
+			continue
+		}
+		n, err := strconv.ParseInt(strings.TrimSpace(strings.TrimSuffix(t, u.suffix)), 10, 64)
+		if err != nil || n < 0 {
+			return 0, fmt.Errorf("want an integer followed by one of B, KiB, MiB, GiB, TiB")
+		}
+		return n * u.scale, nil
+	}
+	n, err := strconv.ParseInt(t, 10, 64)
+	if err != nil || n < 0 {
+		return 0, fmt.Errorf("want an integer followed by one of B, KiB, MiB, GiB, TiB")
+	}
+	return n, nil
 }
 
 // UserPath returns the user-level config file path: $SAPIEN_CONFIG if set
@@ -184,6 +266,7 @@ type rawGit struct {
 
 type rawDaemon struct {
 	IdleTimeout *string `yaml:"idle_timeout"`
+	MemoryLimit *string `yaml:"memory_limit"`
 }
 
 // rawConfig is the shape of one config.yaml. Unknown top-level keys (`mcp:`
@@ -252,6 +335,9 @@ func applyRaw(cfg *Config, raw rawConfig) {
 	if raw.Daemon.IdleTimeout != nil {
 		d.IdleTimeout = *raw.Daemon.IdleTimeout
 	}
+	if raw.Daemon.MemoryLimit != nil {
+		d.MemoryLimit = *raw.Daemon.MemoryLimit
+	}
 }
 
 // validate rejects an unparsable, non-empty duration string in any of the
@@ -275,6 +361,11 @@ func validate(cfg Config) error {
 				WithDetail("key", c.key).
 				WithDetail("value", c.value)
 		}
+	}
+	if _, err := parseByteSize(cfg.Daemon.MemoryLimit); err != nil {
+		return errs.New(errs.Invalid, "config: invalid daemon.memory_limit %q: %v", cfg.Daemon.MemoryLimit, err).
+			WithDetail("key", "daemon.memory_limit").
+			WithDetail("value", cfg.Daemon.MemoryLimit)
 	}
 	return nil
 }

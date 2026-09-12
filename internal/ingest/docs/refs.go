@@ -31,8 +31,61 @@ var fieldStopwords = map[string]bool{
 	"nil": true, "none": true,
 }
 
+// namedRe pairs a compiled name matcher with the ref value a match yields.
+type namedRe struct {
+	re    *regexp.Regexp
+	value string
+}
+
+// RefMatcher is a KnownRefs catalogue with its whole-word name regexps
+// already compiled.
+//
+// Compiling them is expensive and there are a lot of them: one per operation
+// id, schema name, service name and concept phrase -- around 700 for a
+// service with a few hundred operations. ExtractRefs used to compile the
+// whole set on every call, and it is called once per *section*, so indexing
+// one package's docs recompiled the same regexps tens of thousands of times.
+// On the daemon's watch path (a resync per file an agent writes into
+// api/docs/) that was 30% of everything the process allocated -- 6 GB out of
+// 20 GB in one reproduction -- for a set of patterns that never varies
+// within a package. Build one RefMatcher per package and reuse it for every
+// section of every doc: the compiled set is a few MB and the recompiles go
+// to zero.
+type RefMatcher struct {
+	known      KnownRefs
+	operations []namedRe
+	schemas    []namedRe
+	services   []namedRe
+	concepts   []namedRe
+}
+
+// NewRefMatcher compiles known's name matchers once. The returned matcher is
+// read-only and safe to share across goroutines (regexp.Regexp is).
+func NewRefMatcher(known KnownRefs) *RefMatcher {
+	m := &RefMatcher{known: known}
+	for _, id := range known.Operations {
+		m.operations = append(m.operations, namedRe{re: wordRe(id), value: id})
+	}
+	for _, name := range known.Schemas {
+		m.schemas = append(m.schemas, namedRe{re: wordRe(name), value: name})
+	}
+	for _, name := range known.Services {
+		m.services = append(m.services, namedRe{re: wordReCI(name), value: name})
+	}
+	for _, phrase := range known.Concepts {
+		if re := phraseReCI(phrase); re != nil {
+			m.concepts = append(m.concepts, namedRe{re: re, value: phrase})
+		}
+	}
+	return m
+}
+
 // ExtractRefs finds structural references to known operations, paths,
 // schemas, concepts, services, and backticked fields within text.
+//
+// It compiles known's matchers on every call; a caller scanning more than
+// one piece of text against the same KnownRefs should build a RefMatcher
+// once and call Extract instead.
 //
 // Everything except "METHOD /path" mentions is extracted only from text
 // outside fenced code blocks (``` or ~~~); fenced content is otherwise
@@ -44,6 +97,12 @@ var fieldStopwords = map[string]bool{
 // The result is deterministic and deduplicated by (kind, value), ordered by
 // each ref's first appearance in text.
 func ExtractRefs(text string, known KnownRefs) []domain.DocRef {
+	return NewRefMatcher(known).Extract(text)
+}
+
+// Extract is ExtractRefs against an already-compiled matcher.
+func (m *RefMatcher) Extract(text string) []domain.DocRef {
+	known := m.known
 	lines := splitLines(text)
 	offsets := make([]int, len(lines))
 	off := 0
@@ -104,19 +163,17 @@ func ExtractRefs(text string, known KnownRefs) []domain.DocRef {
 			matches = append(matches, found{pos: loc[0], kind: kind, value: value})
 		}
 	}
-	for _, id := range known.Operations {
-		addAll(wordRe(id), domain.RefOperation, id)
+	for _, n := range m.operations {
+		addAll(n.re, domain.RefOperation, n.value)
 	}
-	for _, name := range known.Schemas {
-		addAll(wordRe(name), domain.RefSchema, name)
+	for _, n := range m.schemas {
+		addAll(n.re, domain.RefSchema, n.value)
 	}
-	for _, name := range known.Services {
-		addAll(wordReCI(name), domain.RefService, name)
+	for _, n := range m.services {
+		addAll(n.re, domain.RefService, n.value)
 	}
-	for _, phrase := range known.Concepts {
-		if re := phraseReCI(phrase); re != nil {
-			addAll(re, domain.RefConcept, phrase)
-		}
+	for _, n := range m.concepts {
+		addAll(n.re, domain.RefConcept, n.value)
 	}
 
 	for _, sm := range backtickRe.FindAllStringSubmatchIndex(masked, -1) {

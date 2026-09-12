@@ -23,6 +23,12 @@ type Syncer struct {
 	bus *events.Bus     // may be nil
 	git *gitsrc.Manager // optional; required for git-sourced services (PLAN §18)
 
+	// cache lets repeated syncs of an unchanged contract skip the parse
+	// (ingestcache.go). It lives on the Syncer because the Syncer is what
+	// syncs the same service over and over -- the file watcher calls
+	// SyncOne for every change under the package, docs included.
+	cache *ingestCache
+
 	mu      sync.Mutex
 	sources map[string]domain.Source // name -> the Source last synced, for Remove's best-effort clone cleanup
 }
@@ -30,7 +36,7 @@ type Syncer struct {
 // NewSyncer returns a Syncer for ws, applying snapshots through idx. bus may
 // be nil, in which case no events are published.
 func NewSyncer(ws *domain.Workspace, idx Indexer, bus *events.Bus) *Syncer {
-	return &Syncer{ws: ws, idx: idx, bus: bus, sources: map[string]domain.Source{}}
+	return &Syncer{ws: ws, idx: idx, bus: bus, sources: map[string]domain.Source{}, cache: newIngestCache()}
 }
 
 // WithGit sets the git manager used to resolve and sync git-sourced
@@ -52,7 +58,7 @@ func (s *Syncer) WithGit(m *gitsrc.Manager) *Syncer {
 func (s *Syncer) SyncAll(ctx context.Context) ([]domain.Service, error) {
 	out := make([]domain.Service, 0, len(s.ws.Services))
 	for _, ref := range s.ws.Services {
-		svc, _ := s.syncRef(ctx, ref)
+		svc, _ := s.syncRef(ctx, ref, gitFetch)
 		out = append(out, svc)
 	}
 	return out, nil
@@ -67,7 +73,31 @@ func (s *Syncer) SyncOne(ctx context.Context, name string) (*domain.Service, err
 	if !ok {
 		return nil, errs.New(errs.ServiceNotFound, "service %q not found in workspace", name)
 	}
-	svc, err := s.syncRef(ctx, ref)
+	svc, err := s.syncRef(ctx, ref, gitFetch)
+	return &svc, err
+}
+
+// SyncOneFromDisk is SyncOne without the git fetch: it rebuilds the named
+// service from the files already on disk, resolving a git source's existing
+// clone as-is (cloning only if there is none yet).
+//
+// It exists because fetching is the wrong response to a local change. The
+// file watcher and the engine's staleness check both react to something
+// having changed *here*; answering that by going to the network and running
+// `git reset --hard origin/<ref>` (what Manager.Sync does, see syncRef)
+// fetches on every file save and reverts uncommitted edits inside the
+// managed clone -- including the ones that triggered the sync, if they were
+// to tracked files. An agent writing documentation into a git-sourced
+// package would be fighting the daemon for its own work.
+//
+// Fetching stays where a user or a timer asked for it: Services().Sync and
+// Reindex, service Add, and the daemon's SyncGitPeriodically tick.
+func (s *Syncer) SyncOneFromDisk(ctx context.Context, name string) (*domain.Service, error) {
+	ref, ok := findServiceRef(s.ws, name)
+	if !ok {
+		return nil, errs.New(errs.ServiceNotFound, "service %q not found in workspace", name)
+	}
+	svc, err := s.syncRef(ctx, ref, useCheckoutOnDisk)
 	return &svc, err
 }
 
@@ -112,9 +142,9 @@ func (s *Syncer) urlStillInUse(url, excludeName string) bool {
 // interval (PLAN §18's daemon timer; interval <= 0 uses the PLAN default of
 // 10 minutes), until ctx is done. Each service's own sync failure is
 // recorded the same way SyncOne records one (MarkServiceError,
-// service.sync_failed) and never stops the timer. It is a no-op (returns
-// only when ctx is done) when no git manager has been configured via
-// WithGit.
+// service.sync_failed) and never stops the timer. Without a git manager
+// configured via WithGit it syncs nothing, but still runs on its timer:
+// it doubles as the sweep of the contract ingest cache (ingestcache.go).
 func (s *Syncer) SyncGitPeriodically(ctx context.Context, interval time.Duration) {
 	if interval <= 0 {
 		interval = defaultGitSyncInterval
@@ -128,6 +158,12 @@ func (s *Syncer) SyncGitPeriodically(ctx context.Context, interval time.Duration
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			// The daemon's only periodic heartbeat, so it is also where
+			// the contract ingest cache sheds entries nobody has asked
+			// for since the last tick: that cache expires lazily on use,
+			// and a workspace that has gone quiet never uses it again
+			// (ingestcache.go).
+			s.cache.Sweep()
 			s.syncGitOnce(ctx)
 		}
 	}
@@ -143,7 +179,7 @@ func (s *Syncer) syncGitOnce(ctx context.Context) {
 		if ref.Source.Kind != domain.SourceGit {
 			continue
 		}
-		_, _ = s.syncRef(ctx, ref)
+		_, _ = s.syncRef(ctx, ref, gitFetch)
 	}
 }
 
@@ -168,20 +204,37 @@ func (s *Syncer) sourceFor(name string) (domain.Source, bool) {
 }
 
 // syncRef builds and applies one service reference, handling the
+// gitFetch and useCheckoutOnDisk name syncRef's fetch argument at its call
+// sites, so that whether a sync reaches the network is legible where the
+// decision is made rather than inside syncRef.
+const (
+	// gitFetch brings a git-sourced service's clone up to date first
+	// (Manager.Sync: fetch, then reset --hard onto the tracked ref). Only
+	// for syncs a user or a timer asked for.
+	gitFetch = true
+	// useCheckoutOnDisk builds from whatever the clone already holds, with
+	// no network call and no checkout. For syncs triggered by a local
+	// change; see SyncOneFromDisk.
+	useCheckoutOnDisk = false
+)
+
 // success/failure bookkeeping (MarkServiceError, event emission) shared by
 // SyncAll and SyncOne. For a git source with a configured Manager, it fetches
-// via Manager.Sync first, so Build resolves the up-to-date clone rather than
-// whatever commit happened to be checked out already. It always returns a
-// usable Service record; the error return is nil only on full success.
-func (s *Syncer) syncRef(ctx context.Context, ref domain.ServiceRef) (domain.Service, error) {
+// via Manager.Sync first when fetch is gitFetch, so Build resolves the
+// up-to-date clone rather than whatever commit happened to be checked out
+// already; with useCheckoutOnDisk it leaves the clone alone and Build
+// resolves it through Manager.Ensure, which touches the network only when
+// there is no clone yet. It always returns a usable Service record; the
+// error return is nil only on full success.
+func (s *Syncer) syncRef(ctx context.Context, ref domain.ServiceRef, fetch bool) (domain.Service, error) {
 	s.rememberSource(ref.Name, ref.Source)
 
-	b := NewBuilder(s.ws)
+	b := NewBuilder(s.ws).withIngestCache(s.cache)
 	if s.git != nil {
 		b = b.WithGit(s.git)
 	}
 
-	if ref.Source.Kind == domain.SourceGit && s.git != nil {
+	if fetch && ref.Source.Kind == domain.SourceGit && s.git != nil {
 		// Build must not fetch again below, but must also not blame a stale
 		// clone if the package is missing: this just fetched.
 		b = b.WithGitSynced()

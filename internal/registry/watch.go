@@ -19,6 +19,27 @@ import (
 // defaultDebounce is used when NewWatcher is given a non-positive debounce.
 const defaultDebounce = 200 * time.Millisecond
 
+// maxDelayFactor turns the debounce into a ceiling on how long a flush can
+// be deferred: debounce * maxDelayFactor, so the 200ms default caps a
+// deferral at five seconds.
+//
+// The debounce is a trailing one -- every event restarts it -- which is
+// what makes a burst of writes collapse into a single Change. Left
+// uncapped, that is also a starvation bug: a writer that never pauses for a
+// whole debounce window (a git checkout unpacking a tree, a build step
+// regenerating a contract, an editor autosaving into a large file) resets
+// the timer indefinitely and indexing never happens at all, for as long as
+// the writing lasts. The cap bounds that: however long the stream runs, the
+// watcher still flushes what it has seen every five seconds.
+//
+// Five seconds is deliberately generous. The cap only ever *adds* index
+// passes -- passes the quiet-period debounce would not have run -- and each
+// one costs a resync, so a short cap would reintroduce exactly the churn
+// this work is here to remove. It is a liveness floor for a file still
+// being written, not a freshness target: the settled, final state is always
+// indexed one debounce after the writing stops, as before.
+const maxDelayFactor = 25
+
 // Change describes what changed in one debounced batch of filesystem events
 // (PLAN §17).
 type Change struct {
@@ -43,15 +64,22 @@ type Watcher struct {
 	ws       *domain.Workspace
 	packages map[string]*Package
 	debounce time.Duration
+	// maxDelay bounds how long a flush can be deferred by a stream of
+	// events that never pauses for a full debounce. See maxDelayFactor.
+	maxDelay time.Duration
 	onChange func(Change)
 
 	fsw *fsnotify.Watcher
 
-	// dirIndex, pendingServices, and pendingWorkspace are only ever touched
-	// from the single goroutine started by Start, so they need no lock.
+	// dirIndex, pendingServices, pendingWorkspace and firstPending are only
+	// ever touched from the single goroutine started by Start, so they need
+	// no lock.
 	dirIndex         map[string]watchTarget
 	pendingServices  map[string]bool
 	pendingWorkspace map[string]bool
+	// firstPending is when the oldest unflushed change was seen, or the
+	// zero time when nothing is pending; maxDelay is measured from it.
+	firstPending time.Time
 
 	closeOnce sync.Once
 }
@@ -72,6 +100,7 @@ func NewWatcher(ws *domain.Workspace, packages map[string]*Package, debounce tim
 		ws:       ws,
 		packages: packages,
 		debounce: debounce,
+		maxDelay: debounce * maxDelayFactor,
 		onChange: onChange,
 		fsw:      fsw,
 	}, nil
@@ -82,8 +111,9 @@ func NewWatcher(ws *domain.Workspace, packages map[string]*Package, debounce tim
 // memories/, environments/ directories (recursively), and ws's own directory
 // (to catch changes to the workspace file). It returns once the initial set
 // of watches is established; events are then delivered to onChange,
-// debounced/coalesced per a 200ms (by default) window, until ctx is done or
-// Close is called.
+// debounced/coalesced per a 200ms (by default) window of quiet -- and, when
+// the writing never goes quiet, at least once per debounce*maxDelayFactor
+// -- until ctx is done or Close is called.
 func (w *Watcher) Start(ctx context.Context) error {
 	w.dirIndex = map[string]watchTarget{}
 	w.pendingServices = map[string]bool{}
@@ -146,8 +176,9 @@ func (w *Watcher) loop(ctx context.Context) {
 				return
 			}
 			w.handleEvent(ev)
+			d := w.nextFlushIn(time.Now())
 			if timer == nil {
-				timer = time.NewTimer(w.debounce)
+				timer = time.NewTimer(d)
 			} else {
 				if !timer.Stop() {
 					select {
@@ -155,7 +186,7 @@ func (w *Watcher) loop(ctx context.Context) {
 					default:
 					}
 				}
-				timer.Reset(w.debounce)
+				timer.Reset(d)
 			}
 			timerC = timer.C
 
@@ -211,6 +242,9 @@ func (w *Watcher) handleEvent(ev fsnotify.Event) {
 }
 
 func (w *Watcher) markPending(t watchTarget) {
+	if w.firstPending.IsZero() {
+		w.firstPending = time.Now()
+	}
 	if t.service {
 		w.pendingServices[t.name] = true
 	} else {
@@ -218,7 +252,26 @@ func (w *Watcher) markPending(t watchTarget) {
 	}
 }
 
+// nextFlushIn is how long the debounce timer should run for after an event
+// at now: a full debounce window, unless that would push the oldest pending
+// change past maxDelay, in which case only what is left of that budget (and
+// never less than zero, which fires the timer immediately).
+func (w *Watcher) nextFlushIn(now time.Time) time.Duration {
+	d := w.debounce
+	if w.firstPending.IsZero() {
+		return d
+	}
+	if remaining := w.maxDelay - now.Sub(w.firstPending); remaining < d {
+		d = remaining
+	}
+	if d < 0 {
+		d = 0
+	}
+	return d
+}
+
 func (w *Watcher) flush() {
+	w.firstPending = time.Time{}
 	if len(w.pendingServices) == 0 && len(w.pendingWorkspace) == 0 {
 		return
 	}

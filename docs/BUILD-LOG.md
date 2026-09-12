@@ -120,7 +120,7 @@ The first `sapien mcp` invocation starts the workspace's daemon in the backgroun
 
 New package `internal/config` plus git (PLAN §18) and semantic (PLAN §16) wiring into `internal/engine/local`. Both were, until now, built but never composed into the engine: `internal/gitsrc`/`internal/registry`'s `WithGit` hooks and `internal/semantic`/`internal/search`'s `WithSemantic` hook existed with nothing on the other end inside `local.Open`.
 
-**`internal/config`** (93.8% coverage). `Load(ws *domain.Workspace) (Config, error)` merges `~/.sapien/config.yaml` (or `$SAPIEN_CONFIG`) with `<ws>/.sapien/config.yaml` layered over it, field-by-field (a workspace file only overrides the keys it actually sets, mirroring `internal/mcp/permissions.go`'s `rawPermissions` pointer-field pattern rather than a plain struct overwrite). Three top-level keys: `semantic:` (`enabled`, `kind` openai|ollama, `base_url`, `model`, `api_key` — literal or `${env.X}`/`$X`, `batch_size`), `git:` (`cache_dir`, `sync_interval` default `10m`, `timeout` default 0 → defers to `gitsrc`'s own 60s default), `daemon:` (`idle_timeout` default `30m`). Unknown top-level keys — `mcp:` chief among them — are silently ignored: `rawConfig` simply has no field for them and neither loader ever calls yaml.v3's `KnownFields(true)`, so `internal/mcp.LoadConfig` and `internal/config.Load` read the same file for their own keys without either needing to know the other's schema (verified by a round-trip test that puts both `mcp:` and `semantic:` in one file). A bad duration string anywhere returns `errs.Invalid` naming the exact key (`git.sync_interval`, `git.timeout`, or `daemon.idle_timeout`) both in the message and as a `WithDetail("key", …)`.
+**`internal/config`** (93.8% coverage). `Load(ws *domain.Workspace) (Config, error)` merges `~/.sapien/config.yaml` (or `$SAPIEN_CONFIG`) with `<ws>/.sapien/config.yaml` layered over it, field-by-field (a workspace file only overrides the keys it actually sets, mirroring `internal/mcp/permissions.go`'s `rawPermissions` pointer-field pattern rather than a plain struct overwrite). Three top-level keys: `semantic:` (`enabled`, `kind` openai|ollama, `base_url`, `model`, `api_key` — literal or `${env.X}`/`$X`, `batch_size`), `git:` (`cache_dir`, `sync_interval` default `10m`, `timeout` default 0 → defers to `gitsrc`'s own 60s default), `daemon:` (`idle_timeout` default `30m`, `memory_limit` default `2GiB` — a GOMEMLIMIT-style byte size, `0`/`off` for no limit, applied by `sapien serve` only and never over a `GOMEMLIMIT` already set in the environment). Unknown top-level keys — `mcp:` chief among them — are silently ignored: `rawConfig` simply has no field for them and neither loader ever calls yaml.v3's `KnownFields(true)`, so `internal/mcp.LoadConfig` and `internal/config.Load` read the same file for their own keys without either needing to know the other's schema (verified by a round-trip test that puts both `mcp:` and `semantic:` in one file). A bad duration string anywhere returns `errs.Invalid` naming the exact key (`git.sync_interval`, `git.timeout`, `daemon.idle_timeout`, or `daemon.memory_limit`) both in the message and as a `WithDetail("key", …)`.
 
 **Git sources (`internal/engine/local`).** `Open` now always builds a `gitsrc.Manager` (`CacheDir` from `Options.GitCacheDir` else `config.Git.CacheDir` else gitsrc's own `~/.sapien/repos` default; `Timeout` from `config.Git.TimeoutDuration()`) and calls `syncer.WithGit(gitMgr)`, so a `Source{Kind: git}` service works with zero config beyond `type: git` in the workspace file — this was the gap `TestAdd_GitSourceNotImplemented` (now `TestAdd_GitSource_UnreachableKeepsRegistration`, since git sources are no longer unimplemented) exercised. Three call sites needed a git-aware fix beyond just wiring the `Syncer`:
 - `services.go`'s `Add`, when deriving a name for an unnamed source (`ref.Name == ""`), built its own one-off `registry.Builder` that never got `WithGit` called — an unnamed git source's peek-ingest would have failed with `errs.NotImplemented` even though the `Syncer`'s own internal builder was fully wired. Fixed by calling `.WithGit(l.gitMgr)` on that builder too.
@@ -442,3 +442,101 @@ Not done: coverage says nothing about doc *quality* (a section that
 mentions an operation and says nothing useful counts as documented), and
 nothing re-asks the interview questions when the code changes under a
 service that was onboarded before this.
+
+## Opening the UI without a terminal, and keeping tabs alive (2026-09-12)
+
+Asked as "how complicated would a desktop client be", and narrowed by the
+user to the two things actually wanted: multitasking across tabs, and a way
+to launch that is not `sapien ui` in a terminal. Neither needed Tauri, and
+one argued against it -- a Tauri shell is a single window, so tabs would
+have had to be rebuilt inside it, and it would have added a second artifact
+that drifts from the engine binary. Phase 7c stays deferred; PLAN §27 and
+the `tauri://localhost` origin allowlist are untouched and still cost
+nothing.
+
+What the investigation turned up, which decided the shape of all of it: the
+daemon bound a random port and `serve` mints a fresh bearer token on every
+start, so nothing static can point at it. A bookmark, a Dock URL or a Chrome
+PWA install is stale as soon as the daemon idle-exits -- after thirty
+minutes with nothing connected, i.e. exactly when you would next reach for
+the launcher.
+
+- **`sapien ui --install-app`** (`internal/cli/ui_installapp.go`) writes
+  `~/Applications/Sapien.app`: an `Info.plist` and a `/bin/sh` launcher that
+  runs `sapien ui`, which re-resolves the port and mints a fresh session
+  every time. It never needs updating, because the UI is embedded in the
+  binary (`internal/ui/embed.go`) and `brew upgrade` replaces that binary at
+  the same path. `os.Executable()` is deliberately not passed through
+  `filepath.EvalSymlinks`, and this was checked rather than assumed: launched
+  through `/usr/local/bin/sapien` it records the symlink, not the Cellar
+  path a `brew upgrade` would delete. A Finder launch inherits none of the
+  login shell's `PATH` (so the binary is named absolutely, with a thin
+  `command -v` fallback) and has no terminal (so failures go to
+  `~/Library/Logs/Sapien/launch.log` and one `osascript` alert).
+  `removeExistingBundle` refuses to recursively delete anything at that path
+  that is not carrying our launcher.
+- **The daemon binds 7717 by default**, falling back to an ephemeral port
+  when it is taken and honouring an explicit `--port` exactly. The stable
+  origin is what makes a set of tabs survive an upgrade: one relaunch mints a
+  cookie every tab at that origin shares, so each comes back on reload.
+  Verified live, including the fallback: a second workspace's daemon logged
+  the reason and took 61443.
+- **The workspace picker is per tab** (`sessionStorage`, with `localStorage`
+  as the seed for a brand-new tab). It was a module variable loaded from
+  `localStorage`, so tab A's switch moved tab B on its next reload and every
+  id in tab B's URL then resolved in the wrong workspace. `""` is stored as
+  a real choice rather than by removing the key -- removing it would fall
+  through to `localStorage` and reintroduce exactly the bug.
+- **A missing hashed asset is a 404** (`internal/ui/ui.go`). The SPA history
+  fallback answered every unknown path under `/ui/` with `index.html`,
+  including the content-hashed chunks an upgraded daemon no longer has, so a
+  dynamic `import()` got `text/html` and failed as a MIME type error.
+- **A banner when the tab has outlived its daemon** (`state/daemon.ts`,
+  `components/DaemonBanner.tsx`). `/v1/health` is the one route outside
+  `authMiddleware`, so it answers with a stale cookie and without a workspace
+  header; it is probed on load to record which build served the tab, and
+  again only once the event socket has failed to reconnect twice -- the "no
+  polling" rule holds, since it fires only while reconnection is already
+  failing. A different version means an upgrade replaced the daemon (reload);
+  no answer means it idle-exited (relaunch). Previously both were silent:
+  every request failed with a network error while the socket retried forever
+  against a port nothing was listening on.
+
+The banner work turned up a third state while it was being verified in a
+real browser, and it is the one that was hardest to recognise from the
+outside: the daemon reachable *and* the right build, while the tab's cookie
+belongs to a previous one, because `serve` mints a new token on every start.
+`/v1/health` is unauthenticated, so the status bar showed a green daemon dot
+beside an app whose every request 401ed. `api/client` now reports a 401 to
+the same store and clears it on the next success; the banner says to run
+`sapien ui`, whose own `/ui/session` tab re-cookies the whole origin. The
+status bar's dot follows the probe too -- it was a one-shot check on mount,
+so it stayed green next to a banner saying the daemon was gone.
+
+The icon is 🗿, asked for mid-build: `ui/public/favicon.png` for the browser
+tab (a PNG, not an SVG data URI -- Safari does not render SVG favicons) and
+an `.icns` embedded in the binary and written into the bundle's Resources,
+both rendered from the same glyph so the Dock tile and the tab match.
+
+Verified against a real daemon rather than only in tests: 7717 bound, the
+fallback taken and logged, `/v1/health` answering unauthenticated, a missing
+hashed asset 404ing while `/ui/runs/run_123` still gets the shell, and the
+installed bundle launched from Finder starting the daemon and opening the
+default browser. All three banner states were driven end to end in Chrome
+against a live daemon -- replaced (rebuilt at v9.9.9 on the same port), gone
+(daemon killed), and stale session (restarted, new token) -- along with the
+recovery the stable port exists for: one `sapien ui` and a reload brought the
+already-open tab back to a live event stream. 111 UI tests, the Go suite and
+`-race` on the four changed packages green; initial chunk 66.9 KB gz, whole
+app 211.2 KB gz against the 120/300 budget.
+
+Not verified, and the one thing left open: a cookie-authenticated mutation
+from Safari. `middleware.go`'s CSRF check requires `Origin` to be *present*
+on any non-GET that authenticated by cookie, and while modern WebKit sends
+it on same-origin requests, older WebKit did not -- if any browser omits it,
+every save, run and delete 403s while reads work fine. Safari was confirmed
+to load the app and hold six connections open, which proves the cookie
+exchange, the shell and the sockets; the mutation path needs either a click
+or a `Sec-Fetch-Site: same-origin` fallback in the middleware, which was not
+added here because it changes a security-sensitive path and was outside what
+was agreed.

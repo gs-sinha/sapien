@@ -28,8 +28,15 @@ func Parse(markdown string, opts Options) domain.Doc {
 
 	sections := buildSections(lines, headings, title)
 	assignSectionIDs(sections, docID)
+	// One matcher for the whole document (and, when the caller supplied
+	// one, for the whole package): compiling Known's ~700 name regexps once
+	// per section is what made doc indexing the daemon's biggest allocator.
+	matcher := opts.Matcher
+	if matcher == nil {
+		matcher = NewRefMatcher(opts.Known)
+	}
 	for i := range sections {
-		sections[i].Refs = ExtractRefs(sections[i].Body, opts.Known)
+		sections[i].Refs = matcher.Extract(sections[i].Body)
 	}
 
 	source := opts.Source

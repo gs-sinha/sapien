@@ -7,6 +7,55 @@ and phase numbers refer to PLAN.md §34's roadmap.
 ## [Unreleased]
 
 ### Added
+- **`/debug/pprof/*` and `/debug/memstats` on the daemon**, behind the same
+  loopback Host check and bearer token as every other route, and
+  deliberately outside the OpenAPI route table (Go's profile format is not
+  Sapien's API to promise). There was previously no way to ask a running
+  daemon anything about its own heap, which is why the allocation churn
+  under Fixed had to be diagnosed from `vmmap`; `heap_alloc` against a
+  climbing `total_alloc` answers "leak or churn?" in one request.
+- **`daemon.memory_limit` (default `2GiB`)**, a soft heap ceiling
+  (`GOMEMLIMIT`) the daemon applies to itself, plus a five-minute check that
+  returns the heap to the OS once the daemon stops working -- after a burst
+  of indexing nothing allocates, so nothing triggers a collection, and the
+  process would otherwise sit on its high-water mark for hours. Set it to
+  `0`/`off` for the old unbounded behaviour; a `GOMEMLIMIT` already in the
+  environment always wins.
+- **`sapien ui --install-app`: a macOS launcher for the inspector.** Writes
+  `~/Applications/Sapien.app`, so the UI opens from Spotlight, the Dock or a
+  Raycast hotkey instead of only from a terminal. It shells out to `sapien
+  ui` rather than holding a URL, because a URL cannot survive: the daemon
+  mints a fresh bearer token on every start and exits after thirty minutes
+  with nothing connected, so a bookmark or a PWA install is stale within the
+  hour. The bundle records the absolute path it was installed from (an app
+  launched by Finder inherits none of the login shell's `PATH`, so a bare
+  `sapien` would never be found under Homebrew) and logs a failed launch to
+  `~/Library/Logs/Sapien/launch.log`, since a Finder launch has no terminal
+  to fail in. Re-run it to repoint the launcher at another workspace.
+- **The workspace picker is per tab.** Several tabs is how you multitask in
+  the inspector -- a run in one, a flow in another -- but the selection
+  lived in `localStorage`, so switching in one tab silently moved every
+  other tab on its next reload, and ids in those tabs' URLs then resolved in
+  the wrong workspace. It now lives in `sessionStorage`, which is per tab
+  and survives reload; `localStorage` keeps the last choice only as the seed
+  for a brand-new tab.
+- **🗿 as the icon**, in the browser tab (`favicon.png`, a PNG rather than an
+  SVG data URI because Safari does not render SVG favicons) and on the macOS
+  launcher, whose `.icns` is embedded in the binary and written into the
+  bundle's Resources.
+- **A banner when a tab outlives its daemon.** `/v1/health` (the one route
+  outside auth) is probed on load to record which build served the tab, and
+  again once the event socket has actually failed to reconnect -- not on a
+  timer. A different version answering means an upgrade replaced the daemon
+  and the tab is running the old UI: it now says so and offers a reload.
+  Nothing answering means the daemon idle-exited: it says that instead of
+  retrying in silence. A third state found while testing this: the daemon
+  can be reachable *and* the right build while this tab's cookie is for a
+  previous one, since `serve` mints a new token on every start -- /v1/health
+  is unauthenticated, so the app looked connected while every real request
+  401ed. `api/client` now reports a 401 to the same store, and clears it on
+  the next success, which is what the relaunch's own `/ui/session` tab does
+  for every tab at the origin.
 - **`get_dsl_reference("sapien")`: what Sapien is and what an agent can do
   with it.** Agents had the tools without the framing -- that Sapien is a
   cross-repo discovery layer holding contracts, the services' own
@@ -49,7 +98,59 @@ and phase numbers refer to PLAN.md §34's roadmap.
   `## Open questions` rather than guessing. Every request body gets an
   `example:` in the contract as part of onboarding.
 
+### Changed
+- **The daemon binds `127.0.0.1:7717` by default** instead of a random port.
+  Every daemon replacement (an upgrade, an idle exit) used to strand every
+  open tab at an address nothing was listening on, with no way for the page
+  to find where the daemon went; with a stable origin, one `sapien ui`
+  relaunch mints a session cookie the whole tab set shares, and a reload
+  brings each of them back. `--port` still overrides it, and a port already
+  in use falls back to a random one rather than refusing to start.
+
 ### Fixed
+- **The daemon no longer allocates gigabytes a minute while an agent writes
+  documentation.** A single `sapien serve` was measured at a 13-18 GB
+  physical footprint after three hours, still climbing at ~4 GB/min, with
+  only ~69 MB resident: allocation churn, not a leak. The file watcher
+  answers any change under a service package -- `api/docs/*.md` included --
+  with a full `SyncOne`, which re-parsed the service's entire OpenAPI
+  contract, and doc indexing recompiled one whole-word regexp per operation
+  id and schema name *for every section of every file*. In a reproduction
+  (two workspaces, three 1.2 MB contracts, a doc written every 1.5s) those
+  two accounted for 61% and 30% of everything the process allocated. Now the
+  contract ingest is content-addressed, so a change that leaves the contract
+  bytes alone reuses the previous parse, and the ref matchers are compiled
+  once per package instead of once per section. Same load: 275 MB/s of
+  allocation and a footprint climbing past 9 GB in 80 seconds became 12 MB/s
+  and a flat one, with CPU down from 81% of a core to 19%. A contract edit
+  still changes the content hash and is re-parsed on the very next pass, so
+  the watcher is exactly as prompt as it was.
+- **A local change no longer fetches, or reverts, a git-sourced service.**
+  Every watch-triggered resync ran `gitsrc.Manager.Sync` -- `git fetch
+  --prune` followed by `git reset --hard origin/<ref>` -- so editing a file
+  inside a managed clone put a network call on the save and then discarded
+  the edit, if it was to a tracked file. An agent writing documentation into
+  a git-sourced package was fighting the daemon for its own work. The
+  staleness check on engine open did the same, which meant every `sapien
+  serve` startup fetched and hard-reset every clone; `staleness.go`'s own
+  doc comment had promised the opposite since it was written. Whether a sync
+  reaches the network is now the caller's decision, named at the call site
+  (`gitFetch` / `useCheckoutOnDisk`): the watcher and the staleness check
+  build from the checkout on disk, while `Services().Sync`, `Reindex`,
+  `service add` and the ten-minute timer fetch as before.
+- **The watcher can no longer be starved by a file that is never finished.**
+  The debounce is a trailing one -- every event restarts it -- so a writer
+  that never paused for a full 200ms window (a git checkout, a build step
+  regenerating a contract) deferred indexing indefinitely. A flush is now
+  capped at 25 debounce windows (5s by default) from the oldest pending
+  change, so a continuous stream still gets indexed while it runs.
+- **A missing build asset is a 404, not the app shell.** The SPA history
+  fallback answered any unknown path under `/ui/` with `index.html`,
+  including requests for the content-hashed chunks an upgraded daemon no
+  longer has -- so an open tab navigating to a not-yet-loaded route got
+  `text/html` for a dynamic `import()` and failed with a MIME type error.
+  Paths under `assets/` are now excluded from the fallback; client-side
+  routes still get the shell.
 - **`soft: true` is documented in the flow DSL reference.** Soft assertions
   shipped in the runner, the JSON schema and `docs/flows.md`, but not in
   the reference agents read over MCP, so they could not find the feature

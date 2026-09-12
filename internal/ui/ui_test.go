@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -89,5 +90,32 @@ func TestRelPath(t *testing.T) {
 	}
 	for in, want := range cases {
 		assert.Equalf(t, want, relPath(in), "relPath(%q)", in)
+	}
+}
+
+// A hashed asset from an older build must 404 rather than receive the app
+// shell: an open tab whose daemon was replaced by an upgrade asks for
+// chunk filenames this build no longer has, and answering a dynamic
+// import with text/html turns a clear "your build is gone" into a MIME
+// type error (docs/BUILD-LOG.md, the desktop-launch round).
+func TestHandlerFS_MissingHashedAssetIs404NotAppShell(t *testing.T) {
+	h := HandlerFS(testFS())
+	resp := doGet(t, h, "/ui/assets/FlowsPage-6b3d68f3.js")
+	require.Equal(t, http.StatusNotFound, resp.StatusCode)
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	assert.NotContains(t, string(body), "app shell")
+}
+
+// The exclusion is scoped to assets/: a client-side route that merely
+// looks file-ish still gets the shell, or deep links stop working.
+func TestHandlerFS_MissingNonAssetPathStillGetsAppShell(t *testing.T) {
+	h := HandlerFS(testFS())
+	for _, target := range []string{"/ui/runs/run_123", "/ui/flows/checkout.yaml"} {
+		resp := doGet(t, h, target)
+		require.Equal(t, http.StatusOK, resp.StatusCode, target)
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		assert.Contains(t, string(body), "app shell", target)
 	}
 }

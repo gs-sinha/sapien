@@ -17,8 +17,13 @@ func init() { Register(newUICmd) }
 // HttpOnly session cookie and redirects to /ui/ (internal/server's
 // handleUISession), and opens it in the platform's default browser
 // unless --no-open is given.
+//
+// --install-app writes a macOS launcher that runs this same command, so
+// the UI can be opened from Spotlight, the Dock or a Raycast hotkey
+// rather than only from a terminal (ui_installapp.go).
 func newUICmd(app *App) *cobra.Command {
 	var noOpen bool
+	var installApp bool
 
 	cmd := &cobra.Command{
 		Use:   "ui",
@@ -28,6 +33,23 @@ func newUICmd(app *App) *cobra.Command {
 			ws, err := app.Workspace()
 			if err != nil {
 				return err
+			}
+
+			// --install-app only writes the launcher; it deliberately
+			// neither starts a daemon nor opens anything, so installing
+			// from a script leaves no process behind.
+			if installApp {
+				bundle, err := installAppBundle(ws.Dir)
+				if err != nil {
+					return err
+				}
+				if app.Printer.IsJSON() {
+					return app.Printer.JSON(map[string]any{"bundle": bundle, "workspace": ws.Dir})
+				}
+				app.Printer.Line("installed %s", bundle)
+				app.Printer.Line("  workspace: %s", ws.Dir)
+				app.Printer.Line("  launch it from Spotlight, the Dock, or Raycast; re-run this command to repoint it")
+				return nil
 			}
 
 			info, err := findOrStartDaemon(cmd.Context(), ws, Version)
@@ -56,6 +78,7 @@ func newUICmd(app *App) *cobra.Command {
 	}
 
 	cmd.Flags().BoolVar(&noOpen, "no-open", false, "print the URL instead of opening it in a browser")
+	cmd.Flags().BoolVar(&installApp, "install-app", false, "install ~/Applications/Sapien.app, a launcher for this workspace's UI (macOS), and exit")
 	return cmd
 }
 

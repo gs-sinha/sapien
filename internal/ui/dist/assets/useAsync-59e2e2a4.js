@@ -1,0 +1,2 @@
+import{r as t}from"./index-df355184.js";function k(n,u){const[o,l]=t.useState(null),[f,a]=t.useState(null),[i,s]=t.useState(!0),[d,E]=t.useState(0),c=t.useRef(n);c.current=n,t.useEffect(()=>{let e=!1;return s(!0),a(null),c.current().then(r=>{e||(l(r),s(!1))}).catch(r=>{e||(a(r instanceof Error?r:new Error(String(r))),s(!1))}),()=>{e=!0}},[...u,d]);const S=t.useCallback(()=>E(e=>e+1),[]);return{data:o,error:f,loading:i,reload:S}}export{k as u};
+//# sourceMappingURL=useAsync-59e2e2a4.js.map

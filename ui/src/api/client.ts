@@ -9,6 +9,7 @@
 // details, source, hint. A request that never reaches the server (network
 // failure, daemon not running) is mapped to code "E_NETWORK" so callers can
 // treat every failure uniformly.
+import { setSessionStale } from '../state/daemon';
 import { currentWorkspace } from '../state/workspace';
 import type { WorkspaceInfo } from '../state/workspace';
 import type {
@@ -168,6 +169,19 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiClientError('E_NETWORK', err instanceof Error ? err.message : 'network request failed');
   }
 
+  // 401 here means the session cookie is for a daemon that no longer
+  // exists: `sapien serve` mints a new bearer token on every start, so a
+  // tab that outlived a restart keeps sending the old one. Without this
+  // the app looked connected -- the daemon is reachable, /v1/health is
+  // unauthenticated and answers happily -- while every actual request
+  // failed. A success clears it again, which is what a relaunch's own
+  // /ui/session tab does for every tab at this origin.
+  if (res.status === 401) {
+    setSessionStale(true);
+  } else if (res.ok) {
+    setSessionStale(false);
+  }
+
   if (res.status === 204) {
     return undefined as T;
   }
@@ -214,6 +228,7 @@ function del<T>(path: string): Promise<T> {
 export function getHealth(): Promise<HealthResponse> {
   return get('/v1/health');
 }
+
 export function getWorkspace(): Promise<Workspace> {
   return get('/v1/workspace');
 }

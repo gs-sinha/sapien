@@ -1,11 +1,13 @@
 import { lazy, Suspense, useEffect } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { DaemonBanner } from './components/DaemonBanner';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Nav } from './components/Nav';
 import { NotFound } from './components/NotFound';
 import { SearchBox } from './components/SearchBox';
 import { StatusBar } from './components/StatusBar';
 import { Toasts } from './components/Toasts';
+import { useDaemon } from './state/daemon';
 import { useEvents } from './state/events';
 import { useTheme } from './state/theme';
 
@@ -38,6 +40,9 @@ function PageFallback() {
 export function App() {
   useEffect(() => {
     useTheme.getState().init();
+    // Record which daemon build served this tab, so a later probe can
+    // tell "replaced by an upgrade" from "not running at all".
+    void useDaemon.getState().probe();
     useEvents.getState().start();
     return () => useEvents.getState().stop();
   }, []);
@@ -46,6 +51,7 @@ export function App() {
     <BrowserRouter>
       <div className="flex h-screen flex-col bg-white text-slate-900 dark:bg-slate-950 dark:text-slate-100">
         <StatusBar />
+        <DaemonBanner />
         <div className="flex flex-1 overflow-hidden">
           <Nav />
           <div className="flex flex-1 flex-col overflow-hidden">

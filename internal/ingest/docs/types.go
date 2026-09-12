@@ -51,4 +51,10 @@ type Options struct {
 	// Source defaults to domain.DocSourceFile.
 	Source domain.DocSource
 	Known  KnownRefs
+	// Matcher, when set, is the compiled form of Known and is used instead
+	// of compiling Known again. A caller parsing a whole package's docs
+	// should build one with NewRefMatcher and set it here on every doc:
+	// Known's name regexps are otherwise recompiled for every section of
+	// every file (see RefMatcher's doc comment). When set, Known is ignored.
+	Matcher *RefMatcher
 }

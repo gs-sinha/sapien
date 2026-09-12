@@ -37,6 +37,12 @@ import (
 // service is only ever re-fetched by Services().Sync/Reindex or the
 // daemon's SyncGitPeriodically timer (watch.go), never by opening the
 // engine.
+//
+// That holds for the resync this triggers as well, not just for the
+// fingerprint: it goes through SyncOneFromDisk. Until 2026-09-12 it called
+// SyncOne, which fetches, so opening the engine did reach the network and
+// `git reset --hard` every git-sourced clone -- the opposite of what the
+// paragraph above promises, and of what a staleness check is for.
 func (l *Local) staleCheck(ctx context.Context) error {
 	for _, ref := range l.ws.Services {
 		fp, fpErr := l.computeFingerprint(ctx, ref)
@@ -56,7 +62,7 @@ func (l *Local) staleCheck(ctx context.Context) error {
 			continue
 		}
 
-		svc, err := l.syncer.SyncOne(ctx, ref.Name)
+		svc, err := l.syncer.SyncOneFromDisk(ctx, ref.Name)
 		if err == nil {
 			if fpErr == nil {
 				_ = settingsSet(ctx, l.db, fingerprintKey(ref.Name), fp)

@@ -340,3 +340,52 @@ func TestSyncer_SyncGitPeriodically_NoGitManager_ReturnsOnCancel(t *testing.T) {
 		t.Fatal("SyncGitPeriodically did not return promptly after ctx cancel")
 	}
 }
+
+// A resync triggered by a *local* change must never fetch. Manager.Sync
+// ends in `git reset --hard origin/<ref>`, so fetching here would discard
+// the very edits that triggered the sync -- an agent writing docs into a
+// git-sourced package would be fighting the daemon for its own work -- and
+// would put a network call on every file save.
+func TestSyncer_SyncOneFromDisk_DoesNotFetchOrDiscardLocalEdits(t *testing.T) {
+	env := hermeticGitEnv(t)
+	bareDir, url := newBareRepo(t, env)
+	srcAPI := filepath.Join(fixturesRoot(t), "order-service", "api")
+	first := pushDir(t, bareDir, env, srcAPI, "seed order-service")
+
+	ws := &domain.Workspace{Version: 1, Name: "w", Dir: t.TempDir()}
+	ws.Services = []domain.ServiceRef{
+		{Name: "order-service", Source: domain.Source{Kind: domain.SourceGit, URL: url}},
+	}
+
+	mgr := gitManager(t, env)
+	s := registry.NewSyncer(ws, &fakeIndexer{}, nil).WithGit(mgr)
+
+	// The first sync clones and checks out `first`.
+	_, err := s.SyncOne(context.Background(), "order-service")
+	require.NoError(t, err)
+	clone := mgr.Dir(url)
+	require.Equal(t, first, runGit(t, clone, env, "rev-parse", "HEAD"))
+
+	// Upstream moves on, and something edits a tracked file in the clone --
+	// the shape of an agent writing documentation into the package.
+	second := pushDir(t, bareDir, env, srcAPI, "upstream moves on")
+	require.NotEqual(t, first, second)
+	edited := filepath.Join(clone, "api", ".sync-marker")
+	require.NoError(t, os.WriteFile(edited, []byte("written by an agent"), 0o644))
+
+	_, err = s.SyncOneFromDisk(context.Background(), "order-service")
+	require.NoError(t, err)
+
+	got, rerr := os.ReadFile(edited)
+	require.NoError(t, rerr)
+	assert.Equal(t, "written by an agent", string(got),
+		"a local edit must survive the resync that edit triggered")
+	assert.Equal(t, first, runGit(t, clone, env, "rev-parse", "HEAD"),
+		"SyncOneFromDisk must not fetch: the clone must still be on the commit it had")
+
+	// A sync a user or the periodic timer asked for still fetches and resets.
+	_, err = s.SyncOne(context.Background(), "order-service")
+	require.NoError(t, err)
+	assert.Equal(t, second, runGit(t, clone, env, "rev-parse", "HEAD"),
+		"SyncOne must still bring the clone up to date")
+}

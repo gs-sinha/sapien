@@ -45,6 +45,15 @@ func (f *fakeIndexer) Apply(ctx context.Context, snap registry.Snapshot) (domain
 	return domain.CatalogChange{Service: snap.Service.Name, Added: ids}, nil
 }
 
+// snapshots returns the snapshots applied so far, under the lock.
+func (f *fakeIndexer) snapshots() []registry.Snapshot {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]registry.Snapshot, len(f.applied))
+	copy(out, f.applied)
+	return out
+}
+
 func (f *fakeIndexer) MarkServiceError(ctx context.Context, svc domain.Service, msg string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

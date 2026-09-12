@@ -34,6 +34,10 @@ type Builder struct {
 	// Build must not fetch again but may still describe the clone as
 	// current. See WithGitSynced.
 	gitSynced bool
+	// cache, when set, reuses a previous contract ingest whose inputs are
+	// byte-identical to this one's. Optional: without it every Build parses
+	// the contract afresh, as it always did. See ingestcache.go.
+	cache *ingestCache
 }
 
 // NewBuilder returns a Builder that resolves service sources relative to ws.
@@ -70,6 +74,16 @@ func (b *Builder) WithGitFetch() *Builder {
 // it calls Sync itself and then builds.
 func (b *Builder) WithGitSynced() *Builder {
 	b.gitSynced = true
+	return b
+}
+
+// withIngestCache lets Build reuse an earlier ingest of the same contract
+// bytes instead of re-parsing them. Only the Syncer sets one (it is the
+// only caller that builds the same service over and over, from the file
+// watcher); a one-shot Build gains nothing from a cache and pays for the
+// parsed contract staying live.
+func (b *Builder) withIngestCache(c *ingestCache) *Builder {
+	b.cache = c
 	return b
 }
 
@@ -152,6 +166,15 @@ func (b *Builder) Build(ctx context.Context, ref domain.ServiceRef) (*Snapshot, 
 		return nil, err
 	}
 
+	// Hash the contract files before ingesting them: the digests are both
+	// what the Snapshot records as "this is what was indexed" and the key
+	// the ingest is cached under (ingestcache.go), so computing them first
+	// costs nothing and can save the whole parse.
+	contractHashes, relContracts, err := hashContracts(pkg.Dir, contracts)
+	if err != nil {
+		return nil, err
+	}
+
 	name := ref.Name
 	if name == "" {
 		name = meta.Name
@@ -159,7 +182,7 @@ func (b *Builder) Build(ctx context.Context, ref domain.ServiceRef) (*Snapshot, 
 
 	var merged *mergedContracts
 	if name != "" {
-		merged, err = ingestContracts(name, pkg.Dir, contracts, meta.Concepts)
+		merged, err = b.ingest(name, pkg.Dir, contracts, meta.Concepts, contractHashes)
 		if err != nil {
 			return nil, err
 		}
@@ -167,7 +190,9 @@ func (b *Builder) Build(ctx context.Context, ref domain.ServiceRef) (*Snapshot, 
 		// Neither the workspace entry nor service.yaml names the service;
 		// ingest once under a placeholder id to learn the contract's title,
 		// then re-ingest under the real, derived name so operation ids are
-		// prefixed correctly.
+		// prefixed correctly. The placeholder pass is deliberately not
+		// cached: its result is thrown away, and caching it would evict a
+		// real service's entry to hold something nobody will ask for again.
 		peek, peekErr := ingestContracts("_pending", pkg.Dir, contracts, meta.Concepts)
 		if peekErr != nil {
 			return nil, peekErr
@@ -177,7 +202,7 @@ func (b *Builder) Build(ctx context.Context, ref domain.ServiceRef) (*Snapshot, 
 			return nil, errs.New(errs.Invalid, "unable to determine a name for the service at %s", pkg.Dir).
 				WithHint("set `name` in the workspace entry or in service.yaml")
 		}
-		merged, err = ingestContracts(name, pkg.Dir, contracts, meta.Concepts)
+		merged, err = b.ingest(name, pkg.Dir, contracts, meta.Concepts, contractHashes)
 		if err != nil {
 			return nil, err
 		}
@@ -195,19 +220,6 @@ func (b *Builder) Build(ctx context.Context, ref domain.ServiceRef) (*Snapshot, 
 		return nil, err
 	}
 
-	contractHashes := make(map[string]string, len(contracts))
-	relContracts := make([]string, 0, len(contracts))
-	for _, c := range contracts {
-		rel := relPath(pkg.Dir, c)
-		h, herr := hashFileHex(c)
-		if herr != nil {
-			return nil, errs.Wrap(errs.Internal, herr, "hashing contract %s", c)
-		}
-		contractHashes[rel] = h
-		relContracts = append(relContracts, rel)
-	}
-	sort.Strings(relContracts)
-
 	description := meta.Description
 	if description == "" {
 		description = firstLine(merged.Description)
@@ -219,7 +231,14 @@ func (b *Builder) Build(ctx context.Context, ref domain.ServiceRef) (*Snapshot, 
 	// endpoint can be accepted in service.yaml with a reason like anything
 	// else.
 	cov, covWarnings := coverage(merged.Operations, finalDocs, meta, pkg.ExamplesDir)
-	unaccepted, accepted := partitionWarnings(append(merged.Warnings, covWarnings...), meta.AcceptedWarnings)
+	// Copy rather than append onto merged.Warnings: merged may be a shared,
+	// read-only cache entry (ingestcache.go), and appending would write into
+	// its backing array -- benign for this Build, a data race for a
+	// concurrent one.
+	allWarnings := make([]domain.LintWarning, 0, len(merged.Warnings)+len(covWarnings))
+	allWarnings = append(allWarnings, merged.Warnings...)
+	allWarnings = append(allWarnings, covWarnings...)
+	unaccepted, accepted := partitionWarnings(allWarnings, meta.AcceptedWarnings)
 
 	svc := domain.Service{
 		ID:               name,
@@ -280,6 +299,47 @@ func resolveContracts(pkg *Package, override string, meta domain.ServiceMetadata
 			WithHint("add an openapi.yaml, or declare `contracts:` in service.yaml")
 	}
 	return pkg.Contracts, nil
+}
+
+// hashContracts returns the sha256 digest of every contract file, keyed by
+// its path relative to pkgDir, plus that same set of relative paths sorted.
+func hashContracts(pkgDir string, contracts []string) (map[string]string, []string, error) {
+	hashes := make(map[string]string, len(contracts))
+	rels := make([]string, 0, len(contracts))
+	for _, c := range contracts {
+		rel := relPath(pkgDir, c)
+		h, err := hashFileHex(c)
+		if err != nil {
+			return nil, nil, errs.Wrap(errs.Internal, err, "hashing contract %s", c)
+		}
+		hashes[rel] = h
+		rels = append(rels, rel)
+	}
+	sort.Strings(rels)
+	return hashes, rels, nil
+}
+
+// ingest is ingestContracts with the Builder's cache in front of it: an
+// ingest of the same files, under the same service id and concepts, is
+// reused rather than repeated. The returned *mergedContracts may be shared
+// with other Builds and must be treated as read-only.
+//
+// A cache miss (or no cache at all) parses the contracts exactly as before,
+// so a contract edit is picked up on the very next Build.
+func (b *Builder) ingest(serviceID, pkgDir string, contracts []string, concepts []string, contractHashes map[string]string) (*mergedContracts, error) {
+	if b.cache == nil {
+		return ingestContracts(serviceID, pkgDir, contracts, concepts)
+	}
+	key := ingestKey(serviceID, contractHashes, concepts)
+	if hit := b.cache.get(serviceID, key); hit != nil {
+		return hit, nil
+	}
+	merged, err := ingestContracts(serviceID, pkgDir, contracts, concepts)
+	if err != nil {
+		return nil, err
+	}
+	b.cache.put(serviceID, key, merged)
+	return merged, nil
 }
 
 // ingestContracts ingests every file in contracts (in order) under a shared
@@ -455,6 +515,12 @@ func buildKnownRefs(name string, meta domain.ServiceMetadata, merged *mergedCont
 // through docs.Parse so they carry Refs, then parses every docs/**/*.md file
 // under pkg.DocsDir.
 func buildDocs(name string, pkg *Package, merged *mergedContracts, known docs.KnownRefs) ([]domain.Doc, error) {
+	// One compiled matcher for the whole package. known carries an entry per
+	// operation and per component schema, so compiling it per section (what
+	// docs.Parse does when handed no matcher) costs hundreds of regexp
+	// compilations per file; see docs.RefMatcher.
+	matcher := docs.NewRefMatcher(known)
+
 	out := make([]domain.Doc, 0, len(merged.Docs))
 
 	for _, d := range merged.Docs {
@@ -467,29 +533,43 @@ func buildDocs(name string, pkg *Package, merged *mergedContracts, known docs.Kn
 			Path:      d.Path,
 			Title:     d.Title,
 			Source:    d.Source,
-			Known:     known,
+			Matcher:   matcher,
 		}))
 	}
 
-	if pkg.DocsDir != "" {
-		files, err := globFilesRecursive(pkg.DocsDir, ".md")
-		if err != nil {
-			return nil, errs.Wrap(errs.Internal, err, "scanning %s", pkg.DocsDir)
-		}
-		for _, f := range files {
-			rel := filepath.ToSlash(relPath(pkg.Dir, f))
-			doc, perr := docs.ParseFile(f, docs.Options{
-				ServiceID: name,
-				Path:      rel,
-				Known:     known,
-			})
-			if perr != nil {
-				return nil, errs.Wrap(errs.Internal, perr, "parsing doc %s", f)
-			}
-			out = append(out, doc)
-		}
+	fileDocs, err := parsePackageDocs(name, pkg, matcher)
+	if err != nil {
+		return nil, err
 	}
+	return append(out, fileDocs...), nil
+}
 
+// parsePackageDocs parses every docs/**/*.md file under pkg with an
+// already-compiled matcher, as file-sourced docs of the service named name.
+// It is shared by buildDocs (a full build) and BuildDocsOnly (the watcher's
+// docs-only reindex), which must produce byte-identical docs for the same
+// files or the two paths would disagree about the catalog's contents.
+func parsePackageDocs(name string, pkg *Package, matcher *docs.RefMatcher) ([]domain.Doc, error) {
+	if pkg.DocsDir == "" {
+		return nil, nil
+	}
+	files, err := globFilesRecursive(pkg.DocsDir, ".md")
+	if err != nil {
+		return nil, errs.Wrap(errs.Internal, err, "scanning %s", pkg.DocsDir)
+	}
+	out := make([]domain.Doc, 0, len(files))
+	for _, f := range files {
+		rel := filepath.ToSlash(relPath(pkg.Dir, f))
+		doc, perr := docs.ParseFile(f, docs.Options{
+			ServiceID: name,
+			Path:      rel,
+			Matcher:   matcher,
+		})
+		if perr != nil {
+			return nil, errs.Wrap(errs.Internal, perr, "parsing doc %s", f)
+		}
+		out = append(out, doc)
+	}
 	return out, nil
 }
 

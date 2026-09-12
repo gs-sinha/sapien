@@ -34,6 +34,19 @@ func HandlerFS(fsys fs.FS) http.Handler {
 
 		rel := relPath(r.URL.Path)
 		if !isRegularFile(fsys, rel) {
+			// A missing build asset is a 404, never the app shell. Vite
+			// content-hashes every filename under assets/, so a request
+			// for one that isn't here means the tab was loaded from an
+			// older build than the binary now serving it (an upgrade
+			// replaced the daemon under an open tab). Falling back to
+			// index.html there answers a dynamic import for a .js chunk
+			// with text/html, which the browser reports as a MIME type
+			// error -- unreadable next to the honest 404 that tells the
+			// client its build is gone.
+			if strings.HasPrefix(rel, assetsPrefix) {
+				http.NotFound(w, r)
+				return
+			}
 			// SPA history fallback: any /ui/* path that isn't a real
 			// file (a client-side route like /ui/runs/run_123) gets the
 			// app shell, which then renders that route itself.
@@ -71,6 +84,12 @@ func HandlerFS(fsys fs.FS) http.Handler {
 // root ("" only for "/ui/" itself, which becomes "index.html"),
 // path.Clean-ing away any ".." segments so a request can't escape fsys
 // regardless of what the underlying fs.FS would itself allow.
+// assetsPrefix is where Vite writes every content-hashed build artifact.
+// Paths under it are both cached forever (setCacheHeaders) and excluded
+// from the SPA history fallback (HandlerFS): a hashed name either exists
+// in this build or does not exist at all.
+const assetsPrefix = "assets/"
+
 func relPath(reqPath string) string {
 	rel := strings.TrimPrefix(reqPath, "/ui")
 	rel = strings.TrimPrefix(path.Clean("/"+rel), "/")
@@ -94,7 +113,7 @@ func setCacheHeaders(w http.ResponseWriter, rel string) {
 	switch {
 	case rel == "index.html":
 		w.Header().Set("Cache-Control", "no-cache")
-	case strings.HasPrefix(rel, "assets/"):
+	case strings.HasPrefix(rel, assetsPrefix):
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	}
 }

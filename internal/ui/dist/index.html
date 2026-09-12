@@ -4,8 +4,13 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Sapien</title>
-    <script type="module" crossorigin src="/ui/assets/index-3cde1590.js"></script>
-    <link rel="stylesheet" href="/ui/assets/index-9e214300.css">
+    <!-- PNG rather than an SVG data URI: Safari does not render SVG
+         favicons, and the inspector is meant to work in whatever browser
+         is the system default. -->
+    <link rel="icon" type="image/png" href="/ui/favicon.png" />
+    <link rel="apple-touch-icon" href="/ui/apple-touch-icon.png" />
+    <script type="module" crossorigin src="/ui/assets/index-df355184.js"></script>
+    <link rel="stylesheet" href="/ui/assets/index-6ce71997.css">
   </head>
   <body class="bg-white text-slate-900 dark:bg-slate-950 dark:text-slate-100">
     <div id="root"></div>

@@ -178,6 +178,15 @@ func (s *Server) newRouter() http.Handler {
 	r.Get("/ui", uiHandler.ServeHTTP)
 	r.Get("/ui/*", uiHandler.ServeHTTP)
 
+	// Runtime introspection: /debug/pprof/* and /debug/memstats
+	// (handlers_debug.go). Outside routeTable because it is Go's surface,
+	// not Sapien's API, so it must not appear in /v1/openapi.json -- but
+	// wrapped in authMiddleware here and covered by hostOriginMiddleware
+	// above, so it is guarded exactly like every /v1 route.
+	debugRoutes := s.authMiddleware(s.debugHandler())
+	r.Handle("/debug/*", debugRoutes)
+	r.Handle("/debug", debugRoutes)
+
 	return r
 }
 

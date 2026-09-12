@@ -4,6 +4,13 @@ vi.mock('../api/client', () => ({
   getRecentEvents: vi.fn().mockResolvedValue([]),
 }));
 
+// state/daemon.ts is reached through the reconnect path below, and probes
+// /v1/health with a bare fetch.
+const fetchMock = vi.fn().mockResolvedValue({
+  ok: true,
+  json: async () => ({ ok: true, version: '1.1.0', workspace: '/ws' }),
+});
+
 class MockWebSocket {
   static instances: MockWebSocket[] = [];
   onopen: (() => void) | null = null;
@@ -29,6 +36,8 @@ async function freshEventsModule() {
 }
 
 beforeEach(() => {
+  fetchMock.mockClear();
+  vi.stubGlobal('fetch', fetchMock);
   MockWebSocket.instances = [];
   vi.stubGlobal('WebSocket', MockWebSocket as unknown as typeof WebSocket);
   vi.useFakeTimers();
@@ -126,6 +135,23 @@ describe('events store', () => {
 
     await vi.advanceTimersByTimeAsync(1000);
     expect(MockWebSocket.instances).toHaveLength(2);
+  });
+
+  // The socket alone cannot tell "the daemon is restarting" from "the
+  // daemon was replaced by an upgrade and this tab's UI is stale": it just
+  // closes and retries. One failure is ordinary and must stay silent; the
+  // second asks who is listening now.
+  it('asks who is listening only once reconnecting has actually failed', async () => {
+    const { useEvents } = await freshEventsModule();
+    useEvents.getState().start();
+
+    MockWebSocket.instances[0].onopen?.();
+    MockWebSocket.instances[0].close();
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1000);
+    MockWebSocket.instances[1].close();
+    expect(fetchMock).toHaveBeenCalledWith('/v1/health', expect.anything());
   });
 
   it('stop() prevents further reconnects', async () => {
