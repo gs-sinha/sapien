@@ -38,7 +38,7 @@ func (srv *server) registerTools(s *sdkmcp.Server) {
 
 	sdkmcp.AddTool(s, &sdkmcp.Tool{
 		Name:        "get_api",
-		Description: "Get one operation's contract at progressively more detail: summary, fields, or full.",
+		Description: "Get one operation's contract at progressively more detail: summary, fields, or full. Every level includes a ready-to-send request_example (verified example, saved example, the contract's own example, or one synthesized from the schema), so there is no need to assemble a payload from the field list.",
 	}, srv.getAPI)
 
 	sdkmcp.AddTool(s, &sdkmcp.Tool{
@@ -53,7 +53,7 @@ func (srv *server) registerTools(s *sdkmcp.Server) {
 
 	sdkmcp.AddTool(s, &sdkmcp.Tool{
 		Name:        "get_dsl_reference",
-		Description: "Get a Sapien reference with worked examples: flow (the flow DSL), memory, expressions, or service (how to lay out and register a service's api/ package so Sapien can index it).",
+		Description: "Get a Sapien reference with worked examples: sapien (what Sapien is and what you can do with it), flow (the flow DSL, including soft assertions), memory, expressions, or service (how to lay out and register a service's api/ package so Sapien can index it).",
 	}, srv.getDSLReference)
 
 	sdkmcp.AddTool(s, &sdkmcp.Tool{
@@ -63,7 +63,7 @@ func (srv *server) registerTools(s *sdkmcp.Server) {
 
 	sdkmcp.AddTool(s, &sdkmcp.Tool{
 		Name:        "execute_api",
-		Description: "Execute one operation as a one-step run against an environment.",
+		Description: "Execute one operation as a one-step run against an environment. Prefer this over curl or a throwaway script: the environment supplies the base URL, headers, and secrets, the call is recorded as a run, a failure comes back diagnosed, and a call that worked can be saved with create_example for the next caller.",
 	}, srv.executeAPI)
 
 	sdkmcp.AddTool(s, &sdkmcp.Tool{

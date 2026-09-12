@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/creack/pty"
@@ -62,15 +63,37 @@ func (s *Session) Resize(cols, rows int) error {
 	return pty.Setsize(s.ptmx, &pty.Winsize{Cols: uint16(cols), Rows: uint16(rows)})
 }
 
-// Close kills the process (SIGKILL) and releases the PTY. It is idempotent
-// and safe to call concurrently with the process exiting on its own (via
-// Wait/waitLoop) or with the idle timeout firing.
+// Close kills the terminal process, everything it started (SIGKILL), and
+// releases the PTY. It is idempotent and safe to call concurrently with
+// the process exiting on its own (via Wait/waitLoop) or with the idle
+// timeout firing.
 func (s *Session) Close() error {
 	s.closeOnce.Do(func() {
 		s.stopIdle()
 		close(s.abort)
 		if s.cmd.Process != nil {
+			pid := s.cmd.Process.Pid
+			// Take the census of the pane's descendants first: once the
+			// pane process dies its children are reparented to pid 1 and
+			// the parent links that identify them are gone. Skip it
+			// entirely once waitLoop has reaped the process, because then
+			// the pid is no longer ours and may already have been
+			// recycled by something unrelated -- see reap.go, which is
+			// suspicious about this too.
+			var escaped killSet
+			select {
+			case <-s.waitDone:
+			default:
+				escaped = paneKillSet(pid)
+			}
+			// pty.Start creates a separate session/process group. Kill the
+			// group so agent subprocesses do not survive a disconnected tab.
+			_ = syscall.Kill(-pid, syscall.SIGKILL)
 			_ = s.cmd.Process.Kill()
+			// That reaches everything `claude` and `codex` spawn, but not
+			// what a shell pane with job control on put in a process
+			// group of its own; the census above is what covers those.
+			escaped.kill()
 		}
 		_ = s.ptmx.Close()
 	})

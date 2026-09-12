@@ -59,11 +59,27 @@ func validateCommand(command string) (string, error) {
 		return "", errs.New(errs.Invalid, "command %q is not allowed", command).
 			WithHint("only claude, codex, or your shell may be started here")
 	}
-	path, err := exec.LookPath(command)
+	path, err := resolveTerminalCommand(command)
 	if err != nil {
 		return "", errs.New(errs.Invalid, "command %q was not found on PATH", command)
 	}
 	return path, nil
+}
+
+// Agents installed in ~/.local/bin should also be available when Sapien
+// was started by a launcher with a minimal PATH. Prefer PATH so explicit
+// installations keep their usual precedence; never expand arbitrary names.
+func resolveTerminalCommand(command string) (string, error) {
+	path, err := exec.LookPath(command)
+	if err == nil || (command != "codex" && command != "claude") {
+		return path, err
+	}
+	if home, homeErr := os.UserHomeDir(); homeErr == nil {
+		if path, fallbackErr := exec.LookPath(filepath.Join(home, ".local", "bin", command)); fallbackErr == nil {
+			return path, nil
+		}
+	}
+	return "", err
 }
 
 // cleanAbsDir returns p as a cleaned absolute path, or "" if that fails.
@@ -145,6 +161,16 @@ func (s *Server) validateDir(ctx context.Context, dir string) (string, error) {
 			}
 		}
 	}
+	// The allowlist is per-workspace (terminalDirs reads the request's own
+	// engine), so the message names the workspace the request actually
+	// landed in. By far the commonest way to reach this error is a client
+	// that offered one workspace's directories and then sent the chosen
+	// one with a different workspace selected -- "not allowed" alone would
+	// leave the reader looking at a path that plainly does exist.
+	if ws := engineFrom(ctx).Workspace(); ws != nil {
+		return "", errs.New(errs.Invalid, "dir %q is not an allowed terminal directory in workspace %s", dir, ws.Dir).
+			WithHint("pick a directory from GET /v1/terminal/targets for this workspace")
+	}
 	return "", errs.New(errs.Invalid, "dir %q is not an allowed terminal directory", dir).
 		WithHint("pick a directory from GET /v1/terminal/targets")
 }
@@ -160,7 +186,7 @@ type terminalTargetsResponse struct {
 func (s *Server) handleTerminalTargets(w http.ResponseWriter, r *http.Request) {
 	var commands []string
 	for _, c := range allowedCommands() {
-		if _, err := exec.LookPath(c); err == nil {
+		if _, err := resolveTerminalCommand(c); err == nil {
 			commands = append(commands, c)
 		}
 	}
@@ -214,6 +240,12 @@ func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
 
 	env := os.Environ()
 	env = append(env, "TERM=xterm-256color")
+	// The pane's workspace is the request's workspace, not the daemon's
+	// primary one: engineFrom resolves whatever the header or `?workspace=`
+	// named (workspacectx.go), and this is the variable an agent started in
+	// the pane reads to decide which workspace its own MCP/CLI calls talk
+	// to. Sending the selector on the upgrade is therefore all a client has
+	// to do to make the pane belong to the workspace the user is looking at.
 	if ws := engineFrom(r.Context()).Workspace(); ws != nil {
 		env = append(env, "SAPIEN_WORKSPACE="+ws.Dir)
 	}

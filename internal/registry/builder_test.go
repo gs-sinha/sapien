@@ -239,10 +239,22 @@ contracts: [one.yaml, two.yaml]
 	assert.Equal(t, "two-files-service.listWidgets", snap.Operations[0].ID)
 	assert.Equal(t, "two-files-service.listWidgets", snap.Operations[1].ID)
 
-	require.Len(t, snap.Service.Warnings, 1)
-	assert.Equal(t, "DUPLICATE_OPERATION_ID", snap.Service.Warnings[0].Code)
+	require.Len(t, warningsWithCode(snap.Service.Warnings, "DUPLICATE_OPERATION_ID"), 1)
 
 	assert.ElementsMatch(t, []string{"one.yaml", "two.yaml"}, snap.Service.ContractFiles)
+}
+
+// warningsWithCode filters a service's warnings to one code, so a test about
+// one lint finding is not perturbed by the coverage lint (which fires on any
+// fixture without docs or concepts -- most of them, deliberately).
+func warningsWithCode(warnings []domain.LintWarning, code string) []domain.LintWarning {
+	var out []domain.LintWarning
+	for _, w := range warnings {
+		if w.Code == code {
+			out = append(out, w)
+		}
+	}
+	return out
 }
 
 func TestBuilder_Build_UnsupportedSourceKind(t *testing.T) {
@@ -387,8 +399,8 @@ accepted_warnings:
 		snap.Service.AcceptedWarnings[0].Reason)
 
 	// MISSING_SUMMARY was never accepted, so it stays in Warnings.
-	require.Len(t, snap.Service.Warnings, 1)
-	assert.Equal(t, "MISSING_SUMMARY", snap.Service.Warnings[0].Code)
+	require.Len(t, warningsWithCode(snap.Service.Warnings, "MISSING_SUMMARY"), 1)
+	assert.Empty(t, warningsWithCode(snap.Service.Warnings, "UNSUPPORTED_MEDIA_TYPE"))
 }
 
 func TestBuilder_Build_AcceptedWarnings_ByMatch(t *testing.T) {
@@ -466,8 +478,7 @@ accepted_warnings:
 	snap, err := b.Build(context.Background(), ref)
 	require.NoError(t, err)
 
-	require.Len(t, snap.Service.Warnings, 1)
-	assert.Equal(t, "STALE_ACCEPTANCE", snap.Service.Warnings[0].Code)
+	require.Len(t, warningsWithCode(snap.Service.Warnings, "STALE_ACCEPTANCE"), 1)
 	assert.Empty(t, snap.Service.AcceptedWarnings)
 }
 

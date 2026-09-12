@@ -550,6 +550,22 @@ export interface SavedExample {
   path?: string;
 }
 
+// RequestExample is the daemon's answer to "what does a call to this
+// operation look like?": a ready-to-send payload plus where it came from.
+// Resolved server-side (internal/example.Resolve) so this page, get_api, and
+// the CLI never disagree about which example wins.
+export type RequestExampleSource = 'verified' | 'saved' | 'contract' | 'schema';
+
+export interface RequestExample {
+  operation: string;
+  source: RequestExampleSource;
+  source_id?: string;
+  input?: Record<string, unknown>;
+  body?: unknown;
+  headers?: Record<string, string>;
+  note?: string;
+}
+
 export interface ExampleQueryParams {
   operation?: string;
   service?: string;

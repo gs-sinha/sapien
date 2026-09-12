@@ -213,7 +213,13 @@ func (b *Builder) Build(ctx context.Context, ref domain.ServiceRef) (*Snapshot, 
 		description = firstLine(merged.Description)
 	}
 
-	unaccepted, accepted := partitionWarnings(merged.Warnings, meta.AcceptedWarnings)
+	// Coverage lint runs on the built article -- operations, the docs that
+	// were actually parsed, the examples on disk -- and joins the contract's
+	// own warnings before acceptance, so an intentionally undocumented
+	// endpoint can be accepted in service.yaml with a reason like anything
+	// else.
+	cov, covWarnings := coverage(merged.Operations, finalDocs, meta, pkg.ExamplesDir)
+	unaccepted, accepted := partitionWarnings(append(merged.Warnings, covWarnings...), meta.AcceptedWarnings)
 
 	svc := domain.Service{
 		ID:               name,
@@ -228,6 +234,7 @@ func (b *Builder) Build(ctx context.Context, ref domain.ServiceRef) (*Snapshot, 
 		Status:           domain.SyncOK,
 		Warnings:         unaccepted,
 		AcceptedWarnings: accepted,
+		Coverage:         &cov,
 		LastIndexed:      time.Now(),
 		Commit:           gitCommit,
 		OperationCount:   len(merged.Operations),

@@ -18,6 +18,7 @@ import { FitAddon } from 'xterm-addon-fit';
 import { create } from 'zustand';
 import 'xterm/css/xterm.css';
 import { terminalWebSocketURL } from '../api/agentExtra';
+import { currentWorkspace, useWorkspace } from './workspace';
 
 export type SessionPhase = 'idle' | 'connecting' | 'running' | 'exited' | 'error';
 
@@ -25,8 +26,22 @@ interface AgentTerminalState {
   phase: SessionPhase;
   command: string;
   dir: string;
+  /**
+   * The workspace the running pane belongs to ("" = the daemon's primary),
+   * captured when the session started. A PTY cannot change workspace after
+   * the fact -- its working directory and its SAPIEN_WORKSPACE were both
+   * fixed at spawn -- so this is the pane's own answer to "which workspace
+   * am I?", independent of what the picker says now.
+   */
+  workspace: string;
   exitCode: number | null;
   errorMessage: string | null;
+  /**
+   * Why the session ended, when it was not the process exiting on its own
+   * (today: the user switched workspace). Shown instead of the generic
+   * "Session ended" notice; null for an ordinary exit.
+   */
+  endedNote: string | null;
 }
 
 // Raw, non-reactive singletons. Deliberately not part of the zustand
@@ -51,8 +66,10 @@ export const useAgentTerminal = create<AgentTerminalState>(() => ({
   phase: 'idle',
   command: '',
   dir: '',
+  workspace: currentWorkspace(),
   exitCode: null,
   errorMessage: null,
+  endedNote: null,
 }));
 
 // ensureTerminal creates the singleton Terminal/FitAddon/container the
@@ -145,12 +162,18 @@ export function startSession(opts: StartOptions): void {
   t.reset();
   pendingPrompt = opts.prompt?.trim() ? opts.prompt : null;
 
+  // Read once and use for both the URL and the recorded state, so the pane
+  // can never disagree with the socket it is attached to.
+  const workspace = currentWorkspace();
+
   useAgentTerminal.setState({
     phase: 'connecting',
     command: opts.command,
     dir: opts.dir,
+    workspace,
     exitCode: null,
     errorMessage: null,
+    endedNote: null,
   });
 
   fa.fit();
@@ -159,7 +182,7 @@ export function startSession(opts: StartOptions): void {
 
   let socket: WebSocket;
   try {
-    socket = new WebSocket(terminalWebSocketURL({ command: opts.command, dir: opts.dir, cols, rows }));
+    socket = new WebSocket(terminalWebSocketURL({ command: opts.command, dir: opts.dir, cols, rows, workspace }));
   } catch (err) {
     useAgentTerminal.setState({
       phase: 'error',
@@ -170,7 +193,17 @@ export function startSession(opts: StartOptions): void {
   socket.binaryType = 'arraybuffer';
   ws = socket;
 
+  // Whether the handshake ever succeeded. A browser gives the page no access
+  // to a failed upgrade's status or body, so "closed without ever opening"
+  // is the only signal that the daemon refused the request outright -- e.g.
+  // GET /v1/terminal's 400 for a directory that is not in this workspace's
+  // allowlist. Without it the pane reported "Session ended", which is
+  // indistinguishable from a session that ran and finished and tells the
+  // user nothing they can act on.
+  let opened = false;
+
   socket.onopen = () => {
+    opened = true;
     if (ws === socket) useAgentTerminal.setState({ phase: 'running' });
   };
 
@@ -197,6 +230,15 @@ export function startSession(opts: StartOptions): void {
   socket.onclose = () => {
     if (ws !== socket) return;
     ws = null;
+    if (!opened) {
+      useAgentTerminal.setState({
+        phase: 'error',
+        errorMessage:
+          `the daemon refused to open a terminal in ${opts.dir}. ` +
+          'That directory may not belong to the selected workspace -- pick another from the list and try again.',
+      });
+      return;
+    }
     // A close with no preceding "exit" frame (network drop, server
     // restart) still ends the session from the UI's point of view.
     if (useAgentTerminal.getState().phase !== 'exited') {
@@ -236,3 +278,43 @@ export function endSession(): void {
 export function hasActiveSession(): boolean {
   return ws !== null;
 }
+
+// Switching workspace ends the pane. One daemon serves many workspaces, but
+// a PTY does not: the process was spawned with a working directory inside
+// one workspace and a SAPIEN_WORKSPACE naming it, and neither can be changed
+// after the fact. Keeping it would mean a pane whose header says one
+// workspace while the agent inside it edits files in, and talks over MCP to,
+// another -- precisely the confusion that made this bug hard to spot.
+//
+// The alternative -- keep the session and label which workspace it belongs
+// to -- was rejected because the rest of the app treats a switch as a hard
+// reset: components/WorkspacePicker.tsx reloads the page, since ids from one
+// workspace never resolve in another. A surviving pane would be a process
+// the reloaded UI can no longer show, reach or restart, which is a worse
+// kind of stale than a session that visibly ended.
+//
+// Subscribing to the store here, rather than calling endSession() from
+// WorkspacePicker, keeps xterm out of the main bundle: this module is only
+// ever imported by the lazily loaded agent route (see the file's header
+// comment), so the subscription exists exactly when a pane can.
+useWorkspace.subscribe((state, prev) => {
+  if (state.current === prev.current) return;
+  const wasRunning = ws !== null;
+  endSession();
+
+  // The scrollback belongs to the previous workspace's session, and so do
+  // command and dir -- dir names a directory GET /v1/terminal would now
+  // reject, so TerminalView's Restart must not offer to re-run it. Both are
+  // dropped whether or not anything was running, since a pane left showing
+  // the last workspace's exit notice is just as misleading as a live one.
+  term?.reset();
+  useAgentTerminal.setState({
+    phase: wasRunning ? 'exited' : 'idle',
+    command: '',
+    dir: '',
+    workspace: state.current,
+    exitCode: null,
+    errorMessage: null,
+    endedNote: wasRunning ? 'Session ended: the workspace changed. Start a new one in this workspace.' : null,
+  });
+});

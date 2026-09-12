@@ -2,12 +2,14 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/example"
 )
 
 // --- list_services -----------------------------------------------------
@@ -65,6 +67,7 @@ type GetServiceOutput struct {
 	Environments     map[string]domain.EnvHint    `json:"environments,omitempty"`
 	Docs             []string                     `json:"docs,omitempty"`
 	OperationCount   int                          `json:"operation_count"`
+	Coverage         *domain.DocCoverage          `json:"coverage,omitempty"`
 	Warnings         []domain.LintWarning         `json:"warnings,omitempty"`
 	AcceptedWarnings []domain.AcceptedLintWarning `json:"accepted_warnings,omitempty"`
 }
@@ -84,7 +87,7 @@ func (s *server) getService(ctx context.Context, req *sdkmcp.CallToolRequest, in
 	out := GetServiceOutput{
 		Name: svc.Name, Description: svc.Description, Owners: svc.Owners,
 		Concepts: svc.Concepts, Environments: svc.Environments, OperationCount: svc.OperationCount,
-		Warnings: svc.Warnings, AcceptedWarnings: svc.AcceptedWarnings,
+		Coverage: svc.Coverage, Warnings: svc.Warnings, AcceptedWarnings: svc.AcceptedWarnings,
 	}
 	for _, d := range docs {
 		out.Docs = append(out.Docs, d.Path)
@@ -93,6 +96,7 @@ func (s *server) getService(ctx context.Context, req *sdkmcp.CallToolRequest, in
 	fmt.Fprintf(&b, "# %s\n%s\n\nowners: %s\nconcepts: %s\noperations: %d\ndocs: %s\n",
 		svc.Name, svc.Description, strings.Join(svc.Owners, ", "), strings.Join(svc.Concepts, ", "),
 		svc.OperationCount, strings.Join(out.Docs, ", "))
+	b.WriteString(renderCoverage(svc.Coverage))
 	for _, w := range svc.Warnings {
 		b.WriteString(formatWarningLine(w))
 	}
@@ -187,6 +191,13 @@ type GetAPIOutput struct {
 	Schemas          map[string]*domain.Schema `json:"schemas,omitempty"`
 	ContractExamples []domain.Example          `json:"contract_examples,omitempty"`
 	Examples         []ExampleSummary          `json:"examples,omitempty"`
+	// RequestExample is a ready-to-send request at every detail level: the
+	// best available of a verified example, a saved one, the contract's own
+	// `example:`, and one synthesized from the schema. Knowing the schema is
+	// not the same as knowing what a call looks like, and an agent that has
+	// to compile a body out of a field list tends to go and do it in a
+	// throwaway script instead.
+	RequestExample *domain.RequestExample `json:"request_example,omitempty"`
 }
 
 func (s *server) getAPI(ctx context.Context, req *sdkmcp.CallToolRequest, in GetAPIInput) (*sdkmcp.CallToolResult, any, error) {
@@ -214,13 +225,21 @@ func (s *server) getAPI(ctx context.Context, req *sdkmcp.CallToolRequest, in Get
 	}
 	out.Security = securityLines(*op)
 
+	saved := s.savedExamples(ctx, op.ID)
+	if reqEx := example.Resolve(op, saved); reqEx.Body != nil || len(reqEx.Input) > 0 || len(reqEx.Headers) > 0 {
+		// An operation that takes no body, no params and no headers has
+		// nothing to show; "request example: {}" would be noise on every
+		// parameterless GET.
+		out.RequestExample = &reqEx
+	}
+
 	if detail == "fields" || detail == "full" {
 		fields, err := s.engine().Catalog().Fields(ctx, op.ID)
 		if err != nil {
 			return errResult(err), nil, nil
 		}
 		out.Fields = fields
-		out.Examples = s.savedExampleSummaries(ctx, op.ID)
+		out.Examples = exampleSummaries(saved)
 	}
 	if detail == "full" {
 		schemas := map[string]*domain.Schema{}
@@ -266,6 +285,9 @@ func (s *server) getAPI(ctx context.Context, req *sdkmcp.CallToolRequest, in Get
 	if len(out.Security) > 0 {
 		fmt.Fprintf(&b, "security: %s\n", strings.Join(out.Security, "; "))
 	}
+	if out.RequestExample != nil {
+		b.WriteString(renderRequestExample(*out.RequestExample))
+	}
 	if len(out.Fields) > 0 {
 		fmt.Fprintf(&b, "fields: %d flattened fields (see structured content)\n", len(out.Fields))
 	}
@@ -285,29 +307,75 @@ func (s *server) getAPI(ctx context.Context, req *sdkmcp.CallToolRequest, in Get
 	return result(b.String(), out), nil, nil
 }
 
-// savedExampleSummaries returns up to 5 saved examples of opID, verified
-// first, for get_api's fields/full detail (PLAN §34b). Examples() is
-// optional infrastructure still being wired into some engines (Local's
-// store isn't yet, as of this writing) -- any error from it, not just a
-// missing one, degrades to no examples rather than failing get_api, which
-// otherwise has nothing to do with the example store's readiness.
-func (s *server) savedExampleSummaries(ctx context.Context, opID string) []ExampleSummary {
+// savedExamples returns up to 5 saved examples of opID, verified first, for
+// get_api's example summaries and its request example (PLAN §34b).
+// Examples() is optional infrastructure still being wired into some engines
+// -- any error from it, not just a missing one, degrades to no examples
+// rather than failing get_api, which otherwise has nothing to do with the
+// example store's readiness.
+func (s *server) savedExamples(ctx context.Context, opID string) []domain.SavedExample {
 	saved, err := s.engine().Examples().ForOperations(ctx, []string{opID}, 5)
 	if err != nil {
 		return nil
 	}
+	return saved
+}
+
+func exampleSummaries(saved []domain.SavedExample) []ExampleSummary {
 	out := make([]ExampleSummary, 0, len(saved))
 	for _, ex := range saved {
 		out = append(out, ExampleSummary{ID: ex.ID, Verified: ex.Verified != nil, Description: ex.Description})
 	}
+	if len(out) == 0 {
+		return nil
+	}
 	return out
+}
+
+// renderRequestExample prints the payload as JSON an agent can copy into a
+// flow step, a call, or its own request, labelled with where it came from and
+// what it is not.
+func renderRequestExample(ex domain.RequestExample) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "request example (%s", ex.Source)
+	if ex.SourceID != "" {
+		fmt.Fprintf(&b, " %q", ex.SourceID)
+	}
+	b.WriteString(")")
+	if ex.Note != "" {
+		fmt.Fprintf(&b, " -- %s", ex.Note)
+	}
+	b.WriteString("\n")
+	if len(ex.Input) > 0 {
+		fmt.Fprintf(&b, "  input: %s\n", compactJSON(ex.Input))
+	}
+	if ex.Body != nil {
+		if pretty, err := json.MarshalIndent(ex.Body, "  ", "  "); err == nil {
+			fmt.Fprintf(&b, "  body: %s\n", pretty)
+		}
+	}
+	if len(ex.Headers) > 0 {
+		fmt.Fprintf(&b, "  headers: %s\n", compactJSON(ex.Headers))
+	}
+	if ex.Source != domain.RequestExampleVerified {
+		b.WriteString("  save a working one with create_example(run_id) so the next caller starts from it\n")
+	}
+	return b.String()
+}
+
+func compactJSON(v any) string {
+	out, err := json.Marshal(v)
+	if err != nil {
+		return "{}"
+	}
+	return string(out)
 }
 
 // --- get_dsl_reference -----------------------------------------------------
 
 // GetDSLReferenceInput is get_dsl_reference's arguments.
 type GetDSLReferenceInput struct {
-	Topic string `json:"topic,omitempty" jsonschema:"flow|memory|expressions|service; default flow. service = how to lay out a service's api/ package (openapi.yaml, service.yaml, docs/) so Sapien can index it, and how to register it"`
+	Topic string `json:"topic,omitempty" jsonschema:"sapien|flow|memory|expressions|service; default flow. sapien = what Sapien is and what you can do with it (read this first in a new session). service = how to lay out a service's api/ package (openapi.yaml, service.yaml, docs/) so Sapien can index it, and how to register it"`
 }
 
 // GetDSLReferenceOutput is get_dsl_reference's structured output.

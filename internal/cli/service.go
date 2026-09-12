@@ -135,6 +135,9 @@ func warningLocation(w domain.LintWarning) string {
 // themselves are only printed by printAcceptedWarnings, behind --show-accepted.
 func printServiceHuman(p *Printer, svc *domain.Service) {
 	p.Line("%s: %d operations, status %s, %d warnings accepted", svc.Name, svc.OperationCount, svc.Status, len(svc.AcceptedWarnings))
+	if line := coverageLine(svc.Coverage); line != "" {
+		p.Line("%s", line)
+	}
 	if svc.Error != "" {
 		p.Line("error: %s", svc.Error)
 	}
@@ -145,6 +148,28 @@ func printServiceHuman(p *Printer, svc *domain.Service) {
 			p.Line("warning [%s] %s", w.Code, w.Message)
 		}
 	}
+}
+
+// coverageLine states how much of the service an agent in another repo can
+// actually learn from Sapien: how many operations the narrative docs reach and
+// how many of the ones that take a body show what one looks like. It is
+// printed next to the operation count because that number alone reads like
+// completeness while saying nothing about whether the service is
+// understandable.
+func coverageLine(cov *domain.DocCoverage) string {
+	if cov == nil || cov.Operations == 0 {
+		return ""
+	}
+	out := fmt.Sprintf("docs: %d/%d operations documented", cov.Documented, cov.Operations)
+	if cov.Deprecated > 0 {
+		// Printed beside an operation count that includes them, so say why
+		// the two numbers differ rather than leaving it to be guessed.
+		out += fmt.Sprintf(" (%d deprecated, not counted)", cov.Deprecated)
+	}
+	if cov.NeedExample > 0 {
+		out += fmt.Sprintf("; examples: %d/%d operations that take a body", cov.WithExample, cov.NeedExample)
+	}
+	return out
 }
 
 // printAcceptedWarnings prints one "accepted [CODE] message (reason)" line
@@ -186,13 +211,23 @@ func newServiceListCmd(app *App) *cobra.Command {
 					last = s.LastIndexed.UTC().Format(time.RFC3339)
 				}
 				rows = append(rows, []string{
-					s.Name, string(s.Status), strconv.Itoa(s.OperationCount), strconv.Itoa(len(s.AcceptedWarnings)), sourceString(s.Source), last,
+					s.Name, string(s.Status), strconv.Itoa(s.OperationCount), coverageCell(s.Coverage), strconv.Itoa(len(s.AcceptedWarnings)), sourceString(s.Source), last,
 				})
 			}
-			app.Printer.Table([]string{"NAME", "STATUS", "OPS", "ACCEPTED", "SOURCE", "LAST INDEXED"}, rows)
+			app.Printer.Table([]string{"NAME", "STATUS", "OPS", "DOCS", "ACCEPTED", "SOURCE", "LAST INDEXED"}, rows)
 			return nil
 		},
 	}
+}
+
+// coverageCell is the "DOCS" column: documented operations over total, so a
+// service that is indexed but unexplained is visible in the listing rather
+// than only in its own detail output.
+func coverageCell(cov *domain.DocCoverage) string {
+	if cov == nil || cov.Operations == 0 {
+		return "-"
+	}
+	return fmt.Sprintf("%d/%d", cov.Documented, cov.Operations)
 }
 
 // sourceString renders a Source for the "SOURCE" column.

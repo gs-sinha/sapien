@@ -365,3 +365,80 @@ The manager and the registry now decide identity with `os.SameFile` (device and 
 The first tests written for this were vacuous -- they used a trailing separator and a `.` segment, which `filepath.Clean` collapses before `os.SameFile` is ever reached, so they passed with the fix stubbed out. They now use a symlink, which survives cleaning as a different string, and were checked by disabling `sameDir` and confirming they fail.
 
 The first fix caught two of the three places that compared workspace paths as strings, and the user found the third: `sapien workspace list` merges the registry with the workspace the cwd resolves to, and tested membership with `==`. Run from a lowercase-`desktop` cwd it listed that workspace twice and marked the wrong row current -- so the UI showed two and the CLI showed three, from the same machine at the same moment. The comparison now exists once, as `workspace.SameDir`, used by the manager, the registry, and the CLI; the two local copies were deleted rather than left to drift. Each of the three tests was checked by reverting its call site to `==` and confirming the test fails.
+
+## Discovery framing, coverage, and payloads (2026-09-12)
+
+Five observations from real use, four of them about the same thing: Sapien
+was serving structure and leaving the meaning behind.
+
+- **Agents had the tools without the framing.** Nothing told an agent that
+  Sapien is a cross-repo discovery layer, so it read schemas here and then
+  called services from its own scripts. New topic
+  `get_dsl_reference("sapien")` (and `sapien://reference/sapien`): what
+  Sapien holds, how to consume a service you do not own, why `execute_api`
+  beats curl (environment-resolved base URL/headers/secrets, a recorded
+  run, a diagnosed failure, one step to save the payload for the next
+  agent), where onboarding lives, where memories fit, what Sapien does not
+  do. The MCP `instructions` open with the same sentence; its budget went
+  from 1,300 to 1,750 characters, which is the only place in this change
+  where every session pays.
+- **`soft: true` was invisible to the agents that needed it.** It shipped
+  in the runner, `spec/flow.schema.json` and `docs/flows.md` -- but not in
+  `internal/flow.Reference()`, the text agents actually read -- so they
+  rediscovered it from failed runs. Documented now, with the `expr:` object
+  form and the range keys; `TestReference_DocumentsEveryDSLKey` reflects
+  over every YAML tag in `domain.Flow`/`Step`/`Assertion`/`Poll`/`Range`
+  and fails if the reference does not mention it (verified by stubbing
+  `soft` out and watching it fail). The line budget went 240 -> 280.
+- **Payloads existed everywhere except where they were needed.** `get_api`
+  returned example *ids*; the UI had a manual "From schema" button that
+  emitted required-fields-only placeholders in TypeScript and ignored the
+  contract's own `example:`. One resolver now answers "what does a call
+  look like?" for everyone: `internal/example.Resolve` picks a verified
+  saved example, else a hand-written one, else the contract's `example:`,
+  else a payload synthesized from the schema (required fields plus any
+  field the contract gives a value for; `readOnly` excluded; `?fields=all`
+  for the whole shape), labelled with its source and a note on how much to
+  trust it. Served by `get_api.request_example` at every detail level and
+  by `GET /v1/operations/{id}/example`. The UI's Try It form opens
+  prefilled with a source banner, and `ui/src/pages/try/skeleton.ts` was
+  deleted rather than left to drift from the Go implementation.
+- **"The docs were lacking" was the common feedback, and it was a framing
+  problem.** `reference_service.md` described a format; agents wrote for a
+  reviewer of the repo. It now opens with who reads the result (an agent in
+  another repository that cannot see the code), what the three layers are
+  for, and a documentation checklist of what a section must answer that the
+  contract cannot: why it exists and who calls it, preconditions, business
+  rules, what it changes, idempotency and retries, every error code and
+  what to do about it, timing, deprecations, and the traps.
+- **Some of it is in nobody's code**, so onboarding asks. One batched round
+  *after* drafting (a cold "tell me about your service" gets an unusable
+  paragraph; "`allocate` has no idempotency key and no unique constraint on
+  `order_id` -- is calling it twice safe?" gets an answer worth writing
+  down), with a question bank at service/subproject, operation, and
+  cross-service level, a rule against asking anything the code answers,
+  and `## Open questions` for what comes back unknown -- a gap named is
+  worth more than a plausible guess the reader cannot distinguish from a
+  fact.
+- **Coverage is now a number, because a clean contract read as
+  completeness.** `registry.coverage` counts operations the narrative docs
+  reach (by operation id or by an endpoint mention; contract-derived tag and
+  `info` docs deliberately do not count, or every service would be fully
+  documented by construction) and bodies with an example, and emits
+  `NO_NARRATIVE_DOCS` (once, not per operation), `UNDOCUMENTED_OPERATION`,
+  `MISSING_REQUEST_EXAMPLE`, `NO_CONCEPTS`, capped at 20 per code with an
+  aggregate line. They join the contract's warnings *before* acceptance, so
+  an endpoint nobody outside the team should call can be accepted with a
+  reason -- the 2026-09-06 "agent rewrote 20 text/plain responses to chase
+  zero warnings" incident is the reason this had to be acceptable rather
+  than mandatory. `domain.Service.Coverage` rides in the existing
+  `services.doc_json` blob, so no migration.
+
+Three existing registry tests asserted exact warning counts on fixtures
+with no docs and no concepts; they now filter by the code under test, which
+is what they meant. Go suite and `go vet` clean, 97 UI tests green.
+
+Not done: coverage says nothing about doc *quality* (a section that
+mentions an operation and says nothing useful counts as documented), and
+nothing re-asks the interview questions when the code changes under a
+service that was onboarded before this.

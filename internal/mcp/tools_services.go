@@ -149,6 +149,7 @@ const warningAcceptanceGuidance = "If a warning describes the wire faithfully (f
 func renderServiceSummary(ws *domain.Workspace, svc *domain.Service) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s: %d operations, status %s\n", svc.Name, svc.OperationCount, svc.Status)
+	b.WriteString(renderCoverage(svc.Coverage))
 	if svc.Error != "" {
 		fmt.Fprintf(&b, "error: %s\n", svc.Error)
 	}
@@ -160,6 +161,28 @@ func renderServiceSummary(ws *domain.Workspace, svc *domain.Service) string {
 		b.WriteString(warningAcceptanceGuidance + "\n")
 	}
 	b.WriteString(missingEnvHint(ws, svc))
+	return b.String()
+}
+
+// renderCoverage states how much of the service is understandable, not just
+// indexed: how many operations the narrative docs reach, and how many of those
+// that take a body show a payload. The operation count alone reads as
+// completeness, which is how services kept getting onboarded with a clean
+// contract and docs the next agent could not use.
+func renderCoverage(cov *domain.DocCoverage) string {
+	if cov == nil || cov.Operations == 0 {
+		return ""
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "docs: %d/%d operations documented in api/docs (%d sections)\n", cov.Documented, cov.Operations, cov.DocSections)
+	if cov.Deprecated > 0 {
+		// The operation count above includes deprecated operations and these
+		// totals do not; say so rather than leaving two numbers to disagree.
+		fmt.Fprintf(&b, "  (%d deprecated operations are not counted)\n", cov.Deprecated)
+	}
+	if cov.NeedExample > 0 {
+		fmt.Fprintf(&b, "examples: %d/%d operations that take a body have a request example\n", cov.WithExample, cov.NeedExample)
+	}
 	return b.String()
 }
 

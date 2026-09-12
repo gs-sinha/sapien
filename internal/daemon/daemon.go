@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -124,8 +125,25 @@ func processAlive(pid int) bool {
 	return syscall.Kill(pid, 0) == nil
 }
 
+// Running reports whether info names a process that still exists. It says
+// nothing about whether that process is answering requests, and that is the
+// point: it is the deliberately weaker half of Alive. A daemon that is
+// swapped out, part-way through a long index, or stopped (SIGSTOP) fails
+// Alive's two-second health probe while its process -- along with its file
+// watcher, its open database and its several hundred MB of resident memory
+// -- is very much still there.
+//
+// Ask Alive before deciding whether to *talk* to a daemon; ask Running
+// before deciding whether to *signal* one, or whether to forget it. Treating
+// an unresponsive daemon as absent is precisely how orphans were made: its
+// daemon.json was removed, nothing could name that pid again, and it kept
+// indexing the workspace until the machine was rebooted.
+func Running(info *Info) bool {
+	return info != nil && processAlive(info.PID)
+}
+
 // Alive reports whether info's process still exists AND its HTTP API
-// answers GET /v1/health with 200 within 500ms. Both checks matter: a PID
+// answers GET /v1/health with 200 within two seconds. Both checks matter: a PID
 // can be reused by an unrelated process once the daemon exits, and a
 // process can exist but be hung, mid-shutdown, or listening on a port that
 // no longer matches (e.g. after a crash-and-restart raced this check).
@@ -134,7 +152,7 @@ func Alive(ctx context.Context, info *Info) bool {
 		return false
 	}
 
-	reqCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	reqCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet,
@@ -147,14 +165,20 @@ func Alive(ctx context.Context, info *Info) bool {
 		return false
 	}
 	defer resp.Body.Close()
+	// Consume the small health body so frequent CLI probes can reuse their
+	// connection instead of opening a new one for every discovery.
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
 	return resp.StatusCode == http.StatusOK
 }
 
 // Find looks up the daemon for ws (PLAN §4's "one-shot CLI" rule).
 //
-//   - No daemon.json, or one naming a daemon that is no longer alive: the
+//   - No daemon.json, or one naming a process that has exited: the
 //     stale file (if any) is removed and Find returns (nil, nil) so the
 //     caller falls back to engine.Local.
+//   - A process that exists but fails its health check: return
+//     errs.DaemonUnavailable and preserve discovery, preventing a busy daemon
+//     from being replaced or a second local engine from being opened.
 //   - A live daemon whose Version doesn't match version: Find returns
 //     errs.Conflict with Details{"daemon_version": info.Version}, so the
 //     caller can report the mismatch and offer "sapien serve --restart".
@@ -169,6 +193,9 @@ func Find(ctx context.Context, ws *domain.Workspace, version string) (*Info, err
 	}
 
 	if !Alive(ctx, info) {
+		if processAlive(info.PID) {
+			return nil, errs.New(errs.DaemonUnavailable, "daemon pid %d is running but not responding; retry shortly", info.PID)
+		}
 		_ = Remove(ws)
 		return nil, nil
 	}

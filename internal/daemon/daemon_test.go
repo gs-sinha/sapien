@@ -5,6 +5,8 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -243,4 +245,55 @@ func TestFindLiveMatchingVersion(t *testing.T) {
 	assert.Equal(t, want.Port, got.Port)
 	assert.Equal(t, want.Token, got.Token)
 	assert.Equal(t, want.Version, got.Version)
+}
+
+func TestFindUnresponsiveProcessPreservesDiscovery(t *testing.T) {
+	ws := testWorkspace(t)
+	require.NoError(t, daemon.Write(ws, &daemon.Info{PID: os.Getpid(), Port: freePort(t), Version: "1.0.0"}))
+	info, err := daemon.Find(context.Background(), ws, "1.0.0")
+	require.Error(t, err)
+	assert.Nil(t, info)
+	assert.Equal(t, errs.DaemonUnavailable, errs.CodeOf(err))
+	_, err = daemon.Read(ws)
+	require.NoError(t, err)
+}
+
+func TestAliveAllowsBusyDaemonAndHonorsCancellation(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-time.After(750 * time.Millisecond):
+			w.WriteHeader(http.StatusOK)
+		case <-r.Context().Done():
+		}
+	}))
+	defer ts.Close()
+	_, portString, err := net.SplitHostPort(ts.Listener.Addr().String())
+	require.NoError(t, err)
+	port, err := strconv.Atoi(portString)
+	require.NoError(t, err)
+	info := &daemon.Info{PID: os.Getpid(), Port: port}
+	assert.True(t, daemon.Alive(context.Background(), info))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	assert.False(t, daemon.Alive(ctx, info))
+}
+
+// Running is the process half of Alive, and the distinction is the whole
+// point: a daemon with nothing answering on its port -- swapped out,
+// mid-index, SIGSTOPped -- fails the health check while its process is
+// still there to be signalled.
+func TestRunningTrueForAnUnresponsiveProcess(t *testing.T) {
+	info := &daemon.Info{PID: os.Getpid(), Port: freePort(t)}
+	require.False(t, daemon.Alive(context.Background(), info))
+	assert.True(t, daemon.Running(info))
+}
+
+func TestRunningFalseForAnExitedProcess(t *testing.T) {
+	assert.False(t, daemon.Running(&daemon.Info{PID: deadPID(t), Port: 1}))
+}
+
+func TestRunningFalseForNilOrInvalidPID(t *testing.T) {
+	assert.False(t, daemon.Running(nil))
+	assert.False(t, daemon.Running(&daemon.Info{PID: 0}))
+	assert.False(t, daemon.Running(&daemon.Info{PID: -1}))
 }

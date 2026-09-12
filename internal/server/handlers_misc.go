@@ -11,7 +11,7 @@ type healthResponse struct {
 // handleHealth implements GET /v1/health, the one unauthenticated route.
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	var dir string
-	if ws := engineFrom(r.Context()).Workspace(); ws != nil {
+	if ws := s.engine.Workspace(); ws != nil {
 		dir = ws.Dir
 	}
 	writeJSON(w, http.StatusOK, healthResponse{OK: true, Version: s.version, Workspace: dir})

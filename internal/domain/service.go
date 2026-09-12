@@ -84,6 +84,7 @@ type Service struct {
 	Error            string                `json:"error,omitempty"`
 	Warnings         []LintWarning         `json:"warnings,omitempty"`
 	AcceptedWarnings []AcceptedLintWarning `json:"accepted_warnings,omitempty"`
+	Coverage         *DocCoverage          `json:"coverage,omitempty"`
 	LastIndexed      time.Time             `json:"last_indexed,omitempty"`
 	Commit           string                `json:"commit,omitempty"` // git sources: resolved commit
 	OperationCount   int                   `json:"operation_count"`
@@ -101,4 +102,19 @@ type LintWarning struct {
 type AcceptedLintWarning struct {
 	LintWarning
 	Reason string `json:"reason"`
+}
+
+// DocCoverage measures how much of a service an agent in another repo can
+// actually learn from Sapien, as opposed to how much of it is merely indexed.
+// A contract makes operations findable; docs are what say when to call one and
+// what happens if you do, and a request example is what saves the next caller
+// from compiling a payload out of a schema. Counts, not opinions: the lint
+// warnings name the specific operations.
+type DocCoverage struct {
+	Operations  int `json:"operations"`   // excluding deprecated ones
+	Deprecated  int `json:"deprecated"`   // excluded from every other count here
+	Documented  int `json:"documented"`   // referenced by at least one api/docs section
+	WithExample int `json:"with_example"` // has a contract example or a saved example file
+	NeedExample int `json:"need_example"` // takes a request body, so an example is worth having
+	DocSections int `json:"doc_sections"` // narrative sections (api/docs/*.md), excluding contract-derived ones
 }

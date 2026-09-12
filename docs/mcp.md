@@ -17,11 +17,11 @@ streamable HTTP on the daemon, for hosts that prefer a URL.
 | `list_services` | `read_contracts` | names, descriptions, op counts |
 | `get_service` | `read_contracts` | description, owners, concepts, env base URLs, doc list |
 | `search_apis` | `read_contracts` | id, method, path, summary, score, matched_on |
-| `get_api` | `read_contracts` | `detail=summary\|fields\|full`; `fields`/`full` add `examples` (saved example ids, verified flag, description) |
+| `get_api` | `read_contracts` | `detail=summary\|fields\|full`; every level carries `request_example` (a ready-to-send payload and its source); `fields`/`full` add `examples` (saved example ids, verified flag, description) |
 | `search_docs` | `read_contracts` | doc sections: service, path, heading, snippet, score |
 | `get_doc` | `read_contracts` | full Markdown of a doc, or one section |
 | `get_schema` | `read_contracts` | a named component schema as flattened fields |
-| `get_dsl_reference` | none | flow/memory/expressions/service reference, ~1.5k tokens per topic |
+| `get_dsl_reference` | none | sapien/flow/memory/expressions/service reference, ~1.5k tokens per topic |
 | `get_context` | `read_*` | the context builder; recommended first call for authoring |
 | `list_workspaces`, `switch_workspace` | none | only present when the daemon serves more than one workspace; `switch_workspace` rebinds the session, and every later call acts on the new workspace. Ids do not cross workspaces: a flow, run, memory, or operation id from one never resolves in another |
 | `add_service` | `write_services` | registers a service from a repo path or a git url; returns the operation count, sync status, warnings, and the CLAUDE.md/AGENTS.md section to paste; an already-registered service is re-synced instead of failing |
@@ -47,9 +47,10 @@ streamable HTTP on the daemon, for hosts that prefer a URL.
 Resources: `sapien://services/{name}`, `.../docs/{path}`,
 `sapien://operations/{id}`, `sapien://schemas/{service}/{name}`,
 `sapien://flows/{id}`, `sapien://memories/{id}`, plus Sapien's own
-reference material at `sapien://reference/flow-dsl`,
-`sapien://reference/memory`, `sapien://reference/expressions`,
-`sapien://reference/service`, and `sapien://reference/flow.schema.json`
+reference material at `sapien://reference/sapien`,
+`sapien://reference/flow-dsl`, `sapien://reference/memory`,
+`sapien://reference/expressions`, `sapien://reference/service`, and
+`sapien://reference/flow.schema.json`
 — kept apart from service documentation so an agent never confuses the
 two.
 
@@ -234,23 +235,35 @@ See [`docs/onboarding.md`](onboarding.md) for the full walkthrough.
 The MCP server's `instructions` (sent at `initialize`) describe the
 intended loop so hosts need no custom system prompt:
 
-> Start with `get_context(intent)`. Discover with `search_apis`, inspect
-> with `get_api`, read the service's own documentation with `search_docs`
-> and `get_doc`, read `get_relevant_memories` for the operations you will
-> use, check `list_flows` for existing flows, read
-> `get_dsl_reference("flow")` once per session, then `validate_flow`
-> until clean and `create_flow`. Never invent operation IDs or fields;
-> use only IDs returned by tools. Turn memories of type `invariant` or
-> `testing` attached to a selected operation into assertions or `until`
-> steps. Check `list_examples`/`get_api` for a verified example before
-> writing a request body; save a working one with `create_example(run_id)`
-> so the next agent does not rediscover it. Do not execute flows or
-> endpoints unless the user asked. To onboard a service or write
-> Sapien-style docs: read `get_dsl_reference("service")`, create the
-> `api/` package in the repo from its real code, then `add_service` with
-> the absolute repo path, fix the warnings it returns, and paste the
-> `CLAUDE.md`/`AGENTS.md` section it suggests into the repo so future code
-> changes keep `api/` current.
+> Sapien indexes the services around this repo: their contracts, their own
+> documentation, working request examples, memories, and runnable flows.
+> `get_dsl_reference("sapien")` says what it can do. Start with
+> `get_context(intent)`. Discover with `search_apis`, inspect with
+> `get_api` (its `request_example` is ready to send; never assemble a body
+> from the field list), read its own documentation with
+> `search_docs`/`get_doc`, read `get_relevant_memories` for the operations
+> you will use, check `list_flows`, read `get_dsl_reference("flow")` once
+> per session, then `validate_flow` until clean and `create_flow`;
+> `patch_flow` for edits. Never invent operation IDs or fields; use only
+> IDs tools returned. Turn memories of type `invariant` or `testing` on a
+> selected operation into assertions or `until` steps. Save a working
+> request with `create_example(run_id)` for the next agent. Call operations
+> with `execute_api`, not curl or a script: it resolves the environment's
+> base URL, headers and secrets, records the run, and diagnoses failures.
+> Do not execute flows or endpoints unless the user asked. To onboard a
+> service or write Sapien-style docs: read
+> `get_dsl_reference("service")`. Its reader is an agent in another repo:
+> the docs must carry the business rules, not restate the contract; put an
+> `example:` on every request body, ask the user what the code cannot
+> answer, then `add_service` with the absolute repo path, close the
+> coverage gap, fix the warnings, and paste the `CLAUDE.md`/`AGENTS.md`
+> section it returns so future changes keep `api/` current.
+
+The first line is new, and deliberate: an agent that has the tools but not
+the framing uses Sapien as a schema lookup and then calls services from
+its own scripts. `get_dsl_reference("sapien")` is the one-page
+orientation -- what Sapien holds, how to consume a service you do not own,
+why `execute_api` beats curl, and where onboarding is documented.
 
 Saved examples (PLAN §34b) close the loop `get_context` opens: an agent
 that had to feel its way to a working request body should not make the

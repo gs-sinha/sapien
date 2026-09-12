@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"testing"
+	"time"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
@@ -141,6 +142,56 @@ func TestTool_GetAPI_DetailLevels(t *testing.T) {
 	assert.Less(t, fieldsSize, fullSize)
 }
 
+// TestTool_GetAPI_RequestExample pins the payload get_api hands back at every
+// detail level. Agents were reading the schema here and then assembling a body
+// in a throwaway script; a ready-to-send example, labelled with how much to
+// trust it, is the thing that makes that unnecessary.
+func TestTool_GetAPI_RequestExample(t *testing.T) {
+	cs, eng := newTestSessionAndEngine(t, Config{Default: DefaultPermissions()}, "claude-code")
+	saved := eng.st.examples
+
+	// Nothing saved: synthesized from the schema, and it says how to do better.
+	eng.st.examples = nil
+	res := callTool(t, cs, "get_api", map[string]any{"id": "rider-service.createRider"})
+	require.False(t, res.IsError, firstText(res))
+	out := decodeStructured[GetAPIOutput](t, res.StructuredContent)
+	require.NotNil(t, out.RequestExample, "even the summary level should answer what a call looks like")
+	assert.Equal(t, domain.RequestExampleSynthesized, out.RequestExample.Source)
+	assert.Equal(t, map[string]any{"name": "<name>"}, out.RequestExample.Body)
+	assert.Contains(t, firstText(res), "request example (schema)")
+	assert.Contains(t, firstText(res), `"name"`)
+	assert.Contains(t, firstText(res), "create_example(run_id)", "an unproven payload should say how to prove one")
+
+	// A hand-written saved example beats the schema, and is labelled as unproven.
+	eng.st.examples = saved
+	res = callTool(t, cs, "get_api", map[string]any{"id": "rider-service.createRider"})
+	out = decodeStructured[GetAPIOutput](t, res.StructuredContent)
+	require.NotNil(t, out.RequestExample)
+	assert.Equal(t, domain.RequestExampleSaved, out.RequestExample.Source)
+	assert.Contains(t, out.RequestExample.Note, "not yet confirmed")
+
+	// A verified one outranks it, and then there is nothing left to prove.
+	verified := make([]domain.SavedExample, len(saved))
+	copy(verified, saved)
+	for i := range verified {
+		if verified[i].Operation != "rider-service.createRider" {
+			continue
+		}
+		verified[i].ID = "create-rider"
+		verified[i].Verified = &domain.ExampleVerified{Env: "staging", At: time.Now()}
+	}
+	eng.st.examples = verified
+	res = callTool(t, cs, "get_api", map[string]any{"id": "rider-service.createRider", "detail": "fields"})
+	require.False(t, res.IsError, firstText(res))
+	out = decodeStructured[GetAPIOutput](t, res.StructuredContent)
+	require.NotNil(t, out.RequestExample)
+	assert.Equal(t, domain.RequestExampleVerified, out.RequestExample.Source)
+	assert.Equal(t, "create-rider", out.RequestExample.SourceID)
+	assert.Contains(t, firstText(res), `request example (verified "create-rider")`)
+	assert.NotContains(t, firstText(res), "create_example(run_id)")
+	assert.NotEmpty(t, out.Examples, "the saved-example summaries still come from the same fetch")
+}
+
 func TestTool_GetAPI_ByMethodPath(t *testing.T) {
 	cs := newTestSession(t, Config{Default: DefaultPermissions()}, "claude-code")
 	res := callTool(t, cs, "get_api", map[string]any{"id": "GET /v1/riders/{riderId}"})
@@ -206,4 +257,17 @@ func TestTool_GetSchema(t *testing.T) {
 		}
 	}
 	assert.True(t, found)
+}
+
+// TestTool_GetAPI_NoRequestExampleWhenThereIsNothingToShow: a GET with no
+// parameters has no payload to hand anyone, and "request example: {}" on every
+// such operation is noise, not help.
+func TestTool_GetAPI_NoRequestExampleWhenThereIsNothingToShow(t *testing.T) {
+	cs := newTestSession(t, Config{Default: DefaultPermissions()}, "claude-code")
+
+	res := callTool(t, cs, "get_api", map[string]any{"id": "rider-service.bigResponse"})
+	require.False(t, res.IsError, firstText(res))
+	out := decodeStructured[GetAPIOutput](t, res.StructuredContent)
+	assert.Nil(t, out.RequestExample)
+	assert.NotContains(t, firstText(res), "request example")
 }

@@ -92,6 +92,8 @@ func newServeCmd(app *App) *cobra.Command {
 				Version:    Version,
 			})
 
+			defer srv.Close()
+
 			mcpCfg, err := loadMCPConfig(ws)
 			if err != nil {
 				return err
@@ -159,6 +161,7 @@ func newServeCmd(app *App) *cobra.Command {
 			}
 
 			guard.stop()
+			_ = srv.Close()
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			_ = httpServer.Shutdown(shutdownCtx)
@@ -198,7 +201,9 @@ func refuseIfDaemonAlive(ctx context.Context, ws *domain.Workspace, restart bool
 		return errs.New(errs.Conflict, "a daemon is already running for workspace %q (pid %d, port %d)", ws.Dir, info.PID, info.Port).
 			WithHint("run `sapien serve --restart`")
 	}
-	_ = stopDaemon(info)
+	if err := stopDaemon(info); err != nil {
+		return err
+	}
 	return daemon.Remove(ws)
 }
 
@@ -216,7 +221,9 @@ func acquireWorkspaceLock(ws *domain.Workspace, restart bool) (*daemon.Lock, err
 		return nil, err
 	}
 	if holder, ok := daemon.Holder(ws); ok {
-		_ = stopDaemon(&daemon.Info{PID: holder})
+		if err := stopDaemon(&daemon.Info{PID: holder}); err != nil {
+			return nil, err
+		}
 	}
 	return daemon.Acquire(ws, os.Getpid())
 }

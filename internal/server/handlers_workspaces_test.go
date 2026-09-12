@@ -87,3 +87,24 @@ func TestWorkspaceRegister_SingleWorkspaceServer(t *testing.T) {
 
 // jsonBody wraps a literal JSON string as a request body.
 func jsonBody(s string) io.Reader { return strings.NewReader(s) }
+
+// A daemon can be alive while its workspace manager cannot open a workspace.
+// Health checks must not enter that manager or report the daemon as dead.
+func TestHealthDoesNotResolveWorkspace(t *testing.T) {
+	fake, ts := newTestServer(t, func(opts *Options) {
+		mgr := workspaces.New(opts.Engine.Workspace(), opts.Engine, workspaces.Options{})
+		require.NoError(t, mgr.Close())
+		opts.Workspaces = mgr
+	})
+	req, err := http.NewRequest(http.MethodGet, ts.URL+"/v1/health", nil)
+	require.NoError(t, err)
+	req.Header.Set(WorkspaceHeader, "/unavailable/workspace")
+	resp, err := ts.Client().Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var health healthResponse
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&health))
+	assert.True(t, health.OK)
+	assert.Equal(t, fake.Workspace().Dir, health.Workspace)
+}

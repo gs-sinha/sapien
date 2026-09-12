@@ -131,19 +131,30 @@ running in.
 The agent writes an `api/` package next to the service's code:
 
 ```text
-api/openapi.yaml   the OpenAPI contract, required
+api/openapi.yaml   the OpenAPI contract, with an example: on every request body
 api/service.yaml   name, description, owners, concepts, environments
-api/docs/*.md      narrative documentation, one file per area
+api/docs/*.md      overview.md plus one file per domain area
+api/examples/      optional saved requests, verified from real calls
 api/flows/         optional flows shipped with the service
 ```
 
-It then calls the `add_service` tool with the repo's absolute path,
-fixes any warnings Sapien returns (or accepts a warning that describes
-the wire faithfully in `api/service.yaml` with a reason, instead of
-silencing it), confirms with `get_service` and
-`search_apis`, and adds the "Sapien" section the tool hands back to the
-repo's `CLAUDE.md` or `AGENTS.md`, so the next agent that changes the
-code updates `api/` in the same change. The full layout, the conventions docs must follow to link
+The docs are the point, and their reader is an agent in a *different*
+repository that cannot see this code: they have to carry the business
+logic -- when to call an operation, what must exist first, what it
+changes, whether a retry is safe, which errors are normal -- rather than
+restate the contract. Some of that is in nobody's code, so the agent asks
+you one batched round of questions after drafting from the repo, and
+records what nobody could answer under "Open questions" instead of
+guessing.
+
+It then calls the `add_service` tool with the repo's absolute path, which
+reports how many operations the docs actually reach and how many bodies
+have an example. It closes that gap, fixes any warnings Sapien returns
+(or accepts a warning that describes the wire faithfully in
+`api/service.yaml` with a reason, instead of silencing it), confirms with
+`get_service` and `search_apis`, and adds the "Sapien" section the tool
+hands back to the repo's `CLAUDE.md` or `AGENTS.md`, so the next agent
+that changes the code updates `api/` in the same change. The full layout, the conventions docs must follow to link
 prose to the contract, and the checklist an agent works through are in
 [`internal/engine/local/reference_service.md`](internal/engine/local/reference_service.md),
 the same text served by the MCP tool `get_dsl_reference("service")`. See
@@ -208,9 +219,12 @@ config --client <name> --write` installs the entry for the client named:
 `--scope user`, so the entry it installs works from any repo on the
 machine, and re-running it is safe: a second `--write` for `claude-code`
 replaces the existing `sapien` entry instead of failing. Tools include
-`search_apis`, `get_api`, `create_flow`, `run_flow`, `create_memory`, and
+`search_apis`, `get_api` (which returns a ready-to-send request example,
+not just a schema), `create_flow`, `run_flow`, `create_memory`, and
 `add_service`, the tool an agent calls to register a service it just
-wrote docs for. See [`docs/mcp.md`](docs/mcp.md) for the full tool list,
+wrote docs for. An agent new to Sapien starts with
+`get_dsl_reference("sapien")`: one page on what Sapien holds and how to
+use it. See [`docs/mcp.md`](docs/mcp.md) for the full tool list,
 permissions, and host setup for every client.
 
 ## Learn more

@@ -139,8 +139,9 @@ tests below, which exercise the reattach code path but not real detach/
 reattach DOM or xterm.js rendering behavior, since jsdom can't run real
 xterm.js. Worth a manual pass before relying on it.
 
-**WebSocket protocol** (`GET /v1/terminal?command=&dir=&cols=&rows=`,
-implemented in `src/state/agentTerminal.ts`): binary frames each
+**WebSocket protocol** (`GET
+/v1/terminal?command=&dir=&cols=&rows=&workspace=`, implemented in
+`src/state/agentTerminal.ts`): binary frames each
 direction are raw PTY bytes (stdin from the client, stdout+stderr from
 the server -- the browser's only path for a keystroke to reach the
 process); a `{"type":"resize","cols":n,"rows":n}` text frame from the
@@ -150,6 +151,26 @@ interpolated into a command -- the server only ever spawns `claude`,
 `codex`, or the user's `$SHELL`, resolved via `exec.LookPath`, in a
 directory drawn from the workspace/registered services/home (see that
 package's doc comment for the exact allowlist).
+
+**Which workspace the pane belongs to.** One daemon serves many
+workspaces, so both halves of this page have to say which one they mean,
+and for a while neither did: `getTerminalTargets` hand-rolled its own
+`fetch` instead of going through `src/api/client.ts`, and the socket URL
+carried no selector at all -- so a pane opened while the picker showed a
+second workspace still listed the *primary* workspace's directories and
+started there, with `SAPIEN_WORKSPACE` naming the wrong one. The targets
+request now sends `X-Sapien-Workspace` the way `client.ts` does, and the
+socket appends `?workspace=` the way `src/state/events.ts` does (a
+browser cannot set a header on a WebSocket handshake, which is why the
+two routes take a query parameter). A PTY cannot follow a switch -- its
+cwd and environment were fixed at spawn -- so `agentTerminal.ts`
+subscribes to the workspace store and ends the session when it changes,
+rather than leaving a live agent editing files in a workspace the UI is
+no longer showing. A directory that does not belong to the selected
+workspace is refused by the daemon with a 400 on the upgrade; since the
+browser can see neither that status nor its body, the store treats a
+close that never opened as a failed start and says so, instead of
+reporting it as a session that ran and ended.
 
 **Hand-offs.** `agentHandoffURL({ runId, step })` (`src/api/agentExtra.ts`)
 builds a `/ui/agent?prompt=...` link with a sentence like "Look at Sapien

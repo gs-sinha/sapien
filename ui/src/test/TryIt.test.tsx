@@ -6,6 +6,7 @@ import TryIt from '../pages/TryIt';
 import type { Environment, Operation, Run, SavedExample } from '../api/types';
 
 const operationsGet = vi.fn();
+const operationsExample = vi.fn();
 const environmentsList = vi.fn();
 const environmentsGetDefault = vi.fn();
 const examplesList = vi.fn();
@@ -15,7 +16,10 @@ const examplesFromRun = vi.fn();
 const examplesCreate = vi.fn();
 
 vi.mock('../api/client', () => ({
-  operations: { get: (...a: unknown[]) => operationsGet(...a) },
+  operations: {
+    get: (...a: unknown[]) => operationsGet(...a),
+    example: (...a: unknown[]) => operationsExample(...a),
+  },
   environments: {
     list: (...a: unknown[]) => environmentsList(...a),
     getDefault: (...a: unknown[]) => environmentsGetDefault(...a),
@@ -95,6 +99,13 @@ function renderTryIt(path = '/ui/try/svc.getThing') {
 
 beforeEach(() => {
   operationsGet.mockReset().mockResolvedValue(op);
+  operationsExample.mockReset().mockResolvedValue({
+    operation: op.id,
+    source: 'schema',
+    input: {},
+    body: { customerId: '<customerId>' },
+    note: 'synthesized from the schema',
+  });
   environmentsList.mockReset().mockResolvedValue([stageEnv]);
   environmentsGetDefault.mockReset().mockResolvedValue({ name: 'stage' });
   examplesList.mockReset().mockResolvedValue([]);
@@ -114,6 +125,47 @@ afterEach(() => {
 });
 
 describe('TryIt', () => {
+  // The page used to open with an empty body textarea, which left a human to
+  // compile a payload out of the schema panel field by field. It now starts
+  // from whatever the daemon can offer and says where that came from.
+  it('prefills the body from the resolved request example and labels its source', async () => {
+    operationsExample.mockResolvedValue({
+      operation: 'svc.getThing',
+      source: 'verified',
+      source_id: 'ex1',
+      input: { id: 'abc' },
+      body: { foo: 'bar' },
+      note: 'sent successfully against stage on 2026-09-12',
+    });
+    renderTryIt();
+
+    const bodyBox = (await screen.findByPlaceholderText('{ }')) as HTMLTextAreaElement;
+    await waitFor(() => expect(bodyBox.value).toContain('"foo": "bar"'));
+    expect(await screen.findByText(/Prefilled from a verified example/)).toBeInTheDocument();
+    expect(screen.getByText(/sent successfully against stage/)).toBeInTheDocument();
+    expect(screen.getByDisplayValue('abc')).toBeInTheDocument();
+  });
+
+  it('fills the whole shape from the daemon when asked, and drops the source label', async () => {
+    const user = userEvent.setup();
+    renderTryIt();
+
+    const bodyBox = (await screen.findByPlaceholderText('{ }')) as HTMLTextAreaElement;
+    await waitFor(() => expect(bodyBox.value).toContain('customerId'));
+    expect(screen.getByText(/Prefilled from the schema/)).toBeInTheDocument();
+
+    operationsExample.mockResolvedValue({
+      operation: 'svc.getThing',
+      source: 'schema',
+      body: { customerId: '<customerId>', note: '<note>' },
+    });
+    await user.click(screen.getByRole('button', { name: 'Whole shape' }));
+
+    await waitFor(() => expect(bodyBox.value).toContain('"note"'));
+    expect(operationsExample).toHaveBeenLastCalledWith('svc.getThing', { fields: 'all' });
+    expect(screen.queryByText(/Prefilled from the schema/)).not.toBeInTheDocument();
+  });
+
   it('prefills from ?example= and posts the matching call body', async () => {
     examplesList.mockResolvedValue([savedExample]);
     const user = userEvent.setup();

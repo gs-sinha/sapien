@@ -3,6 +3,7 @@
 // ... with 'ask the agent about this run' hand-offs"). Kept out of the
 // shared api/client.ts per the wave ownership split -- that file is owned
 // by another concurrent pass.
+import { currentWorkspace } from '../state/workspace';
 import { ApiClientError } from './client';
 
 // ---- GET /v1/terminal/targets ----
@@ -23,10 +24,20 @@ export interface TerminalTargets {
 // without importing its unexported internals.
 export async function getTerminalTargets(): Promise<TerminalTargets> {
   let res: Response;
+  // The same workspace selector api/client.ts's request() sends. It is not
+  // optional here just because this endpoint is "only a picker": one daemon
+  // serves many workspaces, and the directories it offers are the selected
+  // workspace's -- the very list GET /v1/terminal then validates a start
+  // against. Omitting the header offered the *primary* workspace's
+  // directories however the picker was set, and started the pane there.
+  const ws = currentWorkspace();
   try {
     res = await fetch('/v1/terminal/targets', {
       credentials: 'include',
-      headers: { Accept: 'application/json' },
+      headers: {
+        Accept: 'application/json',
+        ...(ws ? { 'X-Sapien-Workspace': ws } : {}),
+      },
     });
   } catch (err) {
     throw new ApiClientError('E_NETWORK', err instanceof Error ? err.message : 'network request failed');
@@ -60,10 +71,20 @@ export interface TerminalWebSocketParams {
   dir: string;
   cols: number;
   rows: number;
+  /**
+   * The selected workspace's directory; "" means the daemon's primary one.
+   * Required rather than read from state/workspace.ts inside the builder
+   * (which is what state/events.ts's wsURL does for /v1/events) so that the
+   * URL and the workspace the caller records for the pane are the same
+   * value, read at the same instant: a pane that is running against one
+   * workspace while the store says another is the bug this parameter fixes.
+   */
+  workspace: string;
 }
 
-// terminalWebSocketURL builds the GET /v1/terminal?command=&dir=&cols=&rows=
-// URL that upgrades to the PTY WebSocket (internal/server/handlers_terminal.go).
+// terminalWebSocketURL builds the
+// GET /v1/terminal?command=&dir=&cols=&rows=&workspace= URL that upgrades to
+// the PTY WebSocket (internal/server/handlers_terminal.go).
 // Protocol (binary frames = PTY stdin/stdout, a JSON {"type":"resize",...}
 // text frame from the client, a final {"type":"exit","code":n} text frame
 // from the server) is implemented in state/agentTerminal.ts. Same ws(s)://
@@ -78,6 +99,12 @@ export function terminalWebSocketURL(params: TerminalWebSocketParams): string {
     cols: String(params.cols),
     rows: String(params.rows),
   });
+  // A browser cannot set headers on a WebSocket handshake, so the workspace
+  // selector rides in the query string here, exactly as state/events.ts does
+  // for /v1/events; the daemon accepts either (internal/server/
+  // workspacectx.go). This is also what gives the pane its SAPIEN_WORKSPACE:
+  // handleTerminal sets it from the engine this parameter resolved.
+  if (params.workspace) qs.set('workspace', params.workspace);
   return `${proto}//${window.location.host}/v1/terminal?${qs.toString()}`;
 }
 

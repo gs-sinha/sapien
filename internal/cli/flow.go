@@ -242,7 +242,7 @@ func newFlowDeleteCmd(app *App) *cobra.Command {
 
 func newFlowReferenceCmd(app *App) *cobra.Command {
 	return &cobra.Command{
-		Use:   "reference [flow|memory|expressions|service]",
+		Use:   "reference [sapien|flow|memory|expressions|service]",
 		Short: "Print the DSL reference text for agents",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {

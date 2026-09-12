@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { flows, runs } from '../../api/client';
 import { useAsync } from '../../lib/useAsync';
 import { pushToast } from '../../state/toast';
-import { EnvironmentSelect } from '../../pages/flows/EnvironmentSelect';
+import { EnvironmentSelect, ProductionNotice, useEnvironmentSelection } from '../../pages/flows/EnvironmentSelect';
 import { InputsForm } from '../../pages/flows/InputsForm';
 import { YamlEditor } from './YamlEditor';
 import type { FlowWithSource } from '../../api/types-runs';
@@ -32,7 +32,9 @@ export function EditAndRerunPanel({ run, onClose }: { run: Run; onClose: () => v
     setSeeded(true);
   }
 
-  const [env, setEnv] = useState(run.environment);
+  // Seeded with the run's own environment, so rerunning a production run
+  // starts blocked until the tick, exactly like picking production by hand.
+  const envSel = useEnvironmentSelection(run.environment);
   const [inputs, setInputs] = useState<Record<string, unknown>>(run.inputs || {});
   const [inputsValid, setInputsValid] = useState(true);
   const [running, setRunning] = useState(false);
@@ -44,7 +46,10 @@ export function EditAndRerunPanel({ run, onClose }: { run: Run; onClose: () => v
   const handleRun = async () => {
     setRunning(true);
     try {
-      const result = await runs.runSource({ yaml, opts: { environment: env, inputs, trigger: 'ui' } });
+      const result = await runs.runSource({
+        yaml,
+        opts: { environment: envSel.name, inputs, allow_production: envSel.allowProduction, trigger: 'ui' },
+      });
       setNewRunID(result.id);
       pushToast('success', `Ran as ${result.id}`);
     } catch (err) {
@@ -88,8 +93,9 @@ export function EditAndRerunPanel({ run, onClose }: { run: Run; onClose: () => v
           <div className="space-y-3">
             <div>
               <label className="mb-1 block text-xs text-slate-500">Environment</label>
-              <EnvironmentSelect value={env} onChange={setEnv} />
+              <EnvironmentSelect selection={envSel} />
             </div>
+            <ProductionNotice selection={envSel} />
             <InputsForm
               specs={flow?.inputs}
               initial={run.inputs}
@@ -101,7 +107,7 @@ export function EditAndRerunPanel({ run, onClose }: { run: Run; onClose: () => v
             <button
               type="button"
               onClick={handleRun}
-              disabled={running || !inputsValid || !yaml.trim()}
+              disabled={running || !inputsValid || !yaml.trim() || envSel.productionBlocked}
               className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900"
             >
               {running ? 'Running…' : 'Run'}

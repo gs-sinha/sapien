@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { getTerminalTargets } from '../../api/agentExtra';
 import { useAsync } from '../../lib/useAsync';
 import { startSession, useAgentTerminal } from '../../state/agentTerminal';
+import { useWorkspace } from '../../state/workspace';
 import { StatusPill } from '../StatusPill';
 
 // pickDefaultCommand prefers claude, then codex, then whatever else is
@@ -21,7 +22,13 @@ function pickDefaultCommand(commands: string[]): string {
 // user doesn't have to click Start themselves before seeing their prompt
 // waiting in the terminal.
 export function Picker({ initialPrompt }: { initialPrompt?: string }) {
-  const { data: targets, loading, error } = useAsync(() => getTerminalTargets(), []);
+  // Keyed on the selected workspace, not fetched once on mount: the
+  // directories on offer are that workspace's, so a switch has to re-ask.
+  // In practice WorkspacePicker reloads the page on a switch, but the
+  // page must not depend on that -- state/workspace.ts also drops a
+  // selection the daemon no longer serves, with no reload.
+  const workspace = useWorkspace((s) => s.current);
+  const { data: targets, loading, error } = useAsync(() => getTerminalTargets(), [workspace]);
   const { phase, errorMessage } = useAgentTerminal();
   const [command, setCommand] = useState('');
   const [dir, setDir] = useState('');
@@ -30,8 +37,12 @@ export function Picker({ initialPrompt }: { initialPrompt?: string }) {
 
   useEffect(() => {
     if (!targets) return;
+    // Commands are workspace-independent (the daemon resolves them on its
+    // own PATH), so a chosen one survives. A directory does not: one held
+    // from another workspace is not in this list and GET /v1/terminal would
+    // reject it, so it falls back to this workspace's first entry.
     setCommand((c) => c || pickDefaultCommand(targets.commands));
-    setDir((d) => d || targets.dirs[0]?.path || '');
+    setDir((d) => (targets.dirs.some((t) => t.path === d) ? d : targets.dirs[0]?.path || ''));
   }, [targets]);
 
   const start = () => {

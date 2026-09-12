@@ -52,6 +52,8 @@ var routeTable = []routeDef{
 		func(s *Server) http.HandlerFunc { return s.handleOperationGet }},
 	{http.MethodGet, "/v1/operations/{id}/fields", "getOperationFields", "Get an operation's flattened fields", true,
 		func(s *Server) http.HandlerFunc { return s.handleOperationFields }},
+	{http.MethodGet, "/v1/operations/{id}/example", "getOperationExample", "Get a ready-to-send request for an operation", true,
+		func(s *Server) http.HandlerFunc { return s.handleOperationExample }},
 	{http.MethodGet, "/v1/schemas/{service}/{name}", "getSchema", "Get a named component schema", true,
 		func(s *Server) http.HandlerFunc { return s.handleSchemaGet }},
 	{http.MethodGet, "/v1/docs", "listDocs", "List or search docs", true,

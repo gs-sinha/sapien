@@ -1,9 +1,11 @@
 // Plain textarea JSON body editor: no CodeMirror/Monaco (performance
-// budget), just live validation, a format button, and a "from schema"
-// button that seeds a skeleton from the operation's request body schema.
-import { useMemo } from 'react';
-import { buildSkeleton } from '../../pages/try/skeleton';
-import type { Body } from '../../api/types';
+// budget), just live validation, a format button, and a "Whole shape" button
+// that fills in every field the request schema declares. The payload is
+// synthesized by the daemon (internal/example.Resolve / SynthesizeBody), not
+// here: the UI, get_api, and the CLI must not each have their own idea of
+// what a call to an operation looks like.
+import { useState } from 'react';
+import type { Body, RequestExample } from '../../api/types';
 
 export function jsonError(text: string): string | null {
   if (text.trim() === '') return null;
@@ -19,12 +21,15 @@ export function BodyEditor({
   value,
   onChange,
   requestBody,
+  loadFullShape,
 }: {
   value: string;
   onChange: (text: string) => void;
   requestBody?: Body;
+  loadFullShape?: () => Promise<RequestExample>;
 }) {
-  const error = useMemo(() => jsonError(value), [value]);
+  const error = jsonError(value);
+  const [loading, setLoading] = useState(false);
 
   const format = () => {
     try {
@@ -35,9 +40,17 @@ export function BodyEditor({
     }
   };
 
-  const fromSchema = () => {
-    const skeleton = buildSkeleton(requestBody?.schema);
-    onChange(JSON.stringify(skeleton, null, 2));
+  const fillWholeShape = async () => {
+    if (!loadFullShape) return;
+    setLoading(true);
+    try {
+      const ex = await loadFullShape();
+      onChange(ex.body !== undefined && ex.body !== null ? JSON.stringify(ex.body, null, 2) : '');
+    } catch {
+      // Leave the body alone; the reader can still type one.
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -49,11 +62,12 @@ export function BodyEditor({
         <div className="flex gap-2">
           <button
             type="button"
-            onClick={fromSchema}
-            disabled={!requestBody?.schema}
+            onClick={fillWholeShape}
+            disabled={!requestBody?.schema || !loadFullShape || loading}
+            title="Fill in every field the schema declares, including optional ones"
             className="rounded border border-slate-300 px-2 py-0.5 text-[11px] text-slate-600 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:text-slate-300 dark:hover:text-white"
           >
-            From schema
+            {loading ? 'Filling…' : 'Whole shape'}
           </button>
           <button
             type="button"

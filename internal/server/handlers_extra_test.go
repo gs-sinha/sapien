@@ -173,3 +173,30 @@ func TestRunStepGet(t *testing.T) {
 		assert.Equal(t, errs.RunNotFound, decodeErrBody(t, resp).Code)
 	})
 }
+
+// TestOperationExample covers GET /v1/operations/{id}/example: the endpoint
+// the UI's "Try it" form prefills from, so a human is handed a payload instead
+// of a schema panel and a blank textarea.
+func TestOperationExample(t *testing.T) {
+	_, ts := newTestServer(t, nil)
+
+	resp := doReq(t, ts, http.MethodGet, "/v1/operations/order-service.createOrder/example", reqOpts{token: "test-token"})
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var ex domain.RequestExample
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&ex))
+	assert.Equal(t, "order-service.createOrder", ex.Operation)
+	assert.Equal(t, domain.RequestExampleSynthesized, ex.Source)
+	assert.Equal(t, map[string]any{"customerId": "<customerId>"}, ex.Body)
+
+	// ?fields=all is the "whole shape" button: synthesized from the schema,
+	// optional fields included.
+	resp = doReq(t, ts, http.MethodGet, "/v1/operations/order-service.getOrder/example?fields=all", reqOpts{token: "test-token"})
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var noBody domain.RequestExample
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&noBody))
+	assert.Equal(t, map[string]any{"orderId": "<orderId>"}, noBody.Input)
+	assert.Nil(t, noBody.Body, "an operation with no request body has no body to show")
+
+	resp = doReq(t, ts, http.MethodGet, "/v1/operations/order-service.nope/example", reqOpts{token: "test-token"})
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+}

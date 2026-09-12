@@ -7,7 +7,7 @@
 // which jsdom implements. WebSocket is mocked the same way
 // state/events.ts's own tests mock it (src/test/events.test.ts), since
 // startSession (state/agentTerminal.ts) opens a real one.
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -88,9 +88,18 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.resetModules();
+  localStorage.clear(); // state/workspace.ts persists the selection there
 });
 
-async function freshPicker() {
+// The selected workspace decides which directories the picker offers and
+// which workspace Start opens the pane in, so every test sets it explicitly
+// -- on the freshly imported store, which is the same module instance the
+// component will see. A statically imported one would not be: afterEach's
+// vi.resetModules() means each test's dynamic import re-evaluates the whole
+// graph, state/workspace.ts included.
+async function freshPicker(workspace = '') {
+  const { useWorkspace } = await import('../state/workspace');
+  useWorkspace.getState().select(workspace);
   const { Picker } = await import('../components/agent/Picker');
   return Picker;
 }
@@ -138,5 +147,38 @@ describe('Picker', () => {
     const url = new URL(MockWebSocket.instances[0].url, 'http://localhost');
     expect(url.searchParams.get('command')).toBe('codex');
     expect(url.searchParams.get('dir')).toBe('/ws/services/order-service/api');
+  });
+
+  it('starts the pane in the selected workspace, not the daemon primary', async () => {
+    const Picker = await freshPicker('/lab/ws-heavy');
+    render(<Picker />);
+    await waitFor(() => expect(screen.getByRole('combobox', { name: 'Command' })).toHaveValue('claude'));
+
+    await userEvent.click(screen.getByRole('button', { name: 'Start' }));
+
+    // ?workspace= is what gives the PTY its working directory *and* its
+    // SAPIEN_WORKSPACE (internal/server/handlers_terminal.go); without it
+    // the daemon fell back to the primary workspace whatever the UI showed.
+    const url = new URL(MockWebSocket.instances[0].url, 'http://localhost');
+    expect(url.searchParams.get('workspace')).toBe('/lab/ws-heavy');
+  });
+
+  it('re-asks for targets when the workspace changes, so the directory list is never the old one', async () => {
+    const Picker = await freshPicker();
+    const { useWorkspace } = await import('../state/workspace');
+    const { getTerminalTargets } = await import('../api/agentExtra');
+    // The vi.mock factory's fn is shared across this file's tests, so count
+    // from here rather than from zero.
+    const fetchTargets = vi.mocked(getTerminalTargets);
+    fetchTargets.mockClear();
+    render(<Picker />);
+
+    await waitFor(() => expect(fetchTargets).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      useWorkspace.getState().select('/lab/ws-heavy');
+    });
+
+    await waitFor(() => expect(fetchTargets).toHaveBeenCalledTimes(2));
   });
 });

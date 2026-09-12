@@ -4,6 +4,60 @@ All notable changes to this project are documented in this file. The
 format loosely follows [Keep a Changelog](https://keepachangelog.com/),
 and phase numbers refer to PLAN.md §34's roadmap.
 
+## [Unreleased]
+
+### Added
+- **`get_dsl_reference("sapien")`: what Sapien is and what an agent can do
+  with it.** Agents had the tools without the framing -- that Sapien is a
+  cross-repo discovery layer holding contracts, the services' own
+  documentation, working request examples, memories and runnable flows -- so
+  they used it as a schema lookup and then called services from throwaway
+  scripts. The new topic (also `sapien://reference/sapien`) covers
+  consuming a service you do not own, why `execute_api` beats curl, where
+  onboarding is documented, and where memories fit. The MCP `instructions`
+  now open with the same one-sentence framing.
+- **A ready-to-send request example on every operation.** `get_api`
+  returns `request_example` at every detail level and `GET
+  /v1/operations/{id}/example` serves the same thing to the UI, resolved
+  once in Go (`internal/example.Resolve`): a verified saved example, else a
+  hand-written one, else the contract's own `example:`, else a payload
+  synthesized from the request schema -- labelled with which, because
+  "really was sent" and "placeholders from the schema" deserve different
+  trust. The UI's "Try it" form now opens prefilled and says where the
+  payload came from, instead of opening with an empty textarea beside a
+  schema panel; its "Whole shape" button asks the daemon for every field
+  the schema declares.
+- **Documentation and example coverage, measured and linted.** A contract
+  that lints clean can still be unusable, so `add_service`,
+  `sync_service`, `get_service` and `sapien service add`/`sync`/`list` now
+  report how many operations the narrative docs actually reach and how many
+  of those taking a body show a payload. Four new warnings name the gaps --
+  `NO_NARRATIVE_DOCS`, `UNDOCUMENTED_OPERATION`, `MISSING_REQUEST_EXAMPLE`,
+  `NO_CONCEPTS` -- acceptable in `service.yaml`'s `accepted_warnings` with a
+  reason like any other lint finding. Contract-derived docs (tag and `info`
+  descriptions) do not count towards coverage, deprecated operations are
+  left out of the totals, and a service with no docs at all gets one
+  warning rather than one per operation.
+- **Onboarding now interviews the service's owner.** `get_dsl_reference("service")`
+  is rewritten around the reader it actually has -- an agent in another
+  repository -- and asks for the business logic the contract cannot carry:
+  preconditions, invariants, side effects, idempotency, which errors are
+  normal, and the traps. It tells the agent to ask the user one batched
+  round of questions *after* drafting from the code (with a question bank
+  at service, operation, and cross-service level), to write the answers
+  into the docs and memories, and to record what is still unknown under
+  `## Open questions` rather than guessing. Every request body gets an
+  `example:` in the contract as part of onboarding.
+
+### Fixed
+- **`soft: true` is documented in the flow DSL reference.** Soft assertions
+  shipped in the runner, the JSON schema and `docs/flows.md`, but not in
+  the reference agents read over MCP, so they could not find the feature
+  and rediscovered it from failed runs. The reference now covers soft
+  assertions and the `expr:` object form, and a test walks every YAML key
+  the parser accepts and fails if the reference does not mention it, so a
+  future DSL addition cannot ship invisible.
+
 ## [1.1.0] - 2026-09-06
 
 ### Added

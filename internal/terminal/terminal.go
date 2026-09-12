@@ -93,11 +93,13 @@ func (m *Manager) Count() int {
 // pass context.Background().
 func (m *Manager) Start(ctx context.Context, spec Spec) (*Session, error) {
 	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.sessions == nil {
+		m.sessions = make(map[*Session]struct{})
+	}
 	if len(m.sessions) >= m.maxSessions() {
-		m.mu.Unlock()
 		return nil, errs.New(errs.Conflict, "too many concurrent terminal sessions (max %d)", m.maxSessions())
 	}
-	m.mu.Unlock()
 
 	cols, rows := spec.Cols, spec.Rows
 	if cols <= 0 {
@@ -126,9 +128,7 @@ func (m *Manager) Start(ctx context.Context, spec Spec) (*Session, error) {
 	}
 	sess.armIdle(m.idleTimeout())
 
-	m.mu.Lock()
 	m.sessions[sess] = struct{}{}
-	m.mu.Unlock()
 
 	go sess.readLoop()
 	go sess.waitLoop()

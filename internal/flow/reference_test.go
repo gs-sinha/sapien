@@ -2,6 +2,8 @@ package flow
 
 import (
 	"context"
+	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -35,11 +37,40 @@ func fencedYAMLBlocks(md string) []string {
 }
 
 func TestReference_UnderLineLimit(t *testing.T) {
-	// Raised from 210 to make room for the "Setup and teardown" section
-	// (PLAN §8/§9): still a budget, just one that fits the DSL's current
-	// size rather than its pre-setup/teardown one.
+	// Raised from 210 for "Setup and teardown" (PLAN §8/§9) and again for
+	// "Soft assertions": still a budget, just one that fits the DSL's
+	// current size rather than the size it had before those features.
 	n := strings.Count(Reference(), "\n")
-	assert.LessOrEqual(t, n, 240, "Reference() should stay a concise, agent-sized reference")
+	assert.LessOrEqual(t, n, 280, "Reference() should stay a concise, agent-sized reference")
+}
+
+// TestReference_DocumentsEveryDSLKey pins the reference to the DSL's actual
+// shape: every YAML key the parser accepts must appear in the text an agent
+// reads. `soft:` shipped in the runner, the JSON schema, and docs/flows.md
+// but never here, so agents writing flows over MCP could not find it and
+// rediscovered it from a failed run; this test is what makes that
+// impossible for the next key.
+func TestReference_DocumentsEveryDSLKey(t *testing.T) {
+	ref := Reference()
+	for _, typ := range []reflect.Type{
+		reflect.TypeOf(domain.Flow{}),
+		reflect.TypeOf(domain.InputSpec{}),
+		reflect.TypeOf(domain.Step{}),
+		reflect.TypeOf(domain.ExplicitParams{}),
+		reflect.TypeOf(domain.Poll{}),
+		reflect.TypeOf(domain.Assertion{}),
+		reflect.TypeOf(domain.Range{}),
+	} {
+		for i := 0; i < typ.NumField(); i++ {
+			key := strings.Split(typ.Field(i).Tag.Get("yaml"), ",")[0]
+			if key == "" || key == "-" {
+				continue // loader-populated, not part of the file
+			}
+			found, err := regexp.MatchString(`\b`+regexp.QuoteMeta(key)+`\b`, ref)
+			require.NoError(t, err)
+			assert.True(t, found, "Reference() should document %s.%s (`%s:`); an agent that cannot find a key in the reference cannot use it", typ.Name(), typ.Field(i).Name, key)
+		}
+	}
 }
 
 func TestReference_HasTitleAndDiagnosticSection(t *testing.T) {

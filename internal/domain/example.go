@@ -66,3 +66,37 @@ type ExampleQuery struct {
 	Text      string `json:"text,omitempty"` // substring over id, description, tags
 	Limit     int    `json:"limit,omitempty"`
 }
+
+// RequestExampleSource says where a RequestExample's payload came from, so a
+// caller knows how much to trust it: a verified example was really sent and
+// really worked, a saved one was written by hand, a contract one comes from
+// the service's own openapi.yaml, and a synthesized one is placeholders
+// derived from the schema and has never been near the service.
+type RequestExampleSource string
+
+const (
+	RequestExampleVerified    RequestExampleSource = "verified"
+	RequestExampleSaved       RequestExampleSource = "saved"
+	RequestExampleContract    RequestExampleSource = "contract"
+	RequestExampleSynthesized RequestExampleSource = "schema"
+)
+
+// RequestExample is a ready-to-send request for one operation: the thing a
+// caller would otherwise have to compile out of the schema by hand. Every
+// operation has one -- the best available of a verified example, a saved
+// example, the contract's own `example:`, and a payload synthesized from the
+// request schema -- so no surface has to answer "what does a call to this
+// look like?" with a schema and a shrug.
+type RequestExample struct {
+	Operation string               `json:"operation"`
+	Source    RequestExampleSource `json:"source"`
+	SourceID  string               `json:"source_id,omitempty"` // example id, or the contract example's name
+	// Input binds path/query/header params by name, like a flow step's
+	// `input:` and a SavedExample's Input.
+	Input   map[string]any    `json:"input,omitempty"`
+	Body    any               `json:"body,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
+	// Note warns the reader about what the payload is not: placeholder
+	// values, omitted optional fields. Empty for a verified example.
+	Note string `json:"note,omitempty"`
+}

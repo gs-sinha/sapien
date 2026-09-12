@@ -73,7 +73,7 @@ func (srv *server) registerResources(s *sdkmcp.Server) {
 	s.AddResourceTemplate(&sdkmcp.ResourceTemplate{
 		URITemplate: tmplReference.Raw(),
 		Name:        "reference",
-		Description: "Sapien's own reference material: flow-dsl, memory, expressions, service (the api/ package layout for onboarding), or flow.schema.json.",
+		Description: "Sapien's own reference material: sapien (what Sapien is and what you can do with it), flow-dsl, memory, expressions, service (the api/ package layout for onboarding), or flow.schema.json.",
 		MIMEType:    "text/markdown",
 	}, srv.readReference)
 }
@@ -173,6 +173,7 @@ func renderMemoryMarkdown(m *domain.Memory) string {
 // Engine.Flows().Reference expects (PLAN §23: the resource is named
 // "flow-dsl", the tool/engine topic is "flow").
 var referenceTopics = map[string]string{
+	"sapien":      "sapien",
 	"flow-dsl":    "flow",
 	"memory":      "memory",
 	"expressions": "expressions",

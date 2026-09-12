@@ -72,7 +72,7 @@ type FlowAPI interface {
 	Create(ctx context.Context, yamlSrc string, path string) (*domain.Flow, error)
 	Update(ctx context.Context, id string, yamlSrc string) (*domain.Flow, error)
 	Delete(ctx context.Context, id string) error
-	// Reference returns the DSL reference text for agents (PLAN §23): topic is flow|memory|expressions|service.
+	// Reference returns the DSL reference text for agents (PLAN §23): topic is sapien|flow|memory|expressions|service.
 	Reference(ctx context.Context, topic string) (string, error)
 }
 

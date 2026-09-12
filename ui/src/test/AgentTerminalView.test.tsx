@@ -85,12 +85,18 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.resetModules();
+  localStorage.clear(); // state/workspace.ts persists the selection there
 });
 
+// vi.resetModules() in afterEach means each test gets its own copy of the
+// whole graph, so the workspace store has to be imported from it too rather
+// than statically -- otherwise the test would be driving a different store
+// than agentTerminal.ts subscribed to.
 async function freshModules() {
+  const { useWorkspace } = await import('../state/workspace');
   const state = await import('../state/agentTerminal');
   const { TerminalView } = await import('../components/agent/TerminalView');
-  return { startSession: state.startSession, TerminalView };
+  return { startSession: state.startSession, useWorkspace, TerminalView };
 }
 
 describe('TerminalView', () => {
@@ -158,5 +164,51 @@ describe('TerminalView', () => {
 
     expect(await screen.findByText(/Could not start: boom/)).toBeInTheDocument();
     vi.stubGlobal('WebSocket', OriginalWebSocket);
+  });
+
+  // A browser exposes nothing about a rejected upgrade -- no status, no body
+  // -- so a socket that closes without ever opening is the only evidence the
+  // daemon refused the start (e.g. a dir outside the selected workspace's
+  // allowlist). It must not read as "the agent exited".
+  it('reports a refused upgrade as a failed start, not as a finished session', async () => {
+    const { startSession, TerminalView } = await freshModules();
+    render(<TerminalView />);
+
+    act(() => {
+      startSession({ command: '/bin/zsh', dir: '/ws-a' });
+    });
+    act(() => {
+      MockWebSocket.instances[0].close(); // closed before any onopen
+    });
+
+    expect(await screen.findByText(/refused to open a terminal in \/ws-a/)).toBeInTheDocument();
+    expect(screen.queryByText(/Session ended/)).not.toBeInTheDocument();
+  });
+
+  // Switching workspace ends the pane rather than leaving a PTY attached to
+  // the workspace the user just navigated away from: its cwd and its
+  // SAPIEN_WORKSPACE were fixed at spawn and cannot follow the switch.
+  it('ends the session and says why when the workspace changes', async () => {
+    const { startSession, useWorkspace, TerminalView } = await freshModules();
+    render(<TerminalView />);
+
+    act(() => {
+      startSession({ command: '/bin/zsh', dir: '/lab/ws-a' });
+    });
+    const ws = MockWebSocket.instances[0];
+    act(() => {
+      ws.readyState = MockWebSocket.OPEN;
+      ws.onopen?.();
+    });
+
+    act(() => {
+      useWorkspace.getState().select('/lab/ws-heavy');
+    });
+
+    expect(ws.readyState).toBe(MockWebSocket.CLOSED);
+    expect(await screen.findByText(/the workspace changed/)).toBeInTheDocument();
+    // Restarting would re-run the previous workspace's directory, which the
+    // daemon now rejects, so it is not offered.
+    expect(screen.getByRole('button', { name: 'Restart' })).toBeDisabled();
   });
 });

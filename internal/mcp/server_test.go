@@ -39,7 +39,7 @@ func TestServer_Instructions(t *testing.T) {
 	require.NotNil(t, ir)
 	assert.Contains(t, ir.Instructions, "get_context")
 	assert.Contains(t, ir.Instructions, "sapien://")
-	assert.LessOrEqual(t, len(instructions), 1300)
+	assert.LessOrEqual(t, len(instructions), 1750)
 }
 
 func TestPermission_ExecuteMutationDenied(t *testing.T) {

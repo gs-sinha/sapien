@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/gs-sinha/sapien/internal/daemon"
 	"github.com/gs-sinha/sapien/internal/domain"
 	"github.com/gs-sinha/sapien/internal/engine"
 	"github.com/gs-sinha/sapien/internal/engine/local"
@@ -33,7 +32,12 @@ func init() {
 			return local.Open(ws, local.Options{})
 		}
 
-		info, err := daemon.Find(context.Background(), ws, Version)
+		// findDaemon, not daemon.Find: a daemon that is alive but slow to
+		// answer its health probe (mid-reindex, or paged back in) gets a
+		// few bounded retries rather than failing the command outright.
+		// Falling back to engine.Local there would open a second engine on
+		// the running daemon's database, which is why that is never done.
+		info, err := findDaemon(context.Background(), ws, Version)
 		if err != nil {
 			if errs.CodeOf(err) != errs.Conflict {
 				return nil, err

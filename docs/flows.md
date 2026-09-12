@@ -179,7 +179,12 @@ carry `code`, `line`, `message`, and where possible `suggestions[]` (see
 `--continue-on-failure` keeps running past a failed/errored step instead
 of stopping; without it, remaining steps are marked `skipped`.
 `--allow-production` is required to run against an environment with
-`production: true`.
+`production: true`. The UI asks for the same consent rather than assuming
+it: picking a production environment in the flow "Run" panel, in "Edit and
+rerun" on a run, or on the Try It page marks the option `[production]`,
+shows a warning, and keeps Run disabled until "Allow running against
+production" is ticked. The tick is per environment and per panel -- it
+resets whenever the selected environment changes.
 
 ## CI and JUnit
 
@@ -342,6 +347,13 @@ assert:
 `sapien flow run` and `run resume` print `soft mismatch:` lines after the
 run table and `soft assertion now passing since run <id>:` when one flips;
 `run_flow` over MCP does the same in its text.
+
+`get_dsl_reference("flow")` documents `soft:` too. It did not at first --
+the feature shipped in the runner, the JSON schema, and this page, but not
+in the reference agents actually read, so an agent writing a flow over MCP
+could not find it and rediscovered it from a failed run. A test now walks
+every YAML key the parser accepts and fails if the reference does not
+mention it, so the next DSL addition cannot repeat that.
 
 ## Reading run results cheaply
 

@@ -7,6 +7,7 @@ import (
 
 	"github.com/gs-sinha/sapien/internal/domain"
 	"github.com/gs-sinha/sapien/internal/errs"
+	"github.com/gs-sinha/sapien/internal/example"
 )
 
 // handleOperationsList implements GET /v1/operations?q=&method=&service=&limit=&include_deprecated=.
@@ -73,6 +74,34 @@ func (s *Server) handleOperationFields(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// handleOperationExample answers "what does a call to this look like?" with a
+// payload rather than a schema: the best available of a verified example, a
+// saved one, the contract's own `example:`, and one synthesized from the
+// request schema (see internal/example.Resolve). ?fields=all instead
+// synthesizes every field the schema declares, for a human who wants the
+// whole shape in front of them to delete from.
+func (s *Server) handleOperationExample(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	eng := engineFrom(r.Context())
+	op, err := eng.Catalog().GetOperation(r.Context(), id)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	if r.URL.Query().Get("fields") == "all" {
+		// "Whole shape": synthesize every field from the schema. Answering
+		// this with a saved or contract example would hand back the payload
+		// the caller is already looking at.
+		writeJSON(w, http.StatusOK, example.Synthesize(op, true))
+		return
+	}
+	// Saved examples are supporting material: an example store that cannot
+	// be read degrades to the contract/schema answer rather than failing a
+	// request the caller made about the operation.
+	saved, _ := eng.Examples().ForOperations(r.Context(), []string{op.ID}, 5)
+	writeJSON(w, http.StatusOK, example.Resolve(op, saved))
 }
 
 func (s *Server) handleSchemaGet(w http.ResponseWriter, r *http.Request) {

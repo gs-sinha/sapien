@@ -6,6 +6,30 @@ CLI, MCP hosts, and a UI can replay it without rediscovering it. Where a
 memory captures a fact ("this field means X"), an example captures a
 working request.
 
+## Every operation has a request example
+
+Nothing that needs a payload should have to compile one out of a schema,
+so Sapien always has an answer to "what does a call to this look like?".
+`get_api` returns it as `request_example`, `GET
+/v1/operations/{id}/example` serves it to the UI (whose "Try it" form
+opens prefilled from it), and both say where it came from:
+
+| Source | Means | Trust |
+|---|---|---|
+| `verified` | a saved example written from a real run | it was sent and it worked |
+| `saved` | a hand-written saved example | someone thought it would work |
+| `contract` | the `example:` in the service's own openapi.yaml, written at onboarding | documentation, never sent |
+| `schema` | synthesized from the request schema: required fields, plus any field the contract gives a value for | placeholders; a shape, not a payload |
+
+Onboarding's job is to make sure `schema` is never the best available
+answer -- every operation that takes a body gets an `example:` in the
+contract (see [`onboarding.md`](onboarding.md)) -- and a saved example
+from a real call is what turns that into evidence.
+
+The UI's "Whole shape" button asks the same endpoint with `?fields=all`,
+which fills in every field the schema declares, optional ones included,
+for a human who would rather delete fields than look them up.
+
 Examples are deliberately narrow: one operation each, checked against
 the contract exactly as a flow step is, with the same diagnostics. An
 example that needs several calls belongs in a flow, not an example.

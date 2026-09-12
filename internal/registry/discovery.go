@@ -9,6 +9,7 @@ import (
 
 	"github.com/gs-sinha/sapien/internal/domain"
 	"github.com/gs-sinha/sapien/internal/errs"
+	"github.com/gs-sinha/sapien/internal/example"
 	"github.com/gs-sinha/sapien/internal/spec"
 )
 
@@ -30,6 +31,7 @@ type Package struct {
 	DocsDir      string   // absolute path of docs/, or "" if absent
 	FlowsDir     string   // absolute path of flows/, or "" if absent
 	MemoriesDir  string   // absolute path of memories/, or "" if absent
+	ExamplesDir  string   // absolute path of examples/, or "" if absent
 }
 
 // DiscoverPackage locates a service's API package under root (PLAN §6).
@@ -93,7 +95,7 @@ func DiscoverPackage(root string, contractOverride string) (*Package, error) {
 
 // buildPackage assembles a Package rooted at dir, with contract (if non-empty)
 // as its sole default contract, filling in MetadataFile/DocsDir/FlowsDir/
-// MemoriesDir from whatever exists on disk.
+// ExamplesDir/MemoriesDir from whatever exists on disk.
 func buildPackage(dir, contract string) *Package {
 	pkg := &Package{Dir: dir}
 	if contract != "" {
@@ -107,6 +109,9 @@ func buildPackage(dir, contract string) *Package {
 	}
 	if d := filepath.Join(dir, domain.FlowsDir); isDir(d) {
 		pkg.FlowsDir = d
+	}
+	if d := filepath.Join(dir, example.ExamplesDir); isDir(d) {
+		pkg.ExamplesDir = d
 	}
 	if d := filepath.Join(dir, domain.MemoriesDir); isDir(d) {
 		pkg.MemoriesDir = d

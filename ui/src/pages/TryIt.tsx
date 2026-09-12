@@ -18,13 +18,41 @@ import { SaveExampleDialog } from '../components/try/SaveExampleDialog';
 import type { SaveExampleFields } from '../components/try/SaveExampleDialog';
 import { defaultParamValue, loadFormState, saveFormState } from './try/formState';
 import { pushToast } from '../state/toast';
-import type { CallRequest, Environment, Operation, Run, SavedExample } from '../api/types';
+import type { CallRequest, Environment, Operation, RequestExample, Run, SavedExample } from '../api/types';
 import type { Hint } from '../api/types-try';
 
 function applyExample(ex: SavedExample, setParams: (v: Record<string, unknown>) => void, setBodyText: (v: string) => void, setHeaderRows: (v: HeaderRow[]) => void) {
   setParams({ ...(ex.input || {}) });
   setBodyText(ex.body !== undefined && ex.body !== null ? JSON.stringify(ex.body, null, 2) : '');
   setHeaderRows(Object.entries(ex.headers || {}).map(([key, value]) => ({ key, value })));
+}
+
+const SOURCE_LABEL: Record<RequestExample['source'], string> = {
+  verified: 'Prefilled from a verified example',
+  saved: 'Prefilled from a saved example',
+  contract: "Prefilled from the contract's own example",
+  schema: 'Prefilled from the schema',
+};
+
+// PrefillBanner says where the payload in the form came from. "Verified" means
+// this request really was sent and really worked; "schema" means every value
+// is a placeholder. Without the label a reader cannot tell those apart, and
+// the difference is the whole value of the prefill.
+function PrefillBanner({ example }: { example: RequestExample }) {
+  const trustworthy = example.source === 'verified';
+  return (
+    <div
+      className={`rounded border px-2.5 py-1.5 text-xs ${
+        trustworthy
+          ? 'border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300'
+          : 'border-slate-300 bg-slate-50 text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400'
+      }`}
+    >
+      {SOURCE_LABEL[example.source]}
+      {example.source_id ? ` "${example.source_id}"` : ''}
+      {example.note ? ` -- ${example.note}` : ''}
+    </div>
+  );
 }
 
 export default function TryIt() {
@@ -52,6 +80,11 @@ export default function TryIt() {
   const [callError, setCallError] = useState<ApiClientError | Error | null>(null);
   const [hints, setHints] = useState<Hint[]>([]);
 
+  // prefilled records where the form's starting payload came from, so the
+  // page can say so instead of leaving a reader to guess whether the body in
+  // front of them is known to work. Cleared as soon as an example is picked.
+  const [prefilled, setPrefilled] = useState<RequestExample | null>(null);
+
   const [saveMode, setSaveMode] = useState<'from-run' | 'hand-written' | null>(null);
   const [saveSubmitting, setSaveSubmitting] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -72,11 +105,14 @@ export default function TryIt() {
     setSelectedExampleId('');
 
     async function load() {
-      const [opRes, envsRes, defRes, exRes] = await Promise.all([
+      const [opRes, envsRes, defRes, exRes, reqEx] = await Promise.all([
         operations.get(operationId),
         environments.list(),
         environments.getDefault().catch(() => ({ name: '' })),
         examples.list({ operation: operationId }),
+        // Supplementary: a blank form is still usable, so a failure here
+        // must not stop the page from loading.
+        operations.example(operationId).catch(() => null),
       ]);
       if (cancelled) return;
       setOp(opRes);
@@ -97,6 +133,7 @@ export default function TryIt() {
       }
       if (cancelled) return;
 
+      setPrefilled(null);
       if (matchedExample) {
         applyExample(matchedExample, setParams, setBodyText, setHeaderRows);
         setSelectedExampleId(matchedExample.id);
@@ -106,6 +143,19 @@ export default function TryIt() {
         setBodyText(saved.bodyText);
         setHeaderRows(saved.headers);
         setAllowProduction(saved.allowProduction);
+      } else if (reqEx) {
+        // Nothing to restore: start from the best request the daemon can
+        // offer rather than an empty textarea the reader has to compile a
+        // payload into by hand, and say where it came from.
+        const blank: Record<string, unknown> = {};
+        for (const p of opRes.params || []) blank[p.name] = defaultParamValue(p);
+        setParams({ ...blank, ...(reqEx.input || {}) });
+        setBodyText(reqEx.body !== undefined && reqEx.body !== null ? JSON.stringify(reqEx.body, null, 2) : '');
+        setHeaderRows(Object.entries(reqEx.headers || {}).map(([key, value]) => ({ key, value })));
+        setAllowProduction(false);
+        // Nothing to say about a form there was nothing to prefill (a GET
+        // with no parameters); the banner would be noise.
+        if (reqEx.body !== undefined || reqEx.input || reqEx.headers) setPrefilled(reqEx);
       } else {
         const blank: Record<string, unknown> = {};
         for (const p of opRes.params || []) blank[p.name] = defaultParamValue(p);
@@ -144,6 +194,7 @@ export default function TryIt() {
 
   const onSelectExample = (id: string) => {
     setSelectedExampleId(id);
+    setPrefilled(null);
     if (!id) return;
     const match = exampleList.find((e) => e.id === id);
     if (match) applyExample(match, setParams, setBodyText, setHeaderRows);
@@ -262,9 +313,19 @@ export default function TryIt() {
             <ExamplePicker examples={exampleList} value={selectedExampleId} onChange={onSelectExample} />
           </div>
 
+          {prefilled && <PrefillBanner example={prefilled} />}
+
           <ParamsForm params={op.params || []} values={params} onChange={(name, value) => setParams((p) => ({ ...p, [name]: value }))} />
 
-          <BodyEditor value={bodyText} onChange={setBodyText} requestBody={op.request_body} />
+          <BodyEditor
+            value={bodyText}
+            onChange={(text) => {
+              setBodyText(text);
+              setPrefilled(null);
+            }}
+            requestBody={op.request_body}
+            loadFullShape={() => operations.example(op.id, { fields: 'all' })}
+          />
 
           <HeadersEditor rows={headerRows} onChange={setHeaderRows} />
 

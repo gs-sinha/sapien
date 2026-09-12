@@ -10,7 +10,7 @@ import { attachTerminal, fitTerminal, sendResize, startSession, useAgentTerminal
 // environment) doesn't implement it.
 export function TerminalView() {
   const wrapperRef = useRef<HTMLDivElement | null>(null);
-  const { phase, command, dir, exitCode, errorMessage } = useAgentTerminal();
+  const { phase, command, dir, exitCode, errorMessage, endedNote } = useAgentTerminal();
 
   useEffect(() => {
     const el = wrapperRef.current;
@@ -37,9 +37,13 @@ export function TerminalView() {
       {ended && (
         <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-3 border-t border-slate-700 bg-slate-900/95 px-3 py-2 text-sm text-slate-100">
           <span>
+            {/* endedNote is set when something other than the process itself
+                ended the session (today: a workspace switch), and replaces
+                the generic notice, which would otherwise read as if the
+                agent had exited on its own. */}
             {phase === 'error'
               ? `Could not start: ${errorMessage || 'unknown error'}`
-              : `Session ended${exitCode !== null ? ` (exit code ${exitCode})` : ''}.`}
+              : endedNote || `Session ended${exitCode !== null ? ` (exit code ${exitCode})` : ''}.`}
           </span>
           <button
             type="button"

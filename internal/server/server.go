@@ -90,14 +90,7 @@ func New(opts Options) *Server {
 // httptest.Server or a custom listener.
 func (s *Server) Handler() http.Handler { return s.handler }
 
-// Close stops the server's background event-history subscription
-// (recentCancel). It is not wired into any automatic shutdown path today
-// -- neither ListenAndServe nor `sapien serve` (internal/cli/serve.go
-// serves s.Handler() under its own http.Server and shuts that down
-// directly) calls it -- since the subscription's only cost is one
-// goroutine and a bounded ring buffer for the remainder of the process,
-// which exits anyway once serving stops. It exists so a caller that wants
-// deterministic teardown (tests, an embedder) can get it.
+// Close stops the event subscription and terminates managed terminal sessions.
 func (s *Server) Close() error {
 	if s.recentCancel != nil {
 		s.recentCancel()
@@ -136,6 +129,7 @@ func (s *Server) ListenAndServe(ctx context.Context, addr string) (string, error
 	go func() {
 		<-ctx.Done()
 		s.idle.stop()
+		_ = s.Close()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := httpServer.Shutdown(shutdownCtx); err != nil {
@@ -160,7 +154,11 @@ func (s *Server) newRouter() http.Handler {
 
 	for _, rt := range routeTable {
 		var h http.Handler = rt.Handler(s)
-		h = s.workspaceMiddleware(h)
+		// Liveness must not wait behind workspace loading/indexing. It
+		// describes the daemon, not a selected workspace.
+		if rt.Pattern != "/v1/health" {
+			h = s.workspaceMiddleware(h)
+		}
 		if rt.RequiresAuth {
 			h = s.authMiddleware(h)
 		}

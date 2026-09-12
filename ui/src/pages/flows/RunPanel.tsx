@@ -3,7 +3,7 @@ import { flows, runs } from '../../api/client';
 import { pushToast } from '../../state/toast';
 import { applyStepEditsToYaml, hasAnyEdits } from './stepEdits';
 import type { FlowStepEdits } from './stepEdits';
-import { EnvironmentSelect } from './EnvironmentSelect';
+import { EnvironmentSelect, ProductionNotice, useEnvironmentSelection } from './EnvironmentSelect';
 import { InputsForm } from './InputsForm';
 import type { Flow, Run } from '../../api/types';
 
@@ -28,7 +28,7 @@ export function RunPanel({
   onFinish?: (run: Run) => void;
   onFail?: (message: string) => void;
 }) {
-  const [env, setEnv] = useState('');
+  const envSel = useEnvironmentSelection();
   const [inputs, setInputs] = useState<Record<string, unknown>>({});
   const [inputsValid, setInputsValid] = useState(true);
   const [running, setRunning] = useState(false);
@@ -41,7 +41,7 @@ export function RunPanel({
   const withEdits = hasAnyEdits(edits);
 
   const run = async () => {
-    if (!env) {
+    if (!envSel.name) {
       pushToast('error', 'choose an environment first');
       return;
     }
@@ -51,9 +51,10 @@ export function RunPanel({
       // With pending step edits, run the patched YAML unsaved
       // (POST /v1/runs/source) instead of the flow's own saved steps, so
       // "Run with edits" always reflects exactly what's on screen.
+      const opts = { environment: envSel.name, inputs, allow_production: envSel.allowProduction, trigger: 'ui' };
       const result = withEdits
-        ? await runs.runSource({ yaml: await applyStepEditsToYaml(flow.source || '', edits), opts: { environment: env, inputs, trigger: 'ui' } })
-        : await flows.run(flow.id, { environment: env, inputs, trigger: 'ui' });
+        ? await runs.runSource({ yaml: await applyStepEditsToYaml(flow.source || '', edits), opts })
+        : await flows.run(flow.id, opts);
       onFinish?.(result);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'run failed';
@@ -69,12 +70,12 @@ export function RunPanel({
       <div className="flex flex-wrap items-end gap-3">
         <div className="w-56">
           <label className="mb-1 block text-xs text-slate-500">Environment</label>
-          <EnvironmentSelect value={env} onChange={setEnv} />
+          <EnvironmentSelect selection={envSel} />
         </div>
         <button
           type="button"
           onClick={run}
-          disabled={running || !inputsValid || !env}
+          disabled={running || !inputsValid || !envSel.name || envSel.productionBlocked}
           className="rounded bg-slate-900 px-4 py-1.5 text-sm text-white disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900"
         >
           {running ? 'Running…' : withEdits ? 'Run with edits' : 'Run'}
@@ -100,6 +101,7 @@ export function RunPanel({
         )}
         {withEdits && <p className="text-xs text-slate-400">Runs the flow&apos;s saved YAML with your unsaved step edits applied.</p>}
       </div>
+      <ProductionNotice selection={envSel} />
       {(declaredInputs || adHocOpen) && (
         <InputsForm
           specs={declaredInputs ? flow.inputs : undefined}

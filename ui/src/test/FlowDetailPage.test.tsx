@@ -4,7 +4,10 @@ import { MemoryRouter, Route, Routes, useParams } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import FlowDetailPage from '../pages/FlowDetailPage';
 import { useEvents } from '../state/events';
-import type { Operation, Run } from '../api/types';
+import type { Environment, Operation, Run } from '../api/types';
+
+const stageEnv: Environment = { version: 1, name: 'stage', production: false };
+const prodEnv: Environment = { version: 1, name: 'prod', production: true };
 
 const sampleSource = ['version: 1', 'id: qcom-order', 'steps:', '  - id: create', '    call: qcom.createOrder'].join('\n');
 
@@ -56,6 +59,8 @@ const flowsRun = vi.fn(
       releaseRun = resolve;
     }),
 );
+const environmentsList = vi.fn(async (): Promise<Environment[]> => [stageEnv]);
+const environmentsGetDefault = vi.fn(async () => ({ name: 'stage' }));
 const runsRunSource = vi.fn(
   async (_req: { yaml: string; opts: unknown }): Promise<Run> => ({
     id: 'run_1',
@@ -83,8 +88,8 @@ vi.mock('../api/client', () => ({
     create: vi.fn(),
   },
   environments: {
-    list: vi.fn(async () => [{ version: 1, name: 'stage', production: false }]),
-    getDefault: vi.fn(async () => ({ name: 'stage' })),
+    list: () => environmentsList(),
+    getDefault: () => environmentsGetDefault(),
   },
   runs: {
     list: vi.fn(async () => []),
@@ -113,6 +118,10 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  environmentsList.mockClear();
+  environmentsList.mockImplementation(async () => [stageEnv]);
+  environmentsGetDefault.mockClear();
+  environmentsGetDefault.mockImplementation(async () => ({ name: 'stage' }));
   flowsUpdate.mockClear();
   runsRunSource.mockClear();
   flowsRun.mockClear();
@@ -182,7 +191,7 @@ describe('FlowDetailPage', () => {
     const [req] = runsRunSource.mock.calls[0] as [{ yaml: string; opts: unknown }];
     expect(req.yaml).toContain('riderId: rider_42');
     expect(req.yaml).toContain('call: qcom.createOrder');
-    expect(req.opts).toEqual({ environment: 'stage', inputs: {}, trigger: 'ui' });
+    expect(req.opts).toEqual({ environment: 'stage', inputs: {}, allow_production: false, trigger: 'ui' });
 
     // Stays on the flow page and reports the finished run there, with a way
     // through to its details rather than a forced jump.
@@ -190,6 +199,47 @@ describe('FlowDetailPage', () => {
     expect(screen.getByText('QCOM order')).toBeInTheDocument();
     expect(screen.queryByText('RUN PAGE run_1')).not.toBeInTheDocument();
     expect(screen.getByText('Open run details →')).toHaveAttribute('href', '/ui/runs/run_1');
+  });
+
+  it('blocks Run against a production environment until allow-production is ticked', async () => {
+    environmentsList.mockImplementation(async () => [stageEnv, prodEnv]);
+    environmentsGetDefault.mockImplementation(async () => ({ name: 'prod' }));
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findByText('This environment is marked production.');
+    const runButton = screen.getByRole('button', { name: 'Run' });
+    expect(runButton).toBeDisabled();
+
+    await user.click(screen.getByRole('checkbox', { name: /allow running against production/i }));
+    expect(runButton).toBeEnabled();
+
+    await user.click(runButton);
+    await waitFor(() => expect(flowsRun).toHaveBeenCalledTimes(1));
+    expect(flowsRun.mock.calls[0][1]).toMatchObject({ environment: 'prod', allow_production: true });
+    await act(async () => {
+      releaseRun(finishedRun);
+    });
+  });
+
+  it('drops the production tick when the environment changes', async () => {
+    environmentsList.mockImplementation(async () => [stageEnv, prodEnv]);
+    environmentsGetDefault.mockImplementation(async () => ({ name: 'prod' }));
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findByText('This environment is marked production.');
+    await user.click(screen.getByRole('checkbox', { name: /allow running against production/i }));
+    expect(screen.getByRole('button', { name: 'Run' })).toBeEnabled();
+
+    // Away to stage (no notice at all), then back: the earlier unlock must
+    // not still be in effect.
+    await user.selectOptions(screen.getByRole('combobox'), 'stage');
+    expect(screen.queryByText('This environment is marked production.')).not.toBeInTheDocument();
+
+    await user.selectOptions(screen.getByRole('combobox'), 'prod');
+    expect(screen.getByRole('checkbox', { name: /allow running against production/i })).not.toBeChecked();
+    expect(screen.getByRole('button', { name: 'Run' })).toBeDisabled();
   });
 
   it('clamps a long agent-written description behind "Show more"', async () => {
@@ -235,7 +285,7 @@ describe('FlowDetailPage', () => {
     await user.click(runButton);
 
     await waitFor(() => expect(flowsRun).toHaveBeenCalledTimes(1));
-    expect(flowsRun.mock.calls[0][1]).toEqual({ environment: 'stage', inputs: {}, trigger: 'ui' });
+    expect(flowsRun.mock.calls[0][1]).toEqual({ environment: 'stage', inputs: {}, allow_production: false, trigger: 'ui' });
 
     // POST /run hasn't answered yet: the run is only visible through events.
     // run.started names the id, so the link to the run's own page works

@@ -342,10 +342,13 @@ func (f *flowAPI) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-// Reference returns the DSL reference text for agents (PLAN §23): flow,
-// expressions, memory, or service (the api/ package layout).
+// Reference returns the DSL reference text for agents (PLAN §23): sapien
+// (what Sapien is and what it can do), flow, expressions, memory, or service
+// (the api/ package layout).
 func (f *flowAPI) Reference(ctx context.Context, topic string) (string, error) {
 	switch topic {
+	case "sapien":
+		return sapienReferenceText, nil
 	case "flow":
 		return flow.Reference(), nil
 	case "expressions":
@@ -355,7 +358,7 @@ func (f *flowAPI) Reference(ctx context.Context, topic string) (string, error) {
 	case "service":
 		return serviceReferenceText, nil
 	default:
-		return "", errs.New(errs.Invalid, "unknown reference topic %q; want flow, memory, expressions, or service", topic)
+		return "", errs.New(errs.Invalid, "unknown reference topic %q; want sapien, flow, memory, expressions, or service", topic)
 	}
 }
 

@@ -831,6 +831,19 @@ Source: `docs/feedback/2026-09-05-41-step-flow-session.md`. The knowledge layer 
 
 Deferred to the next round (items 5-8 of the plan given to the user): validate-time documented-error hints, an `environment` reference topic with the exact YAML to add on "no base_url", a context budget that binds, memory `supersedes` and `memory audit`.
 
+## 34e. Understandability, not just indexability (decided 2026-09-12 from consumer-agent feedback)
+
+Source: feedback from agents consuming onboarded services, plus the user's own session using the inspector. The pattern behind four of the five observations: Sapien served structure and left meaning behind.
+
+1. **Orientation.** `get_dsl_reference("sapien")` (resource `sapien://reference/sapien`): what Sapien is (a cross-repo index of contracts, the services' own docs, working examples, memories, flows), how to consume a service you do not own, why `execute_api` beats a throwaway script, where onboarding lives. The MCP `instructions` open with the same framing; budget 1,300 -> 1,750 characters. Agents had the tools and not the frame, so they read schemas here and called services elsewhere.
+2. **A request example on every operation.** One resolver (`internal/example.Resolve`) picks a verified saved example, else a hand-written one, else the contract's `example:`, else a synthesis from the request schema, labelled with its source and how much to trust it. Served by `get_api.request_example` (every detail level) and `GET /v1/operations/{id}/example`; the UI's Try It form prefills from it, and `?fields=all` (`example.Synthesize`) fills the whole declared shape for a human who would rather delete fields than look them up. The authored home is the contract's own `example:`, written during onboarding, because it travels with the code and every OpenAPI tool shows it.
+3. **Docs that carry business logic.** `reference_service.md` is rewritten around its actual reader -- an agent in another repository -- with a checklist of what a section must answer that the contract cannot (why it exists and who calls it, preconditions, invariants, side effects, idempotency and retries, every error code and what to do about it, timing, deprecations, the traps), plus `## Open questions` for what could not be established.
+4. **An interview step.** One batched round *after* drafting from the code, with a question bank at service/subproject, operation, and cross-service level, a rule against asking anything the code answers, and answers written into the contract, the docs, and memories. Some of what makes a service usable is in nobody's code.
+5. **Coverage as a number and as lint.** `registry.coverage` counts operations the narrative docs reach and bodies with an example, reported by `add_service`/`sync_service`/`get_service`/`service list`, with `NO_NARRATIVE_DOCS`, `UNDOCUMENTED_OPERATION`, `MISSING_REQUEST_EXAMPLE`, `NO_CONCEPTS` naming the gaps. Acceptable in `accepted_warnings` with a reason, per §6's acceptance rule: mandatory coverage would reproduce the 2026-09-06 incident where an agent chasing zero warnings made a contract lie.
+6. **`soft:` in the flow reference.** It existed everywhere except the text agents read. `TestReference_DocumentsEveryDSLKey` reflects over every YAML tag the parser accepts so no future DSL key ships invisible.
+
+Not addressed here: coverage measures whether a doc section mentions an operation, not whether it says anything useful; and nothing re-opens the interview when the code changes under a service onboarded earlier.
+
 ## 35. Engineering risks and mitigations
 
 | Risk | Mitigation |

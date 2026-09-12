@@ -34,6 +34,7 @@ import type {
   Operation,
   PromotionTarget,
   PurgeRunsResponse,
+  RequestExample,
   Run,
   RunFilter,
   RunFlowSourceRequest,
@@ -257,6 +258,13 @@ export const operations = {
   resolve: (ref: string): Promise<Operation> => get(`/v1/operations/resolve${buildQuery({ ref })}`),
   get: (id: string): Promise<Operation> => get(`/v1/operations/${encodeURIComponent(id)}`),
   fields: (id: string): Promise<Field[]> => orEmpty(get(`/v1/operations/${encodeURIComponent(id)}/fields`)),
+  // A ready-to-send request: the best of a verified example, a saved one, the
+  // contract's own example, and one synthesized from the schema. `fields:
+  // 'all'` synthesizes every field rather than the required ones. Resolved by
+  // the daemon (internal/example.Resolve) so the UI, get_api, and the CLI all
+  // answer "what does a call look like?" identically.
+  example: (id: string, opts: { fields?: 'all' } = {}): Promise<RequestExample> =>
+    get(`/v1/operations/${encodeURIComponent(id)}/example${buildQuery({ fields: opts.fields })}`),
 };
 
 export const schemas = {

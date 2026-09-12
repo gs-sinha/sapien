@@ -40,35 +40,105 @@ tell the agent what to do when a user asks to onboard a service.
    handling in the repo, and writes:
 
    ```text
-   api/openapi.yaml   the contract, derived from the real code
+   api/openapi.yaml   the contract, with an example: on every request body
    api/service.yaml   name, description, owners, concepts, environments
-   api/docs/*.md      narrative documentation, one file per domain area
+   api/docs/*.md      overview.md plus one file per domain area
    ```
 
-3. Calls `add_service` with the repo's absolute path. The tool returns
-   the operation count and any warnings, most commonly an operation
-   missing an `operationId` or a doc that references a path that does
-   not exist in the contract. If the service is already registered,
-   `add_service` re-syncs it instead of failing, and says so.
-4. For each warning: fixes it if it points at a real gap, or, if the
-   warning already describes the API correctly, accepts it in
-   `api/service.yaml` with a reason instead of editing the contract to
-   make the warning go away (see "Warnings" below). Then confirms the
-   result with `get_service` and a `search_apis` query you would
-   plausibly type.
-5. Adds a "Sapien" section to the repo's `CLAUDE.md` or `AGENTS.md`,
+3. **Asks you one round of questions.** This is the part that decides
+   whether the docs are worth anything. The agent can read what an
+   endpoint takes and returns; it cannot read why the endpoint exists, who
+   calls it, whether calling it twice is safe, which errors are normal, or
+   what everyone gets wrong the first time. It asks after drafting from
+   the code, so the questions are specific ("`allocate` has no idempotency
+   key and no unique constraint on `order_id` -- is calling it twice for
+   one order safe?"), grouped by area, and answerable in a sentence.
+
+   Answer what you know and say so when you do not: anything unanswered
+   goes into an `## Open questions` section in the docs rather than being
+   guessed at, which tells the next reader where the edge of the knowledge
+   is. The round is bounded, and onboarding does not stall waiting for it.
+
+4. Calls `add_service` with the repo's absolute path. The tool returns
+   the operation count, a coverage line (see "Coverage" below), and any
+   warnings -- most commonly an operation missing an `operationId`, a doc
+   that references a path the contract does not have, an operation no doc
+   mentions, or a request body with no example. If the service is already
+   registered, `add_service` re-syncs it instead of failing, and says so.
+5. Closes the coverage gap, and for each warning: fixes it if it points at
+   a real gap, or, if the warning already describes the API correctly or
+   the gap is deliberate, accepts it in `api/service.yaml` with a reason
+   instead of editing the contract to make the warning go away (see
+   "Warnings" below). Then confirms the result with `get_service`, a
+   `search_apis` query you would plausibly type, and `get_api` on the most
+   important operation to see the request example a caller will be handed.
+6. Adds a "Sapien" section to the repo's `CLAUDE.md` or `AGENTS.md`,
    which `add_service` hands back ready to paste. It tells the next agent
    that touches the code to update `api/openapi.yaml` and `api/docs` in
    the same change, to keep `operationId`s stable, and to read what
    Sapien already knows before editing `api/`. This is what keeps the
    docs current after onboarding.
-6. Records anything it learned that does not belong in the contract or
+7. Records anything it learned that does not belong in the contract or
    the docs, such as an operational quirk or an invariant, as a memory
    with `create_memory`.
 
 Nothing here executes a request against the service; onboarding only
 reads the repo and writes files plus one `add_service` call. Commit the
 `CLAUDE.md` or `AGENTS.md` change together with `api/`.
+
+## Coverage
+
+A contract that lints clean can still be useless to the next person. So
+`add_service`, `sapien service add`/`sync`, and `get_service` also report
+how much of the service is *understandable*:
+
+```text
+allocation-service: 24 operations, status ok
+docs: 18/24 operations documented in api/docs (31 sections)
+examples: 15/19 operations that take a body have a request example
+```
+
+An operation counts as documented when some `api/docs` section mentions it
+-- by operation id, or by mentioning its endpoint. The contract's own tag
+and `info` descriptions do not count; that is the contract restating
+itself. Deprecated operations are left out of the totals.
+
+Four warnings name the specific gaps: `NO_NARRATIVE_DOCS` (no
+`api/docs/*.md` at all, reported once rather than per operation),
+`UNDOCUMENTED_OPERATION`, `MISSING_REQUEST_EXAMPLE`, and `NO_CONCEPTS`.
+They are lint like any other -- acceptable with a reason, never a reason
+the registration fails. An internal endpoint no outside caller should use
+is a legitimate thing to leave undocumented; accepting it says so on the
+record instead of leaving the number unexplained.
+
+These numbers are the honest measure of an onboarding. 24 indexed
+operations with 6 documented means the service is findable and not yet
+usable.
+
+## Request examples
+
+Every operation that takes a request body should carry an `example:` in
+the contract, written during onboarding from the code:
+
+```yaml
+  requestBody:
+    content:
+      application/json:
+        schema: { $ref: "#/components/schemas/CreateOrderRequest" }
+        example:
+          customerId: cust_8f21
+          type: QCOM
+```
+
+It lives in the contract because it travels with the code and every
+OpenAPI tool shows it. Sapien serves it wherever a payload is needed:
+`get_api` returns a ready-to-send `request_example`, and the UI's "Try it"
+form opens prefilled from it instead of with an empty textarea. The
+precedence is: a verified example (one really sent, saved from a real run
+with `create_example`), then a hand-written saved example, then the
+contract's, then a payload synthesized from the schema -- and the UI and
+`get_api` both say which one you are looking at, because "verified" and
+"placeholders derived from the schema" deserve different amounts of trust.
 
 ## Warnings
 
@@ -125,7 +195,9 @@ to your codebase: read the diff before you commit it.
   the one who knows the service, so verify it.
 - Read `api/docs/*.md` for accuracy, especially business rules,
   invariants, and error handling. These are what another agent, or a
-  teammate, will rely on later.
+  teammate, will rely on later. Check `## Open questions` too: it is the
+  list of things the agent could not establish, and it is usually the
+  shortest useful to-do list you will get about your own service.
 - Check `api/service.yaml` for a sensible `name`, `description`,
   `owners`, and `concepts`. `concepts` are the words someone would type
   when they do not know the operation name, so make sure they match how

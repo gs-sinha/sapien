@@ -897,6 +897,7 @@ func newFixtureEngine() *fakeEngine {
 	}
 
 	st.refs = map[string]string{
+		"sapien":      "# What Sapien is\n\nA shared index of the services around this repo; get_api returns a request_example.\n",
 		"flow":        "# Flow DSL\n\nA flow is a sequence of steps, each calling one operation.\n",
 		"memory":      "# Memory DSL\n\nA memory has a subject, a type, and Markdown text.\n",
 		"expressions": "# Expressions\n\nCEL expressions evaluate against the step response.\n",

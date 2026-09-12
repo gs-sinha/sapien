@@ -83,6 +83,7 @@ func TestResource_Reference(t *testing.T) {
 		want  string
 		mime  string
 	}{
+		{"sapien", "What Sapien is", "text/markdown"},
 		{"flow-dsl", "Flow DSL", "text/markdown"},
 		{"memory", "Memory DSL", "text/markdown"},
 		{"expressions", "Expressions", "text/markdown"},

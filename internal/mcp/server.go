@@ -13,11 +13,17 @@ import (
 	"github.com/gs-sinha/sapien/internal/errs"
 )
 
-// instructions is sent to every client at initialize (PLAN §23). It is kept
-// under about 1,300 characters.
-const instructions = `Start with get_context(intent). Discover with search_apis, inspect with get_api, read the service's own documentation with search_docs and get_doc, read get_relevant_memories for the operations you will use, check list_flows for existing flows, read get_dsl_reference("flow") once per session, then validate_flow until clean and create_flow; patch_flow for edits. Never invent operation IDs or fields; use only IDs returned by tools. Turn memories of type invariant or testing attached to a selected operation into assertions or until steps. Check list_examples/get_api for a verified example before writing a request body; save a working one with create_example(run_id) so the next agent does not rediscover it. Do not execute flows or endpoints unless the user asked.
-To onboard a service or write Sapien-style docs: read get_dsl_reference("service"), create the api/ package in the repo from its real code, then add_service with the absolute repo path, fix the warnings it returns, and paste the CLAUDE.md/AGENTS.md section it suggests into the repo so future code changes keep api/ current.
-Resources: sapien://services/{name}(/docs/{path}), operations/{id}, schemas/{service}/{name}, flows/{id}, memories/{id}, reference/{flow-dsl|memory|expressions|service|flow.schema.json}.`
+// instructions is sent to every client at initialize (PLAN §23). Budget
+// raised from ~1,300 to ~1,700 characters for the first two additions that
+// paid for themselves: one sentence saying what Sapien actually is (agents
+// used its tools without ever learning it is a cross-repo discovery layer,
+// so they read schemas here and then called services from their own
+// scripts), and the request_example/execute_api nudges. Every session pays
+// for this text, so nothing goes in that a per-tool description can carry.
+const instructions = `Sapien indexes the services around this repo: their contracts, their own documentation, working request examples, memories, and runnable flows. get_dsl_reference("sapien") says what it can do.
+Start with get_context(intent). Discover with search_apis, inspect with get_api (its request_example is ready to send; never assemble a body from the field list), read its own documentation with search_docs/get_doc, read get_relevant_memories for the operations you will use, check list_flows, read get_dsl_reference("flow") once per session, then validate_flow until clean and create_flow; patch_flow for edits. Never invent operation IDs or fields; use only IDs tools returned. Turn memories of type invariant or testing on a selected operation into assertions or until steps. Save a working request with create_example(run_id) for the next agent. Call operations with execute_api, not curl or a script: it resolves the environment's base URL, headers and secrets, records the run, and diagnoses failures. Do not execute flows or endpoints unless the user asked.
+To onboard a service or write Sapien-style docs: read get_dsl_reference("service"). Its reader is an agent in another repo: the docs must carry the business rules, not restate the contract; put an example: on every request body, ask the user what the code cannot answer, then add_service with the absolute repo path, close the coverage gap, fix the warnings, and paste the CLAUDE.md/AGENTS.md section it returns so future changes keep api/ current.
+Resources: sapien://services/{name}(/docs/{path}), operations/{id}, schemas/{service}/{name}, flows/{id}, memories/{id}, reference/{sapien|flow-dsl|memory|expressions|service|flow.schema.json}.`
 
 // Options configures a Sapien MCP server.
 type Options struct {
