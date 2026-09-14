@@ -4,12 +4,20 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/gs-sinha/sapien/internal/config"
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/engine"
+	"github.com/gs-sinha/sapien/internal/engine/enginetest"
+	"github.com/gs-sinha/sapien/internal/engine/local"
 	"github.com/gs-sinha/sapien/internal/errs"
 	"github.com/gs-sinha/sapien/internal/workspaces"
 )
@@ -107,4 +115,75 @@ func TestHealthDoesNotResolveWorkspace(t *testing.T) {
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&health))
 	assert.True(t, health.OK)
 	assert.Equal(t, fake.Workspace().Dir, health.Workspace)
+}
+
+// DELETE /v1/workspaces?dir= closes a workspace on the daemon; the primary
+// is refused, a blank dir is refused, and a single-engine server says it
+// cannot.
+func TestWorkspaceClose(t *testing.T) {
+	primaryDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(primaryDir, domain.WorkspaceFileName), []byte("version: 1\nname: primary\n"), 0o644))
+	t.Setenv("SAPIEN_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
+	otherDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(otherDir, domain.WorkspaceFileName), []byte("version: 1\nname: other\n"), 0o644))
+
+	var mgr *workspaces.Manager
+	_, ts := newTestServer(t, func(opts *Options) {
+		primary := enginetest.New(&domain.Workspace{Version: 1, Name: "primary", Dir: primaryDir})
+		opts.Engine = primary
+		mgr = workspaces.New(primary.Workspace(), primary, workspaces.Options{
+			Open: func(ws *domain.Workspace, _ local.Options) (engine.Engine, error) { return enginetest.New(ws), nil },
+		})
+		opts.Workspaces = mgr
+	})
+	auth := reqOpts{token: "test-token"}
+
+	// Open it explicitly, as the bridge and the UI's picker do.
+	resp := doReqBodyReal(t, ts, http.MethodPost, "/v1/workspaces", "test-token", []byte(`{"dir":"`+otherDir+`"}`))
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.FileExists(t, filepath.Join(otherDir, domain.WorkspaceStateDir, "daemon.lock"))
+
+	resp = doReq(t, ts, http.MethodDelete, "/v1/workspaces?dir="+url.QueryEscape(otherDir), auth)
+	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
+	assert.NoFileExists(t, filepath.Join(otherDir, domain.WorkspaceStateDir, "daemon.lock"))
+
+	resp = doReq(t, ts, http.MethodDelete, "/v1/workspaces?dir="+url.QueryEscape(primaryDir), auth)
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	assert.Equal(t, errs.Invalid, decodeErrBody(t, resp).Code)
+
+	resp = doReq(t, ts, http.MethodDelete, "/v1/workspaces", auth)
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+}
+
+// A request header naming an unregistered workspace does not open it: the
+// stale tab that reopened a forgotten workspace on every request is the
+// reason. Registered ones still open implicitly.
+func TestWorkspaceHeaderOpensOnlyRegistered(t *testing.T) {
+	primaryDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(primaryDir, domain.WorkspaceFileName), []byte("version: 1\nname: primary\n"), 0o644))
+	t.Setenv("SAPIEN_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
+	otherDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(otherDir, domain.WorkspaceFileName), []byte("version: 1\nname: other\n"), 0o644))
+
+	_, ts := newTestServer(t, func(opts *Options) {
+		primary := enginetest.New(&domain.Workspace{Version: 1, Name: "primary", Dir: primaryDir})
+		opts.Engine = primary
+		opts.Workspaces = workspaces.New(primary.Workspace(), primary, workspaces.Options{
+			Open: func(ws *domain.Workspace, _ local.Options) (engine.Engine, error) { return enginetest.New(ws), nil },
+		})
+	})
+
+	req, err := http.NewRequest(http.MethodGet, ts.URL+"/v1/workspace", nil)
+	require.NoError(t, err)
+	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set(WorkspaceHeader, otherDir)
+	resp, err := ts.Client().Do(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+	assert.Equal(t, errs.WorkspaceNotFound, decodeErrBody(t, resp).Code)
+
+	require.NoError(t, config.AddWorkspace(otherDir))
+	resp, err = ts.Client().Do(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
 }

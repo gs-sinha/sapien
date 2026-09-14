@@ -3,7 +3,6 @@ package server
 import (
 	"net/http"
 
-	"github.com/gs-sinha/sapien/internal/config"
 	"github.com/gs-sinha/sapien/internal/domain"
 	"github.com/gs-sinha/sapien/internal/errs"
 	"github.com/gs-sinha/sapien/internal/workspaces"
@@ -52,7 +51,7 @@ func (s *Server) handleWorkspaceRegister(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	eng, err := s.workspaces.Engine(req.Dir)
+	eng, err := s.workspaces.Register(req.Dir)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -63,10 +62,6 @@ func (s *Server) handleWorkspaceRegister(w http.ResponseWriter, r *http.Request)
 		writeError(w, errs.New(errs.Internal, "workspace %q opened without metadata", req.Dir))
 		return
 	}
-	if err := config.AddWorkspace(ws.Dir); err != nil {
-		writeError(w, err)
-		return
-	}
 
 	writeJSON(w, http.StatusOK, workspaces.Info{
 		Dir:      ws.Dir,
@@ -75,4 +70,26 @@ func (s *Server) handleWorkspaceRegister(w http.ResponseWriter, r *http.Request)
 		Open:     true,
 		Services: len(ws.Services),
 	})
+}
+
+// handleWorkspaceClose implements DELETE /v1/workspaces?dir=: close that
+// workspace's engine on this daemon and release its lock. It does not
+// unregister it (`sapien workspace forget` does that, and calls this), so
+// a later request naming a still-registered workspace reopens it.
+func (s *Server) handleWorkspaceClose(w http.ResponseWriter, r *http.Request) {
+	dir := r.URL.Query().Get("dir")
+	if dir == "" {
+		writeError(w, errs.New(errs.Invalid, "dir is required"))
+		return
+	}
+	if s.workspaces == nil {
+		writeError(w, errs.New(errs.Conflict, "this daemon serves a single workspace").
+			WithHint("stop the daemon instead"))
+		return
+	}
+	if err := s.workspaces.CloseOne(dir); err != nil {
+		writeError(w, err)
+		return
+	}
+	writeNoContent(w)
 }

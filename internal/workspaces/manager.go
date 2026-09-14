@@ -75,6 +75,10 @@ type Manager struct {
 	primary string
 	opts    Options
 	closed  bool
+	// registered holds directories Register was called for in this
+	// process, so a workspace registered through the API is openable even
+	// before (or without) the user config listing it.
+	registered map[string]bool
 }
 
 // New builds a Manager whose primary workspace is primary (already loaded by
@@ -88,9 +92,10 @@ func New(primary *domain.Workspace, eng engine.Engine, opts Options) *Manager {
 		}
 	}
 	m := &Manager{
-		open:    map[string]*entry{},
-		primary: primary.Dir,
-		opts:    opts,
+		open:       map[string]*entry{},
+		primary:    primary.Dir,
+		opts:       opts,
+		registered: map[string]bool{},
 	}
 	// The primary carries no lock here: `sapien serve` acquired it before
 	// building the Manager and releases it itself on shutdown.
@@ -105,13 +110,44 @@ func (m *Manager) Primary() string { return m.primary }
 // Engine returns the engine for dir, opening the workspace if this is its
 // first use. An empty dir means the primary workspace.
 //
+// Only the primary, a workspace registered in the user config, or one
+// Register was called for in this process is opened this way. Anything
+// else is errs.WorkspaceNotFound: a request header is not an invitation.
+// This is what makes `sapien workspace forget` mean something -- before,
+// a stale browser tab still carrying a forgotten workspace's header
+// reopened it on its next request, and "shut the other workspaces down"
+// could not be done without stopping the daemon.
+//
 // Opening acquires the workspace's daemon.lock: a workspace already being
 // served by another live daemon is refused with errs.Conflict rather than
 // opened a second time.
 func (m *Manager) Engine(dir string) (engine.Engine, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	return m.engineLocked(dir, false)
+}
 
+// Register opens dir the way Engine does, but allows a directory the user
+// config does not list yet, and records it there so it is offerable from
+// then on. It is the API's explicit "open this workspace" (POST
+// /v1/workspaces), as opposed to the implicit open a request header gets.
+func (m *Manager) Register(dir string) (engine.Engine, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	eng, err := m.engineLocked(dir, true)
+	if err != nil {
+		return nil, err
+	}
+	if ws := eng.Workspace(); ws != nil {
+		// A registry write failure is never fatal to serving it.
+		_ = config.AddWorkspace(ws.Dir)
+	}
+	return eng, nil
+}
+
+// engineLocked is Engine's body, called with m.mu held. explicit reports
+// a Register call, which may open an unregistered directory.
+func (m *Manager) engineLocked(dir string, explicit bool) (engine.Engine, error) {
 	if m.closed {
 		return nil, errs.New(errs.Internal, "workspace manager is closed")
 	}
@@ -126,6 +162,11 @@ func (m *Manager) Engine(dir string) (engine.Engine, error) {
 
 	if e, ok := m.openEntry(ws.Dir); ok {
 		return e.eng, nil
+	}
+
+	if !explicit && !workspace.SameDir(ws.Dir, m.primary) && !m.isRegistered(ws.Dir) {
+		return nil, errs.New(errs.WorkspaceNotFound, "workspace %s is not registered with this daemon", ws.Dir).
+			WithHint("`sapien workspace add " + ws.Dir + "` registers it; a forgotten workspace stays closed until then")
 	}
 
 	pid := m.opts.PID
@@ -144,12 +185,64 @@ func (m *Manager) Engine(dir string) (engine.Engine, error) {
 	}
 
 	m.open[ws.Dir] = &entry{eng: eng, lock: lock, opened: time.Now()}
-	// Opening a workspace is also how it becomes offerable later: a
-	// directory reached by --workspace once should show up in the picker
-	// without a separate "add" step. A registry write failure is never
-	// fatal to serving it.
-	_ = config.AddWorkspace(ws.Dir)
+	if explicit {
+		m.registered[ws.Dir] = true
+	}
 	return eng, nil
+}
+
+// isRegistered reports whether dir is offerable: listed in the user config
+// or registered through this Manager. Called with m.mu held.
+func (m *Manager) isRegistered(dir string) bool {
+	for d := range m.registered {
+		if workspace.SameDir(d, dir) {
+			return true
+		}
+	}
+	known, err := config.KnownWorkspaces()
+	if err != nil {
+		return false
+	}
+	for _, d := range known {
+		if workspace.SameDir(d, dir) {
+			return true
+		}
+	}
+	return false
+}
+
+// CloseOne closes dir's engine and releases its lock, so the daemon stops
+// watching and indexing it. The primary cannot be closed this way -- it is
+// what the daemon was started for; stop the daemon instead. Closing a
+// workspace that is not open is not an error. A closed workspace is
+// reopened by the next request naming it if it is still registered; pair
+// with `sapien workspace forget` to keep it closed.
+func (m *Manager) CloseOne(dir string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if workspace.SameDir(dir, m.primary) {
+		return errs.New(errs.Invalid, "the primary workspace %s cannot be closed while the daemon serves it", m.primary).
+			WithHint("`sapien daemon stop` stops the daemon itself")
+	}
+	delete(m.registered, dir)
+	for open, e := range m.open {
+		if !workspace.SameDir(open, dir) {
+			continue
+		}
+		var firstErr error
+		if err := e.eng.Close(); err != nil {
+			firstErr = err
+		}
+		if e.lock != nil {
+			if err := e.lock.Release(); err != nil && firstErr == nil {
+				firstErr = err
+			}
+		}
+		delete(m.open, open)
+		return firstErr
+	}
+	return nil
 }
 
 // openEntry finds an already-open workspace by directory, matching on the

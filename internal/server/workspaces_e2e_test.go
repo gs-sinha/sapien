@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/gs-sinha/sapien/internal/config"
 	"github.com/gs-sinha/sapien/internal/domain"
 	"github.com/gs-sinha/sapien/internal/engine"
 	"github.com/gs-sinha/sapien/internal/engine/enginetest"
@@ -29,6 +30,7 @@ func TestMultiWorkspaceServer_RoutesByHeader(t *testing.T) {
 
 	primaryDir := writeWorkspace(t, "primary")
 	otherDir := writeWorkspace(t, "other")
+	require.NoError(t, config.AddWorkspace(otherDir))
 
 	primary, err := workspace.Load(filepath.Join(primaryDir, domain.WorkspaceFileName))
 	require.NoError(t, err)

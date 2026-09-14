@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/gs-sinha/sapien/internal/config"
 	"github.com/gs-sinha/sapien/internal/daemon"
 	"github.com/gs-sinha/sapien/internal/domain"
 	"github.com/gs-sinha/sapien/internal/engine"
@@ -24,6 +25,16 @@ func newWorkspaceDir(t *testing.T, name string) string {
 	dir := t.TempDir()
 	body := "version: 1\nname: " + name + "\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, domain.WorkspaceFileName), []byte(body), 0o644))
+	return dir
+}
+
+// newRegisteredWorkspaceDir is newWorkspaceDir plus registration in the
+// (test-scoped) user config: what a workspace the picker offers looks like,
+// and what Engine requires before it opens one on a request's say-so.
+func newRegisteredWorkspaceDir(t *testing.T, name string) string {
+	t.Helper()
+	dir := newWorkspaceDir(t, name)
+	require.NoError(t, config.AddWorkspace(dir))
 	return dir
 }
 
@@ -70,7 +81,7 @@ func TestManager_PrimaryIsAdopted(t *testing.T) {
 func TestManager_OpensSecondWorkspaceOnceAndLocksIt(t *testing.T) {
 	var opened []string
 	m, _ := newManager(t, newWorkspaceDir(t, "primary"), &opened)
-	otherDir := newWorkspaceDir(t, "other")
+	otherDir := newRegisteredWorkspaceDir(t, "other")
 
 	eng, err := m.Engine(otherDir)
 	require.NoError(t, err)
@@ -91,7 +102,7 @@ func TestManager_OpensSecondWorkspaceOnceAndLocksIt(t *testing.T) {
 func TestManager_RefusesWorkspaceLockedElsewhere(t *testing.T) {
 	var opened []string
 	m, _ := newManager(t, newWorkspaceDir(t, "primary"), &opened)
-	otherDir := newWorkspaceDir(t, "other")
+	otherDir := newRegisteredWorkspaceDir(t, "other")
 
 	other, err := workspace.Load(filepath.Join(otherDir, domain.WorkspaceFileName))
 	require.NoError(t, err)
@@ -129,7 +140,7 @@ func TestManager_EngineRejectsMissingWorkspace(t *testing.T) {
 func TestManager_ListsOpenAndRegistered(t *testing.T) {
 	var opened []string
 	m, primary := newManager(t, newWorkspaceDir(t, "primary"), &opened)
-	otherDir := newWorkspaceDir(t, "other")
+	otherDir := newRegisteredWorkspaceDir(t, "other")
 
 	_, err := m.Engine(otherDir)
 	require.NoError(t, err)
@@ -156,7 +167,7 @@ func TestManager_ListsUnloadableWorkspaceWithError(t *testing.T) {
 	var opened []string
 	m, _ := newManager(t, newWorkspaceDir(t, "primary"), &opened)
 
-	goneDir := newWorkspaceDir(t, "gone")
+	goneDir := newRegisteredWorkspaceDir(t, "gone")
 	_, err := m.Engine(goneDir)
 	require.NoError(t, err)
 	require.NoError(t, os.Remove(filepath.Join(goneDir, domain.WorkspaceFileName)))
@@ -179,7 +190,7 @@ func TestManager_CloseReleasesOpenedLocksOnly(t *testing.T) {
 	var opened []string
 	primaryDir := newWorkspaceDir(t, "primary")
 	m, primary := newManager(t, primaryDir, &opened)
-	otherDir := newWorkspaceDir(t, "other")
+	otherDir := newRegisteredWorkspaceDir(t, "other")
 
 	_, err := m.Engine(otherDir)
 	require.NoError(t, err)
@@ -230,7 +241,7 @@ func TestManager_SameDirectoryUnderAnotherSpellingIsOneWorkspace(t *testing.T) {
 func TestManager_SecondSpellingReusesAnOpenedWorkspace(t *testing.T) {
 	var opened []string
 	m, _ := newManager(t, newWorkspaceDir(t, "primary"), &opened)
-	otherDir := newWorkspaceDir(t, "other")
+	otherDir := newRegisteredWorkspaceDir(t, "other")
 
 	link := filepath.Join(t.TempDir(), "link")
 	require.NoError(t, os.Symlink(otherDir, link))
@@ -242,4 +253,73 @@ func TestManager_SecondSpellingReusesAnOpenedWorkspace(t *testing.T) {
 
 	assert.Same(t, first, second)
 	assert.Equal(t, []string{otherDir}, opened, "opened once, not once per path")
+}
+
+// A request header is not an invitation: a workspace that is neither the
+// primary nor registered is refused, so a stale client cannot reopen a
+// workspace the user forgot. Register is the explicit way in, and it
+// records the directory in the user config.
+func TestManager_UnregisteredIsRefusedUntilRegistered(t *testing.T) {
+	var opened []string
+	m, _ := newManager(t, newWorkspaceDir(t, "primary"), &opened)
+	otherDir := newWorkspaceDir(t, "other")
+
+	_, err := m.Engine(otherDir)
+	require.Error(t, err)
+	assert.Equal(t, errs.WorkspaceNotFound, errs.CodeOf(err))
+	assert.Empty(t, opened)
+
+	eng, err := m.Register(otherDir)
+	require.NoError(t, err)
+	assert.Equal(t, "other", eng.Workspace().Name)
+	assert.Len(t, opened, 1)
+
+	known, err := config.KnownWorkspaces()
+	require.NoError(t, err)
+	assert.Contains(t, known, otherDir)
+
+	// Registered: the implicit path now works too.
+	_, err = m.Engine(otherDir)
+	require.NoError(t, err)
+}
+
+// CloseOne releases the workspace's lock and drops its engine; the primary
+// is never closed this way; a still-registered workspace reopens on the
+// next implicit request, a forgotten one does not.
+func TestManager_CloseOne(t *testing.T) {
+	var opened []string
+	m, primary := newManager(t, newWorkspaceDir(t, "primary"), &opened)
+	otherDir := newWorkspaceDir(t, "other")
+	require.NoError(t, config.AddWorkspace(otherDir))
+
+	_, err := m.Engine(otherDir)
+	require.NoError(t, err)
+	require.Len(t, opened, 1)
+	lock := filepath.Join(otherDir, domain.WorkspaceStateDir, "daemon.lock")
+	assert.FileExists(t, lock)
+
+	require.NoError(t, m.CloseOne(otherDir))
+	assert.NoFileExists(t, lock, "closing releases the lock")
+	for _, info := range m.List() {
+		if info.Dir == otherDir {
+			assert.False(t, info.Open)
+		}
+	}
+
+	err = m.CloseOne(primary.Dir)
+	require.Error(t, err)
+	assert.Equal(t, errs.Invalid, errs.CodeOf(err))
+
+	// Still registered: reopened on demand.
+	_, err = m.Engine(otherDir)
+	require.NoError(t, err)
+	assert.Len(t, opened, 2)
+
+	// Forgotten and closed: stays closed.
+	require.NoError(t, config.RemoveWorkspace(otherDir))
+	require.NoError(t, m.CloseOne(otherDir))
+	_, err = m.Engine(otherDir)
+	require.Error(t, err)
+	assert.Equal(t, errs.WorkspaceNotFound, errs.CodeOf(err))
+	assert.Len(t, opened, 2)
 }

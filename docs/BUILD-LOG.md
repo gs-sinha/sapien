@@ -772,3 +772,28 @@ switch now says "this session is still bound to <previous>" and carries
 `delete_memory` exists with write-memories permission. Tests: a stub
 daemon that rotates its token proves List and Engine recover; the MCP
 tests pin the still-bound text and the delete.
+
+### "Daemon very much alive" (2026-09-14, same day)
+
+Asked to shut every workspace but `team` down. Stopping the personal
+workspace's daemon was not it: two MCP bridges from earlier agent
+sessions were still bound to it, and the team daemon -- one process,
+many workspaces -- had opened it on their behalf and held its lock.
+Stopping the bridges and restarting the daemon was not it either: a
+browser tab still carrying that workspace's header reopened it on its
+next request, because `workspaces.Manager.Engine` opened whatever
+directory a header named and registered it as a side effect. There was
+no way to close a workspace short of stopping the daemon, and `workspace
+forget` only edited the user config.
+
+Now a request header opens only the primary or a registered workspace
+(errs.WorkspaceNotFound otherwise); `Manager.Register`, behind `POST
+/v1/workspaces`, is the explicit open that also registers, which is what
+the MCP bridge already called; `Manager.CloseOne` closes one engine and
+releases its lock, behind `DELETE /v1/workspaces?dir=` and `sapien
+workspace close`; and `sapien workspace forget` closes it on the running
+daemon as it unregisters, so "forgotten" means "stays closed". Verified
+live: after `forget`, the daemon listed the workspace closed, its lock
+file was gone, and a request carrying its header got 404 without
+recreating the lock. Six existing tests that relied on the implicit open
+now register the workspace first, which is what they were modelling.

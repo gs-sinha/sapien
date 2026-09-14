@@ -1,13 +1,19 @@
 package cli
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/url"
+	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/gs-sinha/sapien/internal/config"
+	"github.com/gs-sinha/sapien/internal/daemon"
 	"github.com/gs-sinha/sapien/internal/domain"
 	"github.com/gs-sinha/sapien/internal/errs"
 	"github.com/gs-sinha/sapien/internal/workspace"
@@ -44,6 +50,7 @@ func newWorkspaceCmd(app *App) *cobra.Command {
 		newWorkspaceUseCmd(app),
 		newWorkspaceAddCmd(app),
 		newWorkspaceForgetCmd(app),
+		newWorkspaceCloseCmd(app),
 		newWorkspaceStatusCmd(app),
 		newWorkspacePullCmd(app),
 		newWorkspaceSyncCmd(app),
@@ -215,6 +222,14 @@ func newWorkspaceForgetCmd(app *App) *cobra.Command {
 				return err
 			}
 			app.Printer.Line("forgot %s (the directory is untouched)", abs)
+			// A forgotten workspace should also stop being served: close
+			// it on the running daemon, best effort. Being unregistered is
+			// what keeps it closed afterwards.
+			if closed, err := closeOnDaemon(cmd.Context(), app, abs); err != nil {
+				app.Printer.Line("%s", app.Printer.Dim("not closed on the daemon: "+err.Error()))
+			} else if closed {
+				app.Printer.Line("closed it on the running daemon")
+			}
 			return nil
 		},
 	}
@@ -425,4 +440,71 @@ func resolveWorkspaceArg(arg string) (*domain.Workspace, error) {
 		return nil, errs.New(errs.Invalid, "%d registered workspaces are named %q", len(matches), arg).
 			WithHint(fmt.Sprintf("name one by path: %v", dirsList))
 	}
+}
+
+// newWorkspaceCloseCmd is `sapien workspace close <dir|name>`: close a
+// workspace's engine on the running daemon without unregistering it. The
+// next request naming it reopens it; `forget` is the durable form.
+func newWorkspaceCloseCmd(app *App) *cobra.Command {
+	return &cobra.Command{
+		Use:   "close <dir|name>",
+		Short: "Close a workspace on the running daemon (it stays registered)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ws, err := resolveWorkspaceArg(args[0])
+			if err != nil {
+				return err
+			}
+			dir := ws.Dir
+			closed, err := closeOnDaemon(cmd.Context(), app, dir)
+			if err != nil {
+				return err
+			}
+			if !closed {
+				app.Printer.Line("no daemon is running; nothing to close")
+				return nil
+			}
+			app.Printer.Line("closed %s on the daemon", dir)
+			return nil
+		},
+	}
+}
+
+// closeOnDaemon asks the daemon serving this invocation's workspace (the
+// default one, or --workspace) to close dir. It reports false with no
+// error when no daemon is running or SAPIEN_NO_DAEMON is set, since there
+// is then nothing holding the workspace open.
+func closeOnDaemon(ctx context.Context, app *App, dir string) (bool, error) {
+	if os.Getenv("SAPIEN_NO_DAEMON") != "" {
+		return false, nil
+	}
+	ws, err := app.Workspace()
+	if err != nil {
+		return false, nil
+	}
+	info, err := daemon.Find(ctx, ws, Version)
+	if err != nil {
+		return false, nil
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete,
+		fmt.Sprintf("http://127.0.0.1:%d/v1/workspaces?dir=%s", info.Port, url.QueryEscape(dir)), nil)
+	if err != nil {
+		return false, err
+	}
+	req.Header.Set("Authorization", "Bearer "+info.Token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return false, errs.Wrap(errs.DaemonUnavailable, err, "closing %s on the daemon", dir)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNoContent {
+		return true, nil
+	}
+	var envelope struct {
+		Error *errs.Error `json:"error"`
+	}
+	if json.NewDecoder(resp.Body).Decode(&envelope) == nil && envelope.Error != nil {
+		return false, envelope.Error
+	}
+	return false, errs.New(errs.Internal, "closing %s on the daemon: HTTP %d", dir, resp.StatusCode)
 }

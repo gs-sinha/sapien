@@ -18,6 +18,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/gs-sinha/sapien/internal/config"
 	"github.com/gs-sinha/sapien/internal/domain"
 	"github.com/gs-sinha/sapien/internal/engine"
 	"github.com/gs-sinha/sapien/internal/engine/enginetest"
@@ -302,6 +303,7 @@ func newTerminalWorkspaces(t *testing.T) terminalWorkspaces {
 		primaryPkg: t.TempDir(),
 		otherPkg:   t.TempDir(),
 	}
+	require.NoError(t, config.AddWorkspace(w.otherDir))
 
 	primary, err := workspace.Load(filepath.Join(w.primaryDir, domain.WorkspaceFileName))
 	require.NoError(t, err)

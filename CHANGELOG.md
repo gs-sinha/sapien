@@ -78,6 +78,14 @@ and phase numbers refer to PLAN.md §34's roadmap.
   like they carry a secret are refused at creation, since they go public.
 
 ### Fixed
+- **A forgotten workspace stays closed.** One daemon serves many
+  workspaces and opened any directory a request header named, so a stale
+  browser tab or an old MCP bridge kept reopening a workspace the user had
+  shut down, taking its lock again. A request header now opens only the
+  primary or a registered workspace; `POST /v1/workspaces` is the explicit
+  way to open and register another. `sapien workspace forget` also closes
+  the workspace on the running daemon, and `sapien workspace close` (and
+  `DELETE /v1/workspaces?dir=`) closes one that stays registered.
 - **`switch_workspace` survives a daemon restart, and a failed switch says
   so.** The first friction report an agent filed against Sapien
   (discussion #1): the stdio MCP bridge's workspace switcher kept the
