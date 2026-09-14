@@ -14,6 +14,10 @@ const (
 	EventMemoryCreated     EventType = "memory.created"
 	EventMemoryChanged     EventType = "memory.changed"
 	EventFlowChanged       EventType = "flow.changed"
+	// EventWorkspaceRepo carries a domain.RepoStatus whenever the workspace's
+	// own repository was fetched, pulled or synced (PLAN §7b), so a status
+	// bar learns "team has N new commits" without polling.
+	EventWorkspaceRepo EventType = "workspace.repo"
 )
 
 // Event is one engine event.

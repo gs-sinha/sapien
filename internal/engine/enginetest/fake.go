@@ -48,6 +48,7 @@ type Fake struct {
 	environments map[string]domain.Environment
 	defaultEnv   string
 	secrets      map[string]string // name -> value; never returned by any API
+	repo         domain.RepoStatus // what Repo() reports; see SetRepoStatus
 
 	reindexedServices bool
 	reindexedMemories bool

@@ -24,6 +24,7 @@ import (
 // fakeState is the shared, mutex-protected in-memory store behind every
 // fakeEngine sub-API.
 type fakeState struct {
+	repo domain.RepoStatus
 	mu       sync.Mutex
 	ws       domain.Workspace
 	services []domain.Service
@@ -1334,4 +1335,49 @@ func (a fakeFlows) Commit(_ context.Context, id, message string) (*domain.FlowSu
 		return &domain.FlowSummary{ID: fl.ID, Name: fl.Name, Path: fl.Path, OwnerKind: fl.OwnerKind, OwnerID: fl.OwnerID, StepCount: len(fl.Steps), Shipped: domain.ShipUnpushed}, nil
 	}
 	return nil, errs.New(errs.FlowNotFound, "flow %q not found", id)
+}
+
+// fakeRepo is the MCP fake's engine.RepoAPI: a status the test seeds on
+// fakeState.repo; Sync and Pull fast-forward it when clean.
+type fakeRepo struct{ st *fakeState }
+
+func (e *fakeEngine) Repo() engine.RepoAPI { return fakeRepo{e.st} }
+
+func (a fakeRepo) Status(context.Context) (*domain.RepoStatus, error) {
+	a.st.mu.Lock()
+	defer a.st.mu.Unlock()
+	c := a.st.repo
+	return &c, nil
+}
+
+func (a fakeRepo) Fetch(context.Context) (*domain.RepoStatus, error) { return a.Status(context.Background()) }
+
+func (a fakeRepo) Pull(context.Context) (*domain.RepoStatus, error) {
+	a.st.mu.Lock()
+	defer a.st.mu.Unlock()
+	s := a.st.repo
+	if s.Dirty > 0 {
+		return nil, errs.New(errs.Conflict, "workspace has uncommitted changes; commit or stash them before pulling")
+	}
+	if s.Behind > 0 {
+		s.Pulled, s.PulledCount, s.Behind = true, s.Behind, 0
+	}
+	a.st.repo = s
+	c := s
+	return &c, nil
+}
+
+func (a fakeRepo) Sync(context.Context) (*domain.RepoStatus, error) {
+	a.st.mu.Lock()
+	defer a.st.mu.Unlock()
+	s := a.st.repo
+	switch {
+	case s.Dirty > 0:
+		s.Skipped = "uncommitted changes"
+	case s.Behind > 0:
+		s.Pulled, s.PulledCount, s.Behind = true, s.Behind, 0
+	}
+	a.st.repo = s
+	c := s
+	return &c, nil
 }

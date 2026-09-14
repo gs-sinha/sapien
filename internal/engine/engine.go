@@ -25,6 +25,9 @@ type Engine interface {
 	Context() ContextAPI
 	Envs() EnvAPI
 	Events() EventAPI
+	// Repo is the workspace's own git repository: fetched on the git tick,
+	// pulled only on request and only fast-forward on a clean tree.
+	Repo() RepoAPI
 	// Close releases resources. Local closes the DB; Remote closes connections.
 	Close() error
 }
@@ -342,4 +345,25 @@ type RescopeOptions struct {
 	Commit bool
 	// Message overrides the default commit message.
 	Message string
+}
+
+// RepoAPI reads and, on request, updates the workspace's own git
+// repository -- the team's shared copy of the workspace tier (PLAN §7b).
+// Nothing here ever pushes, commits, or touches a service repository.
+type RepoAPI interface {
+	// Status reports the repository from refs on disk: no network.
+	Status(ctx context.Context) (*domain.RepoStatus, error)
+	// Fetch runs `git fetch` and returns the refreshed status. The
+	// working tree is not changed. The daemon calls this on its git tick.
+	Fetch(ctx context.Context) (*domain.RepoStatus, error)
+	// Pull fast-forwards the checkout onto its upstream. It refuses
+	// (errs.Conflict) when the tree has uncommitted changes, the branch
+	// has no upstream, or the branches have diverged, naming the reason;
+	// after a pull the workspace tier is reindexed.
+	Pull(ctx context.Context) (*domain.RepoStatus, error)
+	// Sync is what "Sync all" does for the repository: Fetch, then Pull
+	// when the tree is clean and the branch is behind, otherwise a status
+	// whose Skipped says why nothing moved. It never fails because a pull
+	// was not possible; only a fetch or git failure is an error.
+	Sync(ctx context.Context) (*domain.RepoStatus, error)
 }
