@@ -6,6 +6,8 @@ and phase numbers refer to PLAN.md §34's roadmap.
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-09-15
+
 ### Fixed
 - **`.sapien/` is gitignored at the workspace root.** `sapien init` now
   writes `.sapien/` into the root `.gitignore` beside
