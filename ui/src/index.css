@@ -10,6 +10,52 @@ html.dark {
   color-scheme: dark;
 }
 
+/* Typography follows the website (site/styles.css): system fonts, smoothed,
+   tight headings, tracked small caps labels, links underlined a little below
+   the baseline. */
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    text-underline-offset: 3px;
+    text-decoration-thickness: 1px;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    letter-spacing: -0.015em;
+  }
+
+  .uppercase {
+    letter-spacing: 0.06em;
+  }
+
+  ::selection {
+    background: theme('colors.sky.200');
+    color: theme('colors.slate.900');
+  }
+
+  html.dark ::selection {
+    background: theme('colors.sky.950');
+    color: theme('colors.slate.100');
+  }
+
+  :focus-visible {
+    outline: 2px solid theme('colors.sky.600');
+    outline-offset: 2px;
+  }
+
+  html.dark :focus-visible {
+    outline-color: theme('colors.sky.400');
+  }
+}
+
 /* Small, deliberately un-fancy scrollbars so long lists/JSON trees don't
    feel like a component library snuck in. */
 ::-webkit-scrollbar {
@@ -17,6 +63,6 @@ html.dark {
   height: 10px;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(100, 116, 139, 0.4);
+  background: rgba(121, 116, 103, 0.4);
   border-radius: 6px;
 }

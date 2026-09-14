@@ -16,7 +16,7 @@ function colorizeValue(value: string, key: number): ReactNode {
   if (trimmed === '') return value;
   if (/^\$\{[^}]*\}/.test(trimmed)) {
     return (
-      <span key={key} className="text-fuchsia-700 dark:text-fuchsia-400">
+      <span key={key} className="text-sky-700 dark:text-sky-400">
         {value}
       </span>
     );
@@ -30,7 +30,7 @@ function colorizeValue(value: string, key: number): ReactNode {
   }
   if (/^-?\d+(\.\d+)?$/.test(trimmed)) {
     return (
-      <span key={key} className="text-amber-700 dark:text-amber-400">
+      <span key={key} className="text-violet-700 dark:text-violet-400">
         {value}
       </span>
     );
@@ -45,7 +45,7 @@ function highlightLine(line: string, key: number): ReactNode {
     return (
       <span key={key}>
         {indent}
-        <span className="text-sky-700 dark:text-sky-400">{k}</span>
+        <span className="text-blue-700 dark:text-blue-300">{k}</span>
         {colon}
         {colorizeValue(rest, key)}
       </span>

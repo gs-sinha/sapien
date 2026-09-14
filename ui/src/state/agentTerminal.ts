@@ -80,7 +80,16 @@ function ensureTerminal(): { term: Terminal; fitAddon: FitAddon; container: HTML
     term = new Terminal({
       convertEol: true,
       fontSize: 13,
+      fontFamily: 'ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace',
       cursorBlink: true,
+      // The website's code panel colours (site/styles.css --code-*).
+      theme: {
+        background: '#1b1a17',
+        foreground: '#ebe6da',
+        cursor: '#7fd4b1',
+        cursorAccent: '#1b1a17',
+        selectionBackground: '#24493f',
+      },
       scrollback: 5000,
     });
     fitAddon = new FitAddon();

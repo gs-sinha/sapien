@@ -32,7 +32,7 @@ export function TerminalView() {
   const ended = phase === 'exited' || phase === 'error';
 
   return (
-    <div className="relative flex h-full min-h-0 w-full flex-col bg-black">
+    <div className="relative flex h-full min-h-0 w-full flex-col bg-[#1b1a17]">
       <div ref={wrapperRef} className="min-h-0 flex-1 overflow-hidden p-1" />
       {ended && (
         <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-3 border-t border-slate-700 bg-slate-900/95 px-3 py-2 text-sm text-slate-100">

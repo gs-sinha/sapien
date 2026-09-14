@@ -102,6 +102,15 @@ and phase numbers refer to PLAN.md §34's roadmap.
   `friction.category` in the user config choose where). Reports that look
   like they carry a secret are refused at creation, since they go public.
 
+### Changed
+- **The inspector wears the website's theme.** Warm paper and stone
+  neutrals, one moss accent for links and selection, the same system font
+  stacks, tight headings and tracked labels, in light and dark. It is done
+  in the Tailwind palette (`slate` is the stone scale, `sky` the accent), so
+  component classes barely changed. The nav carries the 🗿 mark, JSON and
+  YAML use the site's syntax colours (blue keys, amber strings, moss
+  `${...}`), and the Agent terminal uses its code-panel colours.
+
 ### Fixed
 - **A forgotten workspace stays closed.** One daemon serves many
   workspaces and opened any directory a request header named, so a stale

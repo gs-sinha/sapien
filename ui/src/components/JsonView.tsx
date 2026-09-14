@@ -76,7 +76,7 @@ function Toggle({ expanded, onClick }: { expanded: boolean; onClick: () => void 
 
 function KeyLabel({ name }: { name?: string }) {
   if (name === undefined) return null;
-  return <span className="text-sky-700 dark:text-sky-400">{name}: </span>;
+  return <span className="text-blue-700 dark:text-blue-300">{name}: </span>;
 }
 
 function JsonNode({ value, name, depth }: { value: unknown; name?: string; depth: number }) {
@@ -93,7 +93,7 @@ function JsonNode({ value, name, depth }: { value: unknown; name?: string; depth
     return (
       <div>
         <KeyLabel name={name} />
-        <span className="text-amber-700 dark:text-amber-400">{String(value)}</span>
+        <span className="text-violet-700 dark:text-violet-400">{String(value)}</span>
       </div>
     );
   }
@@ -122,14 +122,14 @@ function StringLeaf({ name, value }: { name?: string; value: string }) {
     return (
       <div className="break-all">
         <KeyLabel name={name} />
-        <span className="text-emerald-700 dark:text-emerald-400">&quot;{value}&quot;</span>
+        <span className="text-amber-700 dark:text-amber-300">&quot;{value}&quot;</span>
       </div>
     );
   }
   return (
     <div className="break-all">
       <KeyLabel name={name} />
-      <span className="text-emerald-700 dark:text-emerald-400">
+      <span className="text-amber-700 dark:text-amber-300">
         &quot;{value.slice(0, 500)}&hellip;&quot;
       </span>
       <div className="mt-1 flex items-center gap-2 text-[11px] text-slate-500">

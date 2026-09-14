@@ -52,7 +52,7 @@ export function App() {
 
   return (
     <BrowserRouter>
-      <div className="flex h-screen flex-col bg-white text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+      <div className="flex h-screen flex-col bg-paper text-slate-900 dark:bg-slate-950 dark:text-slate-100">
         <StatusBar />
         <DaemonBanner />
         <div className="flex flex-1 overflow-hidden">

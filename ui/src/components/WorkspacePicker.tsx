@@ -77,8 +77,16 @@ export function WorkspacePicker() {
         className="flex w-full items-center gap-1 rounded px-2 py-1 text-left hover:bg-slate-100 disabled:cursor-default disabled:hover:bg-transparent dark:hover:bg-slate-900"
       >
         <span className="min-w-0 flex-1">
-          <span className="block text-sm font-semibold tracking-tight">Sapien</span>
-          <span className="block truncate text-xs text-slate-500">{label}</span>
+          <span className="flex items-center gap-1.5 text-sm font-bold tracking-tight">
+            <span
+              aria-hidden="true"
+              className="grid h-6 w-6 shrink-0 place-items-center rounded-md border border-slate-200 bg-white text-[13px] leading-none dark:border-slate-800 dark:bg-slate-900"
+            >
+              🗿
+            </span>
+            sapien
+          </span>
+          <span className="block truncate pl-[30px] text-xs text-slate-500">{label}</span>
         </span>
         {list.length > 1 && <span className="text-[10px] text-slate-400">▾</span>}
       </button>
