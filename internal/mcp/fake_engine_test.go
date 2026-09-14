@@ -600,7 +600,19 @@ func (a fakeMemories) Update(_ context.Context, m domain.Memory) (*domain.Memory
 	return nil, errs.New(errs.MemoryNotFound, "memory %q not found", m.ID)
 }
 
-func (a fakeMemories) Delete(context.Context, string) error { return nil }
+// Delete removes the memory so a later search cannot return it; an
+// unknown id is E_MEMORY_NOT_FOUND, as the real store reports.
+func (a fakeMemories) Delete(_ context.Context, id string) error {
+	a.st.mu.Lock()
+	defer a.st.mu.Unlock()
+	for i, m := range a.st.memories {
+		if m.ID == id {
+			a.st.memories = append(a.st.memories[:i], a.st.memories[i+1:]...)
+			return nil
+		}
+	}
+	return errs.New(errs.MemoryNotFound, "memory %q not found", id)
+}
 
 func (a fakeMemories) List(context.Context, domain.MemoryQuery) ([]domain.Memory, error) {
 	a.st.mu.Lock()

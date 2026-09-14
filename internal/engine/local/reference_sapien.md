@@ -126,7 +126,9 @@ an invariant, a gotcha, a testing convention, something that broke once.
 Sapien surfaces them next to the operation they concern, and they feed
 search ranking, so writing one is how a discovery survives past the end of
 your session. `get_dsl_reference("memory")` has the types and scoping
-rules.
+rules. `rescope_memory` moves one whose home is wrong, `delete_memory`
+removes one that is wrong; every write names the workspace it landed in,
+so check it after a `switch_workspace`.
 
 ## Where your work lives: tiers and bindings
 

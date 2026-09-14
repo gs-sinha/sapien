@@ -381,7 +381,7 @@ func (s *server) createFlow(ctx context.Context, req *sdkmcp.CallToolRequest, in
 	}
 	out := buildFlowSaveResult(flow, s.workspaceDir(), valResult)
 	out.Shipped = shippedStateFor(ctx, s.engine().Flows(), flow.ID)
-	text := fmt.Sprintf("created flow %s at %s (%s), %d steps\n", out.ID, out.Path, flowTierNote(out.Tier, out.Service), out.Steps)
+	text := fmt.Sprintf("created flow %s at %s (%s) in workspace %s, %d steps\n", out.ID, out.Path, flowTierNote(out.Tier, out.Service), s.workspaceName(), out.Steps)
 	return result(text, out), nil, nil
 }
 

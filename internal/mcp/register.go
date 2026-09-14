@@ -172,6 +172,11 @@ func (srv *server) registerTools(s *sdkmcp.Server) {
 	}, srv.rescopeMemory)
 
 	sdkmcp.AddTool(s, &sdkmcp.Tool{
+		Name:        "delete_memory",
+		Description: "Delete a memory by id: its file (for workspace and service scope) and its index rows. The counterpart of `sapien memory rm`; use it to remove a memory that landed in the wrong workspace or scope, or that turned out to be wrong. Prefer rescope_memory when the text is right and only its home is wrong.",
+	}, srv.deleteMemory)
+
+	sdkmcp.AddTool(s, &sdkmcp.Tool{
 		Name:        "get_promotion_target",
 		Description: "Find where a memory's knowledge belongs canonically (an OpenAPI file/line/pointer, or a doc section).",
 	}, srv.getPromotionTarget)

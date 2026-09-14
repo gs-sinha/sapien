@@ -97,6 +97,15 @@ func (s *server) workspaceDir() string {
 	return "<workspace>"
 }
 
+// workspaceName is the bound workspace's name, for the one line every
+// write echoes so an agent can see where its data landed.
+func (s *server) workspaceName() string {
+	if ws := s.engine().Workspace(); ws != nil && ws.Name != "" {
+		return ws.Name
+	}
+	return s.workspaceDir()
+}
+
 // clientName resolves the calling client's name from its initialize
 // request, per PLAN §23.2 ("by client name (from initialize request
 // clientInfo.name)").

@@ -16,7 +16,7 @@ var wantToolNames = []string{
 	"search_memories", "get_relevant_memories", "create_memory", "get_promotion_target",
 	"add_service", "sync_service", "rescope_memory",
 	"list_examples", "get_example", "create_example", "rescope_example", "delete_example",
-	"report_friction",
+	"report_friction", "delete_memory",
 	"bind_service", "unbind_service", "find_checkouts",
 }
 

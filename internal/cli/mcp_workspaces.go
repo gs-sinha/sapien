@@ -2,7 +2,9 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"path/filepath"
 	"sync"
@@ -26,9 +28,14 @@ import (
 // config directly: the daemon knows which workspaces it already has open,
 // and is the thing that will refuse one whose lock is held elsewhere.
 type remoteSwitcher struct {
-	baseURL  string
-	token    string
 	resolver remote.EndpointResolver
+
+	// epMu guards baseURL and token, which the resolver replaces when the
+	// daemon behind them is gone or no longer accepts the token. Separate
+	// from mu because Engine holds mu while it registers.
+	epMu    sync.Mutex
+	baseURL string
+	token   string
 
 	mu    sync.Mutex
 	cache map[string]engine.Engine
@@ -54,26 +61,103 @@ func (s *remoteSwitcher) List() []workspaces.Info {
 }
 
 func (s *remoteSwitcher) fetchList() ([]workspaces.Info, error) {
-	req, err := http.NewRequest(http.MethodGet, s.baseURL+"/v1/workspaces", nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+s.token)
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, errs.New(errs.Internal, "listing workspaces: HTTP %d", resp.StatusCode)
-	}
-
 	var out []workspaces.Info
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	if err := s.do(context.Background(), http.MethodGet, "/v1/workspaces", nil, &out); err != nil {
 		return nil, err
 	}
 	return out, nil
+}
+
+// endpoint returns the daemon address and token this switcher currently
+// believes in.
+func (s *remoteSwitcher) endpoint() (string, string) {
+	s.epMu.Lock()
+	defer s.epMu.Unlock()
+	return s.baseURL, s.token
+}
+
+// reresolve asks the resolver where the daemon is now and remembers it.
+func (s *remoteSwitcher) reresolve(ctx context.Context) error {
+	if s.resolver == nil {
+		return errs.New(errs.Internal, "no daemon resolver configured")
+	}
+	baseURL, token, err := s.resolver(ctx)
+	if err != nil {
+		return err
+	}
+	s.epMu.Lock()
+	s.baseURL, s.token = baseURL, token
+	s.epMu.Unlock()
+	return nil
+}
+
+// do performs one JSON request against the daemon the way engine.Remote
+// does: a connection-level failure or an HTTP 401 triggers exactly one
+// re-resolve of the endpoint and a replay. This is the fix for the first
+// friction report an agent filed (github.com/gs-sinha/sapien/discussions/1):
+// the switcher held the token captured when the bridge started, so after
+// `serve --restart` every switch_workspace failed with a 401 while the
+// primary client, which re-resolves, kept working -- and list_workspaces
+// hid the failure by falling back to the local registry. Non-2xx answers
+// are decoded as the daemon's errs envelope so the agent sees the real
+// code rather than "HTTP 409".
+func (s *remoteSwitcher) do(ctx context.Context, method, path string, body []byte, out any) error {
+	attempt := func() (*http.Response, error) {
+		baseURL, token := s.endpoint()
+		var reader io.Reader
+		if body != nil {
+			reader = bytes.NewReader(body)
+		}
+		req, err := http.NewRequestWithContext(ctx, method, baseURL+path, reader)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		if body != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		return http.DefaultClient.Do(req)
+	}
+
+	resp, err := attempt()
+	if (err != nil || resp.StatusCode == http.StatusUnauthorized) && s.resolver != nil && ctx.Err() == nil {
+		if resp != nil {
+			resp.Body.Close()
+		}
+		if rerr := s.reresolve(ctx); rerr != nil {
+			return errs.Wrap(errs.Internal, rerr, "%s %s: the daemon did not answer and re-resolving it failed", method, path)
+		}
+		resp, err = attempt()
+	}
+	if err != nil {
+		return errs.Wrap(errs.Internal, err, "%s %s", method, path)
+	}
+	defer resp.Body.Close()
+
+	data, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		var envelope struct {
+			Error *errs.Error `json:"error"`
+		}
+		if json.Unmarshal(data, &envelope) == nil && envelope.Error != nil && envelope.Error.Code != "" {
+			return envelope.Error
+		}
+		var bare errs.Error
+		if json.Unmarshal(data, &bare) == nil && bare.Code != "" {
+			return &bare
+		}
+		if resp.StatusCode == http.StatusUnauthorized {
+			return errs.New(errs.PermissionDenied, "%s %s: the daemon rejected this session's token even after re-resolving it", method, path).
+				WithHint("restart the MCP session; the daemon was replaced and its new token could not be read")
+		}
+		return errs.New(errs.Internal, "%s %s: HTTP %d", method, path, resp.StatusCode)
+	}
+	if out != nil && len(data) > 0 {
+		if err := json.Unmarshal(data, out); err != nil {
+			return errs.Wrap(errs.Internal, err, "decoding %s %s", method, path)
+		}
+	}
+	return nil
 }
 
 // Engine returns a client bound to dir on the same daemon.
@@ -96,7 +180,8 @@ func (s *remoteSwitcher) Engine(dir string) (engine.Engine, error) {
 		return nil, err
 	}
 
-	eng, err := remote.New(s.baseURL, s.token,
+	baseURL, token := s.endpoint()
+	eng, err := remote.New(baseURL, token,
 		remote.WithEndpointResolver(s.resolver),
 		remote.WithWorkspace(ws.Dir))
 	if err != nil {
@@ -111,20 +196,8 @@ func (s *remoteSwitcher) register(dir string) error {
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequest(http.MethodPost, s.baseURL+"/v1/workspaces", bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+s.token)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return errs.New(errs.Internal, "opening workspace %s on the daemon: HTTP %d", dir, resp.StatusCode)
+	if err := s.do(context.Background(), http.MethodPost, "/v1/workspaces", body, nil); err != nil {
+		return errs.As(err).WithDetail("dir", dir)
 	}
 	return nil
 }

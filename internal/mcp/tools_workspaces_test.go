@@ -126,3 +126,19 @@ func TestWorkspaceTools_WithoutSwitcher(t *testing.T) {
 	assert.True(t, res.IsError)
 	assert.Equal(t, "/ws/only", srv.workspaceDir())
 }
+
+// A failed switch must say where the session still is: the first friction
+// report against Sapien was a write that landed in the previous workspace
+// after a switch had failed and the agent did not notice.
+func TestSwitchWorkspace_FailureSaysStillBound(t *testing.T) {
+	srv, sw := newSwitchableServer(t)
+	sw.fail = errs.New(errs.PermissionDenied, "bad token")
+
+	res, _, err := srv.switchWorkspace(context.Background(), nil, SwitchWorkspaceInput{Dir: "/ws/other"})
+	require.NoError(t, err)
+	require.True(t, res.IsError)
+	text := firstText(res)
+	assert.Contains(t, text, "E_PERMISSION_DENIED")
+	assert.Contains(t, text, "still bound to /ws/primary")
+	assert.Equal(t, "/ws/primary", srv.workspaceDir(), "the session must not move on a failed switch")
+}

@@ -128,7 +128,7 @@ func (s *server) createMemory(ctx context.Context, req *sdkmcp.CallToolRequest, 
 	}
 	out := CreateMemoryOutput{Memory: *created}
 	var b strings.Builder
-	fmt.Fprintf(&b, "created memory %s (%s, %s, source agent{%s})\n%s\n", created.ID, created.Type, created.Scope, client, created.Text)
+	fmt.Fprintf(&b, "created memory %s (%s, %s, source agent{%s}) in workspace %s\n%s\n", created.ID, created.Type, created.Scope, client, s.workspaceName(), created.Text)
 	s.writeMemoryHints(ctx, &b, created)
 	return result(b.String(), out), nil, nil
 }
@@ -289,4 +289,30 @@ func (s *server) rescopeMemory(ctx context.Context, req *sdkmcp.CallToolRequest,
 	text := fmt.Sprintf("rescoped memory %s to %s scope (%s -> %s)\n",
 		moved.ID, moved.Scope, memoryPathOrSQLite(oldPath), memoryPathOrSQLite(moved.FilePath))
 	return result(text, out), nil, nil
+}
+
+// --- delete_memory -----------------------------------------------------
+
+// DeleteMemoryInput is delete_memory's arguments.
+type DeleteMemoryInput struct {
+	ID string `json:"id" jsonschema:"memory id"`
+}
+
+// DeleteMemoryOutput is delete_memory's structured output.
+type DeleteMemoryOutput struct {
+	ID string `json:"id"`
+}
+
+// delete_memory is `sapien memory rm` for agents. It was missing: the
+// first friction report filed against Sapien had to park a memory that
+// landed in the wrong workspace at personal scope because nothing over
+// MCP could delete it.
+func (s *server) deleteMemory(ctx context.Context, req *sdkmcp.CallToolRequest, in DeleteMemoryInput) (*sdkmcp.CallToolResult, any, error) {
+	if _, _, denied := s.checkPermission(req.Session, classWriteMemories); denied != nil {
+		return denied, nil, nil
+	}
+	if err := s.engine().Memories().Delete(ctx, in.ID); err != nil {
+		return errResult(err), nil, nil
+	}
+	return result(fmt.Sprintf("deleted memory %s from workspace %s\n", in.ID, s.workspaceName()), DeleteMemoryOutput{ID: in.ID}), nil, nil
 }

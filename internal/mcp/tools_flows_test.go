@@ -94,7 +94,7 @@ func TestTool_CreateFlow(t *testing.T) {
 	assert.Empty(t, out.Diagnostics)
 
 	text := firstText(res)
-	assert.Contains(t, text, "created flow new-flow at local/flows/new-flow.flow.yaml (local tier; promote with rescope_flow when it works), 2 steps")
+	assert.Contains(t, text, "created flow new-flow at local/flows/new-flow.flow.yaml (local tier; promote with rescope_flow when it works) in workspace test-workspace, 2 steps")
 	// Item 4 (docs/feedback/2026-09-05-41-step-flow-session.md): the flow
 	// document itself must never be echoed back.
 	assert.NotContains(t, text, "call: rider-service.getRider")

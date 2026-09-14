@@ -747,3 +747,28 @@ resets. `terminalDirs` now lists only writable places: the workspace,
 each locally-read service at its checkout (a bound service at the path
 it is bound to), and home; the `api/` entries went too, since the
 repository is where an agent works.
+
+### The first friction report, and what it found (2026-09-14, same day)
+
+Within an hour of `report_friction` existing, an agent (codex, over the
+stdio bridge) filed one and the user posted it as
+github.com/gs-sinha/sapien/discussions/1: `switch_workspace` to the team
+workspace returned E_INTERNAL with an HTTP 401 while the CLI could read
+that workspace fine, the failed switch left the session on the previous
+workspace so the next `create_memory` landed in the wrong catalog, and
+there was no `delete_memory` to clean up with.
+
+Traced in `internal/cli/mcp_workspaces.go`: the bridge's switcher kept
+the bearer token captured when the session started, and its raw HTTP
+calls never re-resolved it, while the primary `engine.Remote` reconnects
+on a 401 through its resolver. The daemon had been restarted at 19:48;
+the agent's session predated that. `list_workspaces` masked the failure
+by falling back to the local registry on any error. Fixes: the switcher
+resolves the endpoint on demand and replays once on a 401 or connection
+failure, exactly as `Remote.do` does, and decodes the daemon's error
+envelope so an agent sees E_CONFLICT rather than "HTTP 409"; a failed
+switch now says "this session is still bound to <previous>" and carries
+`still_bound_to`; every write names the workspace it landed in;
+`delete_memory` exists with write-memories permission. Tests: a stub
+daemon that rotates its token proves List and Engine recover; the MCP
+tests pin the still-bound text and the delete.

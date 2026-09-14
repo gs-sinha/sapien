@@ -90,7 +90,14 @@ func (s *server) switchWorkspace(ctx context.Context, req *sdkmcp.CallToolReques
 
 	eng, err := s.switcher.Engine(dir)
 	if err != nil {
-		return errResult(err), nil, nil
+		// A failed switch leaves the session where it was, and the agent
+		// must hear that in the same breath as the failure: the first
+		// friction report filed against Sapien was a create_memory that
+		// landed in the wrong workspace after a switch had failed.
+		e := errs.As(err)
+		e.Message = fmt.Sprintf("switch to %s failed: %s; this session is still bound to %s and every tool keeps acting there", dir, e.Message, previous)
+		e.WithDetail("still_bound_to", previous)
+		return errResult(e), nil, nil
 	}
 	s.bind(eng)
 

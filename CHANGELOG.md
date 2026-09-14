@@ -78,6 +78,19 @@ and phase numbers refer to PLAN.md §34's roadmap.
   like they carry a secret are refused at creation, since they go public.
 
 ### Fixed
+- **`switch_workspace` survives a daemon restart, and a failed switch says
+  so.** The first friction report an agent filed against Sapien
+  (discussion #1): the stdio MCP bridge's workspace switcher kept the
+  bearer token from when the session started, so after the daemon was
+  replaced every switch failed with a 401 while every other call, which
+  re-resolves its token, kept working; `list_workspaces` hid it by falling
+  back to the local registry. The switcher now re-resolves and retries
+  like the main client, a failed switch answers "still bound to <previous
+  workspace>", and `create_memory`, `create_flow` and `create_example`
+  name the workspace they wrote into.
+- **`delete_memory` over MCP**, the counterpart of `sapien memory rm`; the
+  same report had to park a misplaced memory at personal scope for lack
+  of it.
 - **Nothing is written into a managed git clone any more.** A service read
   from its git source is read-only for service-scoped memories, examples and
   flows: the daemon `reset --hard`s that clone every ten minutes, so a doc

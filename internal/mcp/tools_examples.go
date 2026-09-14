@@ -189,8 +189,8 @@ func (s *server) createExample(ctx context.Context, req *sdkmcp.CallToolRequest,
 		verified = fmt.Sprintf("verified against %s (run %s)", created.Verified.Env, created.Verified.RunID)
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "created example %s for %s (%s scope, %s)\nstored: %s\nuse it with execute_api(example=%q) or a flow step `example: %s`\n",
-		created.ID, created.Operation, created.Scope, verified, examplePathText(created.Path), created.ID, created.ID)
+	fmt.Fprintf(&b, "created example %s for %s (%s scope, %s) in workspace %s\nstored: %s\nuse it with execute_api(example=%q) or a flow step `example: %s`\n",
+		created.ID, created.Operation, created.Scope, verified, s.workspaceName(), examplePathText(created.Path), created.ID, created.ID)
 	return result(b.String(), out), nil, nil
 }
 
