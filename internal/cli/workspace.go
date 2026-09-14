@@ -528,7 +528,7 @@ func closeOnDaemon(ctx context.Context, app *App, dir string) (bool, error) {
 		return false, nil
 	}
 	info, err := daemon.Find(ctx, ws, Version)
-	if err != nil {
+	if err != nil || info == nil { // Find reports no daemon as (nil, nil)
 		return false, nil
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete,

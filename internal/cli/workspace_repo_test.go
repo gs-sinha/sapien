@@ -176,3 +176,24 @@ func TestWorkspaceStatus_AheadLineMentionsPushCommand(t *testing.T) {
 	require.Equal(t, 0, code, "stderr: %s", stderr)
 	assert.Contains(t, stdout, "you have 2 unpushed commits (sapien workspace push)")
 }
+
+// Forgetting (or closing) the default workspace while no daemon is running
+// used to panic: daemon.Find reports "no daemon" as (nil, nil) and
+// closeOnDaemon dereferenced the nil Info after the registry was updated.
+func TestWorkspaceForget_NoDaemonRunning(t *testing.T) {
+	t.Setenv("SAPIEN_NO_DAEMON", "")
+	wsDir := t.TempDir()
+	_, stderr, code := run(t, "init", wsDir)
+	require.Equal(t, 0, code, "stderr: %s", stderr)
+	_, stderr, code = run(t, "workspace", "use", wsDir)
+	require.Equal(t, 0, code, "stderr: %s", stderr)
+
+	stdout, stderr, code := run(t, "workspace", "close", wsDir)
+	require.Equal(t, 0, code, "stderr: %s", stderr)
+	assert.Contains(t, stdout, "no daemon is running")
+
+	stdout, stderr, code = run(t, "workspace", "forget", wsDir)
+	require.Equal(t, 0, code, "stderr: %s", stderr)
+	assert.Contains(t, stdout, "forgot "+wsDir)
+	assert.NotContains(t, stderr, "panic")
+}
