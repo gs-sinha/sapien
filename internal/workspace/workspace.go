@@ -111,7 +111,7 @@ func Save(ws *domain.Workspace) error {
 	if ws.File == "" {
 		return errs.New(errs.Invalid, "workspace has no File set")
 	}
-	data, err := encodeYAML(ws)
+	data, err := encodeYAML(committedView(ws))
 	if err != nil {
 		return errs.Wrap(errs.Internal, err, "encoding workspace")
 	}
@@ -415,4 +415,22 @@ func SameDir(a, b string) bool {
 		return false
 	}
 	return os.SameFile(ai, bi)
+}
+
+// committedView returns ws as it must be written to sapien.workspace.yaml:
+// every service carries its committed source, never a per-machine override
+// (ServiceRef.Team is the committed one whenever an override replaced
+// Source; see LoadLocal). The override itself lives in
+// sapien.workspace.local.yaml and is written by SaveLocal.
+func committedView(ws *domain.Workspace) *domain.Workspace {
+	out := *ws
+	out.Services = make([]domain.ServiceRef, len(ws.Services))
+	for i, ref := range ws.Services {
+		if ref.Team != nil {
+			ref.Source = *ref.Team
+			ref.Team = nil
+		}
+		out.Services[i] = ref
+	}
+	return &out
 }

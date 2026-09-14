@@ -34,6 +34,10 @@ type Locator struct {
 	// (the "…/api" directory, PLAN §6). Service-scoped examples live under
 	// ServiceDirs[name]/examples.
 	ServiceDirs map[string]string
+	// ReadOnly names services whose package must not be written into (a
+	// git source read from a managed clone). Shared by reference with the
+	// engine, like ServiceDirs; reads still cover their examples directory.
+	ReadOnly map[string]bool
 }
 
 // PathFor returns the file path ex's file should live at, given ex.Scope
@@ -48,6 +52,9 @@ func (l Locator) PathFor(ex domain.SavedExample) (string, error) {
 		dir, ok := l.ServiceDirs[ex.Service]
 		if !ok {
 			return "", errs.New(errs.Invalid, "example: unknown service %q for service-scoped example", ex.Service).WithDetail("service", ex.Service)
+		}
+		if l.ReadOnly[ex.Service] {
+			return "", readOnlyErr(ex.Service)
 		}
 		return filepath.Join(dir, ExamplesDir, FileName(ex.ID)), nil
 	default:
@@ -148,4 +155,13 @@ func isUnder(path, dir string) bool {
 		return false
 	}
 	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
+}
+
+// readOnlyErr is the error PathFor returns for a service the Locator's
+// ReadOnly set names: one read from a managed git clone that Sapien resets
+// on every sync (PLAN §7b).
+func readOnlyErr(service string) error {
+	return errs.New(errs.Invalid, "example: service %q is read from a managed git clone that Sapien resets on every sync, so nothing can be written into it", service).
+		WithDetail("service", service).
+		WithHint("bind a local checkout with `sapien service bind " + service + " <path>` so contributions ride your own branch, or save the example at workspace scope")
 }

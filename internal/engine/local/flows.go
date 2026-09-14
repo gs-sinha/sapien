@@ -601,3 +601,17 @@ old one. The edit happens in the service's own repo, reviewed like any
 other change; nothing here writes it automatically. Once applied, mark
 the memory ` + "`status: promoted`" + `.
 `
+
+// CreateIn and Rescope implement flow tiers (PLAN §7b). Phase 0: CreateIn
+// honours the workspace tier by delegating to Create; the local and service
+// tiers, and Rescope, are filled in by the flow-tier work in this change.
+func (f *flowAPI) CreateIn(ctx context.Context, yamlSrc string, opts engine.CreateFlowOptions) (*domain.Flow, error) {
+	if opts.OwnerKind == domain.FlowOwnerWorkspace {
+		return f.Create(ctx, yamlSrc, opts.Path)
+	}
+	return nil, errs.New(errs.NotImplemented, "flow tier %q is not available yet", opts.OwnerKind)
+}
+
+func (f *flowAPI) Rescope(ctx context.Context, id string, ownerKind, ownerID string) (*domain.Flow, error) {
+	return nil, errs.New(errs.NotImplemented, "flow rescope is not available yet")
+}

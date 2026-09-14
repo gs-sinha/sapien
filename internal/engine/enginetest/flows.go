@@ -204,3 +204,44 @@ func (fl *flowAPI) Get(ctx context.Context, id string) (*domain.Flow, error) {
 }
 
 var _ engine.FlowAPI = (*flowAPI)(nil)
+
+// CreateIn is Create with the owner recorded: the fake has no tiers on
+// disk, so the owner is simply stamped on the stored flow.
+func (fl *flowAPI) CreateIn(ctx context.Context, yamlSrc string, opts engine.CreateFlowOptions) (*domain.Flow, error) {
+	kind := opts.OwnerKind
+	if kind == "" {
+		kind = domain.FlowOwnerLocal
+	}
+	created, err := fl.Create(ctx, yamlSrc, opts.Path)
+	if err != nil {
+		return nil, err
+	}
+	f := fl.f()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.recordLocked("Flows.CreateIn", map[string]string{"id": created.ID, "owner_kind": kind, "owner_id": opts.OwnerID})
+	stored := f.flows[created.ID]
+	stored.OwnerKind, stored.OwnerID = kind, opts.OwnerID
+	f.flows[created.ID] = stored
+	cp := stored
+	return &cp, nil
+}
+
+// Rescope re-stamps the owner on a stored flow.
+func (fl *flowAPI) Rescope(ctx context.Context, id string, ownerKind, ownerID string) (*domain.Flow, error) {
+	f := fl.f()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.recordLocked("Flows.Rescope", map[string]string{"id": id, "owner_kind": ownerKind, "owner_id": ownerID})
+
+	stored, ok := f.flows[id]
+	if !ok {
+		return nil, errs.New(errs.FlowNotFound, "flow %q not found", id).WithDetail("id", id)
+	}
+	stored.OwnerKind, stored.OwnerID = ownerKind, ownerID
+	f.flows[id] = stored
+	f.flowUpdated[id] = time.Now().UTC()
+	f.events.publish(domain.Event{Type: domain.EventFlowChanged, Time: time.Now().UTC(), Payload: id})
+	cp := stored
+	return &cp, nil
+}

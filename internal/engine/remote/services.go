@@ -66,3 +66,34 @@ func (s *serviceAPI) Reindex(ctx context.Context) error {
 }
 
 var _ engine.ServiceAPI = (*serviceAPI)(nil)
+
+type bindServiceRequest struct {
+	Path string `json:"path"`
+}
+
+// Bind maps to PUT /v1/services/{id}/binding.
+func (s *serviceAPI) Bind(ctx context.Context, name, path string) (*domain.Service, error) {
+	var out domain.Service
+	if err := s.r().do(ctx, http.MethodPut, "/v1/services/"+name+"/binding", nil, bindServiceRequest{Path: path}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// Unbind maps to DELETE /v1/services/{id}/binding.
+func (s *serviceAPI) Unbind(ctx context.Context, name string) (*domain.Service, error) {
+	var out domain.Service
+	if err := s.r().do(ctx, http.MethodDelete, "/v1/services/"+name+"/binding", nil, nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// Binding maps to GET /v1/services/{id}/binding.
+func (s *serviceAPI) Binding(ctx context.Context, name string) (*engine.BindingInfo, error) {
+	var out engine.BindingInfo
+	if err := s.r().do(ctx, http.MethodGet, "/v1/services/"+name+"/binding", nil, nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}

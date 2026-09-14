@@ -8,6 +8,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -1127,4 +1128,107 @@ func fakeExampleDefaults(ex *domain.SavedExample) {
 	if ex.Updated.IsZero() {
 		ex.Updated = now
 	}
+}
+
+// --- binding and flow tiers (PLAN §7b) --------------------------------
+
+func (a fakeServices) Bind(_ context.Context, name, path string) (*domain.Service, error) {
+	a.st.mu.Lock()
+	defer a.st.mu.Unlock()
+	for i := range a.st.services {
+		if a.st.services[i].Name != name {
+			continue
+		}
+		team := a.st.services[i].Source
+		if b := a.st.services[i].Binding; b != nil && b.Team != nil {
+			team = *b.Team
+		}
+		a.st.services[i].Source = domain.Source{Kind: domain.SourceLocal, Path: path}
+		a.st.services[i].PackageDir = path
+		a.st.services[i].Binding = &domain.ServiceBinding{
+			Mode: domain.BindingLocal, Team: &team, Local: &domain.LocalCheckout{Path: path}, Writable: true,
+		}
+		c := a.st.services[i]
+		return &c, nil
+	}
+	return nil, errs.New(errs.ServiceNotFound, "service %q not found", name)
+}
+
+func (a fakeServices) Unbind(_ context.Context, name string) (*domain.Service, error) {
+	a.st.mu.Lock()
+	defer a.st.mu.Unlock()
+	for i := range a.st.services {
+		if a.st.services[i].Name != name {
+			continue
+		}
+		if b := a.st.services[i].Binding; b != nil && b.Team != nil {
+			a.st.services[i].Source = *b.Team
+			a.st.services[i].PackageDir = b.Team.Path
+		}
+		a.st.services[i].Binding = fakeBindingFor(a.st.services[i].Source)
+		c := a.st.services[i]
+		return &c, nil
+	}
+	return nil, errs.New(errs.ServiceNotFound, "service %q not found", name)
+}
+
+func (a fakeServices) Binding(_ context.Context, name string) (*engine.BindingInfo, error) {
+	a.st.mu.Lock()
+	defer a.st.mu.Unlock()
+	for _, s := range a.st.services {
+		if s.Name != name {
+			continue
+		}
+		b := s.Binding
+		if b == nil {
+			b = fakeBindingFor(s.Source)
+		}
+		return &engine.BindingInfo{Service: name, Binding: *b}, nil
+	}
+	return nil, errs.New(errs.ServiceNotFound, "service %q not found", name)
+}
+
+func fakeBindingFor(src domain.Source) *domain.ServiceBinding {
+	if src.Kind == domain.SourceGit {
+		s := src
+		return &domain.ServiceBinding{Mode: domain.BindingTeam, Team: &s}
+	}
+	return &domain.ServiceBinding{Mode: domain.BindingLocal, Local: &domain.LocalCheckout{Path: src.Path}, Writable: true}
+}
+
+func (a fakeFlows) CreateIn(ctx context.Context, yamlSrc string, opts engine.CreateFlowOptions) (*domain.Flow, error) {
+	kind := opts.OwnerKind
+	if kind == "" {
+		kind = domain.FlowOwnerLocal
+	}
+	created, err := a.Create(ctx, yamlSrc, opts.Path)
+	if err != nil {
+		return nil, err
+	}
+	a.st.mu.Lock()
+	defer a.st.mu.Unlock()
+	for i := range a.st.flows {
+		if a.st.flows[i].ID == created.ID {
+			a.st.flows[i].OwnerKind, a.st.flows[i].OwnerID = kind, opts.OwnerID
+			if kind == domain.FlowOwnerLocal {
+				a.st.flows[i].Path = filepath.Join(domain.LocalDir, domain.FlowsDir, filepath.Base(a.st.flows[i].Path))
+			}
+			c := a.st.flows[i]
+			return &c, nil
+		}
+	}
+	return created, nil
+}
+
+func (a fakeFlows) Rescope(_ context.Context, id string, ownerKind, ownerID string) (*domain.Flow, error) {
+	a.st.mu.Lock()
+	defer a.st.mu.Unlock()
+	for i := range a.st.flows {
+		if a.st.flows[i].ID == id {
+			a.st.flows[i].OwnerKind, a.st.flows[i].OwnerID = ownerKind, ownerID
+			c := a.st.flows[i]
+			return &c, nil
+		}
+	}
+	return nil, errs.New(errs.FlowNotFound, "flow %q not found", id)
 }

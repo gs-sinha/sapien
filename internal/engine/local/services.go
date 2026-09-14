@@ -5,6 +5,7 @@ import (
 
 	"github.com/gs-sinha/sapien/internal/domain"
 	"github.com/gs-sinha/sapien/internal/engine"
+	"github.com/gs-sinha/sapien/internal/errs"
 	"github.com/gs-sinha/sapien/internal/events"
 	"github.com/gs-sinha/sapien/internal/registry"
 	"github.com/gs-sinha/sapien/internal/workspace"
@@ -75,6 +76,7 @@ func (s *serviceAPI) Add(ctx context.Context, name string, src domain.Source) (*
 	if svc != nil && svc.PackageDir != "" {
 		l.serviceDirs[ref.Name] = svc.PackageDir
 	}
+	l.setReadOnly(ref.Name, ref.Source)
 	if svc != nil && svc.Status == domain.SyncOK {
 		l.enqueueSemanticIndex(ref.Name)
 	}
@@ -104,6 +106,7 @@ func (s *serviceAPI) Remove(ctx context.Context, name string) error {
 	}
 	_ = settingsDelete(ctx, l.db, fingerprintKey(name))
 	delete(l.serviceDirs, name)
+	delete(l.readOnlyServices, name)
 
 	l.emit(domain.EventCatalogChanged, domain.CatalogChange{Service: name, Removed: removedIDs})
 	return nil
@@ -166,4 +169,18 @@ func (l *Local) emit(typ domain.EventType, payload any) {
 		return
 	}
 	events.Emit(l.bus, typ, payload)
+}
+
+// Bind, Unbind and Binding implement per-machine source overrides (PLAN
+// §7b). Phase 0 stubs: replaced by the binding work in this same change.
+func (s *serviceAPI) Bind(ctx context.Context, name, path string) (*domain.Service, error) {
+	return nil, errs.New(errs.NotImplemented, "service binding is not available yet")
+}
+
+func (s *serviceAPI) Unbind(ctx context.Context, name string) (*domain.Service, error) {
+	return nil, errs.New(errs.NotImplemented, "service binding is not available yet")
+}
+
+func (s *serviceAPI) Binding(ctx context.Context, name string) (*engine.BindingInfo, error) {
+	return nil, errs.New(errs.NotImplemented, "service binding is not available yet")
 }

@@ -90,6 +90,9 @@ type Service struct {
 	TaskCoverage     *TaskCoverage         `json:"task_coverage,omitempty"`
 	LastIndexed      time.Time             `json:"last_indexed,omitempty"`
 	Commit           string                `json:"commit,omitempty"` // git sources: resolved commit
+	// Binding says which source this machine reads the service from and
+	// whether service-scoped knowledge can be written into it (PLAN §7b).
+	Binding          *ServiceBinding       `json:"binding,omitempty"`
 	OperationCount   int                   `json:"operation_count"`
 	WarningRules     []AcceptedWarning     `json:"-" yaml:"-"`
 }
@@ -121,4 +124,46 @@ type DocCoverage struct {
 	WithExample int `json:"with_example"` // has a contract example or a saved example file
 	NeedExample int `json:"need_example"` // takes a request body, so an example is worth having
 	DocSections int `json:"doc_sections"` // narrative sections (api/docs/*.md), excluding contract-derived ones
+}
+
+// Binding modes: where this machine reads a service from.
+const (
+	// BindingLocal: a local checkout, either a local source in the
+	// committed workspace or a per-machine override of a git source.
+	BindingLocal = "local"
+	// BindingTeam: the committed git source, read from the managed clone.
+	BindingTeam = "team"
+)
+
+// ServiceBinding describes which source a service is read from on this
+// machine ("listening to") and what it could be read from instead ("can
+// listen to"). A git source is read from a managed clone that Sapien resets
+// on every sync, so nothing may be written into it; binding a local
+// checkout (sapien.workspace.local.yaml) makes the service writable and
+// lets contributions ride the developer's own branch.
+type ServiceBinding struct {
+	Mode string `json:"mode"` // BindingLocal | BindingTeam
+	// Team is the committed source when it is a git source: the one every
+	// other machine reads. Set in both modes so the UI can show what this
+	// machine would fall back to.
+	Team *Source `json:"team,omitempty"`
+	// Local describes the checkout being read when Mode is BindingLocal.
+	Local *LocalCheckout `json:"local,omitempty"`
+	// Writable reports whether service-scoped memories, examples and flows
+	// can be written for this service here: true for a local checkout,
+	// false for a managed clone.
+	Writable bool `json:"writable"`
+}
+
+// LocalCheckout describes a local git checkout of a service: the path this
+// machine reads, and what git says about it (read-only queries; Sapien
+// never fetches, checks out or commits in a developer's repository).
+type LocalCheckout struct {
+	Path   string `json:"path"`
+	Branch string `json:"branch,omitempty"`
+	Commit string `json:"commit,omitempty"`
+	Remote string `json:"remote,omitempty"` // origin URL, when the path is a git repository
+	// Dirty counts modified and untracked files under the package
+	// directory: work that exists here and nowhere else yet.
+	Dirty int `json:"dirty,omitempty"`
 }

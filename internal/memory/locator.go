@@ -26,6 +26,9 @@ type Locator struct {
 	// "workspace" (PLAN §12: "flow ... stored as workspace or service
 	// memory with subject.flow set").
 	FlowOwner func(flowID string) (kind, id string)
+	// ReadOnly names services whose package must not be written into; see
+	// ReadOnlyServices. Shared by reference with the engine, like ServiceDirs.
+	ReadOnly ReadOnlyServices
 }
 
 // DirFor returns the directory m's file should live in, given m.Scope (and,
@@ -68,6 +71,9 @@ func (l Locator) serviceMemoriesDir(service string) (string, error) {
 	dir, ok := l.ServiceDirs[service]
 	if !ok {
 		return "", errs.New(errs.ServiceNotFound, "memory: unknown service %q", service)
+	}
+	if l.ReadOnly[service] {
+		return "", readOnlyErr(service)
 	}
 	return filepath.Join(dir, domain.MemoriesDir), nil
 }
@@ -134,4 +140,18 @@ func (l Locator) Files() ([]string, error) {
 	}
 	sort.Strings(files)
 	return files, nil
+}
+
+// ReadOnlyServices, when set on a Locator, names services whose package
+// directory must not be written: a git-sourced service read from a managed
+// clone that Sapien resets on every sync (PLAN §7b). Reads still cover
+// their memories directory; DirFor refuses service and flow scopes that
+// resolve into one, with a hint to bind a local checkout.
+type ReadOnlyServices = map[string]bool
+
+// readOnlyErr is the error DirFor returns for a service in ReadOnly.
+func readOnlyErr(service string) error {
+	return errs.New(errs.Invalid, "memory: service %q is read from a managed git clone that Sapien resets on every sync, so nothing can be written into it", service).
+		WithDetail("service", service).
+		WithHint("bind a local checkout with `sapien service bind " + service + " <path>` so contributions ride your own branch, or keep the memory at workspace scope with subject.service set")
 }

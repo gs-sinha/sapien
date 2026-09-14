@@ -40,6 +40,29 @@ type ServiceAPI interface {
 	Sync(ctx context.Context, name string) ([]domain.Service, error)
 	// Reindex rebuilds the catalog for all services from canonical files.
 	Reindex(ctx context.Context) error
+
+	// Bind makes this machine read name from the local checkout at path
+	// instead of its committed git source, recording the override in
+	// sapien.workspace.local.yaml (never in the committed file), and
+	// resyncs the service from there. Service-scoped knowledge becomes
+	// writable and rides the developer's own branch.
+	Bind(ctx context.Context, name, path string) (*domain.Service, error)
+	// Unbind removes the override so the service is read from its
+	// committed source again, and resyncs it.
+	Unbind(ctx context.Context, name string) (*domain.Service, error)
+	// Binding reports what the service is read from here, what it could
+	// be read from instead, and any local checkouts of the same remote
+	// this machine already knows about.
+	Binding(ctx context.Context, name string) (*BindingInfo, error)
+}
+
+// BindingInfo is Services().Binding's answer: the service's current binding
+// plus local checkouts of the same repository found on this machine, so a
+// UI can offer "read from ~/code/sarathy instead" as one click.
+type BindingInfo struct {
+	Service    string                 `json:"service"`
+	Binding    domain.ServiceBinding  `json:"binding"`
+	Candidates []domain.LocalCheckout `json:"candidates,omitempty"`
 }
 
 // CatalogAPI reads the normalized catalog.
@@ -68,8 +91,18 @@ type FlowAPI interface {
 	Parse(ctx context.Context, yamlSrc string) (*domain.Flow, error)
 	// Validate checks references, bindings, and expressions against the catalog.
 	Validate(ctx context.Context, yamlSrc string) (*domain.ValidationResult, error)
-	// Create writes a new flow file (workspace flows dir by default) after validation.
+	// Create writes a new flow file into the workspace tier (<workspace>/flows)
+	// after validation. Shorthand for CreateIn with OwnerKind workspace.
 	Create(ctx context.Context, yamlSrc string, path string) (*domain.Flow, error)
+	// CreateIn writes a new flow file into the tier opts names after
+	// validation: local (this machine, the default), workspace (the team's
+	// repo), or service (the owning service's api/flows, only when that
+	// service is bound to a writable checkout).
+	CreateIn(ctx context.Context, yamlSrc string, opts CreateFlowOptions) (*domain.Flow, error)
+	// Rescope moves an existing flow to another tier, keeping its file name,
+	// and reindexes both owners. ownerID names the service for ownerKind
+	// service and is ignored otherwise.
+	Rescope(ctx context.Context, id string, ownerKind, ownerID string) (*domain.Flow, error)
 	Update(ctx context.Context, id string, yamlSrc string) (*domain.Flow, error)
 	Delete(ctx context.Context, id string) error
 	// Reference returns the DSL reference text for agents (PLAN §23): topic is sapien|flow|memory|expressions|service.
@@ -215,3 +248,15 @@ type EventAPI interface {
 
 // Closer is implemented by engines that hold resources.
 var _ io.Closer = (Engine)(nil)
+
+// CreateFlowOptions says where FlowAPI.CreateIn saves a new flow.
+type CreateFlowOptions struct {
+	// Path is the destination relative to the chosen tier's flows
+	// directory; default "<id>.flow.yaml" from the flow's own id.
+	Path string
+	// OwnerKind is the tier: domain.FlowOwnerLocal (default when empty),
+	// domain.FlowOwnerWorkspace, or domain.FlowOwnerService.
+	OwnerKind string
+	// OwnerID names the service for OwnerKind service; ignored otherwise.
+	OwnerID string
+}

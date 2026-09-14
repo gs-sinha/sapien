@@ -93,6 +93,11 @@ type Local struct {
 	// keep it in sync with the catalog after Open (the map is shared by
 	// reference with the Locator already embedded in memStore).
 	serviceDirs map[string]string
+	// readOnlyServices names services read from a managed git clone, whose
+	// package must never be written into (the daemon resets it on every
+	// sync). It backs memory.Locator.ReadOnly and example.Locator.ReadOnly,
+	// shared by reference like serviceDirs, and is refreshed alongside it.
+	readOnlyServices map[string]bool
 
 	// gitMgr resolves and syncs git-sourced services (PLAN §18). Always
 	// non-nil: Open always constructs one, so a git source is usable
@@ -175,18 +180,19 @@ func Open(ws *domain.Workspace, opts Options) (*Local, error) {
 	runsStore := runs.New(db)
 
 	l := &Local{
-		ws:              ws,
-		db:              db,
-		cat:             cat,
-		srch:            srch,
-		bus:             bus,
-		syncer:          syncer,
-		logger:          logger,
-		runsStore:       runsStore,
-		secrets:         secrets,
-		serviceDirs:     map[string]string{},
-		gitMgr:          gitMgr,
-		gitSyncInterval: gitSyncInterval,
+		ws:               ws,
+		db:               db,
+		cat:              cat,
+		srch:             srch,
+		bus:              bus,
+		syncer:           syncer,
+		logger:           logger,
+		runsStore:        runsStore,
+		secrets:          secrets,
+		serviceDirs:      map[string]string{},
+		readOnlyServices: map[string]bool{},
+		gitMgr:           gitMgr,
+		gitSyncInterval:  gitSyncInterval,
 	}
 
 	if err := l.setupSemantic(cfg, opts); err != nil {
@@ -197,6 +203,7 @@ func Open(ws *domain.Workspace, opts Options) (*Local, error) {
 	loc := memory.Locator{
 		WorkspaceDir: ws.Dir,
 		ServiceDirs:  l.serviceDirs,
+		ReadOnly:     l.readOnlyServices,
 		FlowOwner: func(flowID string) (string, string) {
 			fs, err := cat.GetFlowSummary(context.Background(), flowID)
 			if err != nil || fs == nil {
@@ -206,7 +213,7 @@ func Open(ws *domain.Workspace, opts Options) (*Local, error) {
 		},
 	}
 	l.memStore = memory.New(db, loc, &retrieval.CatalogResolver{Cat: cat})
-	l.exStore = example.New(db, example.Locator{WorkspaceDir: ws.Dir, ServiceDirs: l.serviceDirs})
+	l.exStore = example.New(db, example.Locator{WorkspaceDir: ws.Dir, ServiceDirs: l.serviceDirs, ReadOnly: l.readOnlyServices})
 	l.ctxBuilder = retrieval.New(cat, srch, l.memStore, runsStore)
 	l.runner = runner.New(&operationsAdapter{cat: cat})
 
@@ -439,5 +446,19 @@ func (l *Local) refreshServiceDirs(ctx context.Context) {
 		if s.PackageDir != "" {
 			l.serviceDirs[s.Name] = s.PackageDir
 		}
+		l.setReadOnly(s.Name, s.Source)
 	}
+}
+
+// setReadOnly records whether service-scoped knowledge may be written for
+// name: not when its effective source is a git source, because that is
+// read from a managed clone the daemon resets on every sync (PLAN §7b). A
+// local source, including a per-machine override of a git source, is
+// writable.
+func (l *Local) setReadOnly(name string, src domain.Source) {
+	if src.Kind == domain.SourceGit {
+		l.readOnlyServices[name] = true
+		return
+	}
+	delete(l.readOnlyServices, name)
 }
