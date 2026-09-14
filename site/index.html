@@ -367,8 +367,8 @@ released  allocation-service.getAllocation   <span class="ok">200</span>   2/2
 <span class="p">$ </span>ollama pull nomic-embed-text</pre>
               </div>
             </div>
-            <p>Then turn it on for every workspace on this machine. The first start builds the vectors in the background, and search works as before while it does.</p>
-            <pre class="code"><span class="p">$ </span>cat &gt;&gt; ~/.sapien/config.yaml &lt;&lt;'EOF'
+            <p>Then turn it on for every workspace on this machine: Sapien reads <code>~/.sapien/config.yaml</code> whenever it opens any workspace, so there is nothing to register. The command only appends when the file has no <code>semantic:</code> block yet; if it already has one, edit that block instead. The first start builds the vectors in the background, and search works as before while it does.</p>
+            <pre class="code"><span class="p">$ </span>mkdir -p ~/.sapien &amp;&amp; grep -qs '^semantic:' ~/.sapien/config.yaml || cat &gt;&gt; ~/.sapien/config.yaml &lt;&lt;'EOF'
 semantic:
   enabled: true
   kind: ollama
@@ -376,7 +376,7 @@ semantic:
   model: nomic-embed-text
   batch_size: 8
 EOF</pre>
-            <p class="note">Turning it on later? Run <code>sapien daemon stop</code> in the workspace so the next start picks it up. A workspace can opt out with <code>semantic: {enabled: false}</code> in its own <code>.sapien/config.yaml</code>.</p>
+            <p class="note">Turning it on later? A running daemon read the file when it opened each workspace, so run <code>sapien daemon stop</code> and the next start picks it up. A workspace's own <code>.sapien/config.yaml</code> wins over this file, so <code>semantic: {enabled: false}</code> there opts that workspace out.</p>
           </div>
         </li>
 
