@@ -119,6 +119,10 @@ type FlowAPI interface {
 	// and reindexes both owners. ownerID names the service for ownerKind
 	// service and is ignored otherwise.
 	Rescope(ctx context.Context, id string, ownerKind, ownerID string) (*domain.Flow, error)
+	// RescopeWith is Rescope with options: Commit records the moved file in
+	// the workspace repository with one commit (never a push, never a
+	// service repository), only when the target tier is workspace.
+	RescopeWith(ctx context.Context, id string, ownerKind, ownerID string, opts RescopeOptions) (*domain.Flow, error)
 	Update(ctx context.Context, id string, yamlSrc string) (*domain.Flow, error)
 	Delete(ctx context.Context, id string) error
 	// Reference returns the DSL reference text for agents (PLAN §23): topic is sapien|flow|memory|expressions|service.
@@ -291,6 +295,13 @@ type AddFromCheckoutOptions struct {
 	Ref string
 	// Force registers even when the checkout has no API package yet.
 	Force bool
+	// AllowSubdir accepts a path that is a subdirectory of its repository
+	// (a monorepo): the team source then carries Subdir, the package's path
+	// inside the repository. Without it such a path is refused with an
+	// errs.Invalid carrying the detail local_add=true, meaning a plain local
+	// Add is the sensible fallback; the same detail marks a path that is not
+	// a git checkout with an origin at all.
+	AllowSubdir bool
 }
 
 // DirListing is ServiceAPI.BrowseCheckouts' answer: one directory level,
@@ -313,4 +324,16 @@ type DirEntry struct {
 	Checkout *domain.LocalCheckout `json:"checkout,omitempty"`
 	Matches  bool                  `json:"matches"`
 	Reason   string                `json:"reason,omitempty"`
+}
+
+// RescopeOptions tunes FlowAPI.RescopeWith.
+type RescopeOptions struct {
+	// Commit runs `git add` and `git commit` for the moved file in the
+	// workspace repository after a promotion to the workspace tier. Opt-in:
+	// the default leaves the file for the human to commit, and Sapien
+	// never pushes. Refused (errs.Invalid) when the target tier is not
+	// workspace or the workspace is not inside a git repository.
+	Commit bool
+	// Message overrides the default commit message.
+	Message string
 }

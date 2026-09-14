@@ -245,3 +245,12 @@ func (fl *flowAPI) Rescope(ctx context.Context, id string, ownerKind, ownerID st
 	cp := stored
 	return &cp, nil
 }
+
+// RescopeWith is Rescope for the fake; a commit is recorded, not made.
+func (fl *flowAPI) RescopeWith(ctx context.Context, id string, ownerKind, ownerID string, opts engine.RescopeOptions) (*domain.Flow, error) {
+	f := fl.f()
+	f.mu.Lock()
+	f.recordLocked("Flows.RescopeWith", map[string]any{"id": id, "owner_kind": ownerKind, "owner_id": ownerID, "commit": opts.Commit, "message": opts.Message})
+	f.mu.Unlock()
+	return fl.Rescope(ctx, id, ownerKind, ownerID)
+}

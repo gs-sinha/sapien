@@ -111,12 +111,24 @@ func (fl *flowAPI) CreateIn(ctx context.Context, yamlSrc string, opts engine.Cre
 type rescopeFlowRequest struct {
 	OwnerKind string `json:"owner_kind"`
 	OwnerID   string `json:"owner_id,omitempty"`
+	Commit    bool   `json:"commit,omitempty"`
+	Message   string `json:"message,omitempty"`
 }
 
 // Rescope maps to POST /v1/flows/{id}/rescope.
 func (fl *flowAPI) Rescope(ctx context.Context, id string, ownerKind, ownerID string) (*domain.Flow, error) {
 	var out domain.Flow
 	body := rescopeFlowRequest{OwnerKind: ownerKind, OwnerID: ownerID}
+	if err := fl.r().do(ctx, http.MethodPost, "/v1/flows/"+id+"/rescope", nil, body, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// RescopeWith maps to POST /v1/flows/{id}/rescope with commit/message.
+func (fl *flowAPI) RescopeWith(ctx context.Context, id string, ownerKind, ownerID string, opts engine.RescopeOptions) (*domain.Flow, error) {
+	var out domain.Flow
+	body := rescopeFlowRequest{OwnerKind: ownerKind, OwnerID: ownerID, Commit: opts.Commit, Message: opts.Message}
 	if err := fl.r().do(ctx, http.MethodPost, "/v1/flows/"+id+"/rescope", nil, body, &out); err != nil {
 		return nil, err
 	}

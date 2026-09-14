@@ -112,7 +112,23 @@ type FlowSummary struct {
 	StepCount  int       `json:"step_count"`
 	Hash       string    `json:"hash"`
 	Updated    time.Time `json:"updated"`
+	// Shipped says how far a workspace-tier flow's file has travelled
+	// towards the team, from a read-only look at the workspace repository:
+	// ShipUntracked, ShipModified, ShipUnpushed or ShipShipped. Empty for
+	// the local and service tiers, and when the workspace is not in git.
+	Shipped string `json:"shipped,omitempty"`
 }
+
+// Ship states for FlowSummary.Shipped (PLAN §7b). Promotion moves a file
+// into the team's directory; these say whether a human has committed and
+// pushed it since, because a moved file nobody commits is the silent
+// failure the tiers exist to remove.
+const (
+	ShipUntracked = "untracked" // in flows/ but never added to git
+	ShipModified  = "modified"  // tracked, with uncommitted changes
+	ShipUnpushed  = "unpushed"  // committed on a branch the remote does not have yet, or no upstream
+	ShipShipped   = "shipped"   // committed and on the upstream
+)
 
 // Severity of a diagnostic.
 type Severity string

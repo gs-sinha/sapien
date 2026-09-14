@@ -868,3 +868,12 @@ old one. The edit happens in the service's own repo, reviewed like any
 other change; nothing here writes it automatically. Once applied, mark
 the memory ` + "`status: promoted`" + `.
 `
+
+// RescopeWith: Phase 0 stub; the shipping work in this change fills in the
+// commit path.
+func (f *flowAPI) RescopeWith(ctx context.Context, id string, ownerKind, ownerID string, opts engine.RescopeOptions) (*domain.Flow, error) {
+	if opts.Commit {
+		return nil, errs.New(errs.NotImplemented, "committing a promoted flow is not available yet")
+	}
+	return f.Rescope(ctx, id, ownerKind, ownerID)
+}

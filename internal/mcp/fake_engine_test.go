@@ -1290,3 +1290,20 @@ func (a fakeServices) AddFromCheckout(ctx context.Context, name, path string, op
 	}
 	return a.Bind(ctx, name, path)
 }
+
+func (a fakeFlows) RescopeWith(ctx context.Context, id string, ownerKind, ownerID string, opts engine.RescopeOptions) (*domain.Flow, error) {
+	fl, err := a.Rescope(ctx, id, ownerKind, ownerID)
+	if err != nil {
+		return nil, err
+	}
+	if opts.Commit {
+		a.st.mu.Lock()
+		for i := range a.st.flows {
+			if a.st.flows[i].ID == id {
+				a.st.flows[i].Path = a.st.flows[i].Path // committed state is not modelled beyond the recorded call
+			}
+		}
+		a.st.mu.Unlock()
+	}
+	return fl, nil
+}
