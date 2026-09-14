@@ -1,0 +1,55 @@
+name: Pages
+
+# Publishes site/ to https://gs-sinha.github.io/sapien/, with
+# scripts/install.sh served beside it as /install.sh. Needs Settings ->
+# Pages -> Source set to "GitHub Actions" once.
+#
+# Preview locally: python3 -m http.server -d site 8765
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - "scripts/install.sh"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Assemble the site
+        run: |
+          sh -n scripts/install.sh
+          mkdir -p _site
+          cp -R site/. _site/
+          cp scripts/install.sh _site/install.sh
+
+      - name: Upload
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4

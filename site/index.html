@@ -1,0 +1,800 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sapien · API discovery for agents and humans</title>
+  <meta name="description" content="Sapien is a local-first, git-first API discovery tool for agents and humans. Agents write business-first docs for your services, and build multi-service flows from a sentence. No backend.">
+  <meta property="og:title" content="Sapien · API discovery for agents and humans">
+  <meta property="og:description" content="Business-first API docs written by agents, queryable from any repo, and multi-service flows from a sentence. Local and git first. No backend.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://gs-sinha.github.io/sapien/">
+  <meta property="og:image" content="https://gs-sinha.github.io/sapien/apple-touch-icon.png">
+  <meta name="theme-color" content="#f6f4ee" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#121210" media="(prefers-color-scheme: dark)">
+  <link rel="icon" type="image/png" href="favicon.png">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-laptop" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M2 20h20"/></symbol>
+  <symbol id="i-git" viewBox="0 0 24 24"><path d="M6 3v12"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></symbol>
+  <symbol id="i-doc" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h4"/></symbol>
+  <symbol id="i-flow" viewBox="0 0 24 24"><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/><path d="M7 11v4a2 2 0 0 0 2 2h4"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20.5a6.5 6.5 0 0 1 13 0"/><path d="M16 4.6a3.5 3.5 0 0 1 0 6.8"/><path d="M18.5 14.5a6.5 6.5 0 0 1 3 6"/></symbol>
+  <symbol id="i-cloud-off" viewBox="0 0 24 24"><path d="M3 3l18 18"/><path d="M8.2 6.2A6 6 0 0 1 16.9 9H17a4.5 4.5 0 0 1 3.1 7.8"/><path d="M17 19H7a5 5 0 0 1-1.6-9.7"/></symbol>
+  <symbol id="i-terminal" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3"/><path d="M13 15h4"/></symbol>
+  <symbol id="i-window" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/><path d="M9 9v11"/></symbol>
+  <symbol id="i-plug" viewBox="0 0 24 24"><path d="M9 2v5M15 2v5"/><path d="M6 7h12v4a6 6 0 0 1-12 0z"/><path d="M12 17v5"/></symbol>
+  <symbol id="i-server" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="7" rx="2"/><rect x="3" y="14" width="18" height="7" rx="2"/><path d="M7 6.5h.01M7 17.5h.01"/></symbol>
+  <symbol id="i-screen" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/><path d="M6 8.5h5M6 11.5h8"/></symbol>
+  <symbol id="i-qa" viewBox="0 0 24 24"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M9 14l2 2 4-4"/></symbol>
+  <symbol id="i-bot" viewBox="0 0 24 24"><rect x="4" y="8" width="16" height="12" rx="3"/><path d="M12 8V5"/><circle cx="12" cy="3.5" r="1.2"/><path d="M9.5 13v1.5M14.5 13v1.5"/><path d="M2 13v3M22 13v3"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></symbol>
+  <symbol id="i-check-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8.5 12.5l2.5 2.5 4.5-5"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></symbol>
+  <symbol id="i-tag" viewBox="0 0 24 24"><path d="M3 12V4a1 1 0 0 1 1-1h8l9 9-9 9z"/><circle cx="7.5" cy="7.5" r="1.5"/></symbol>
+  <symbol id="i-message" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></symbol>
+  <symbol id="i-sparkle" viewBox="0 0 24 24"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M18.5 16.5l.6 1.4 1.4.6-1.4.6-.6 1.4-.6-1.4-1.4-.6 1.4-.6z"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24"><path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-login" viewBox="0 0 24 24"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><path d="M10 17l5-5-5-5"/><path d="M15 12H3"/></symbol>
+  <symbol id="i-github" viewBox="0 0 16 16"><path class="i-fill" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></symbol>
+</svg>
+
+<header class="topbar" id="topbar">
+  <div class="wrap bar">
+    <a class="brand" href="#top" aria-label="Sapien home"><span class="mark" aria-hidden="true">🗿</span>sapien</a>
+    <nav class="nav" aria-label="Sections">
+      <a href="#why">Why</a>
+      <a href="#stories">Stories</a>
+      <a href="#install">Install</a>
+      <a href="#workspaces">Workspaces</a>
+      <a href="#onboard">Onboard</a>
+      <a href="#flows">Flows</a>
+      <a href="#releases">Releases</a>
+    </nav>
+    <a class="gh" href="https://github.com/gs-sinha/sapien"><svg class="i" aria-hidden="true"><use href="#i-github"/></svg><span>GitHub</span></a>
+  </div>
+</header>
+
+<main id="top">
+
+  <!-- ============ HERO ============ -->
+  <section class="hero">
+    <div class="wrap hero-grid">
+      <div>
+        <a class="pill" href="#releases"><span class="tag" data-latest>v1.2.0</span> macOS &amp; Linux · Apache-2.0 · free</a>
+        <h1>API discovery for <em>agents</em> and humans.</h1>
+        <p class="lede">Sapien gives every service in your org <strong>business-first docs, a schema and ready-to-send payloads</strong>, written by the agents already working in those repos. Any agent in any repo can query it, any developer can browse it, and an agent can turn it into <strong>multi-service flows from one sentence</strong>.</p>
+        <div class="install">
+          <pre class="code"><span class="p">$ </span>curl -fsSL https://gs-sinha.github.io/sapien/install.sh | sh</pre>
+        </div>
+        <div class="cta">
+          <a class="btn primary" href="#install">Get started <svg class="i" aria-hidden="true"><use href="#i-arrow"/></svg></a>
+          <a class="btn" href="#flows">See a flow</a>
+        </div>
+        <ul class="chips" aria-label="Ways to use Sapien">
+          <li><svg class="i" aria-hidden="true"><use href="#i-terminal"/></svg>CLI</li>
+          <li><svg class="i" aria-hidden="true"><use href="#i-window"/></svg>Browser UI</li>
+          <li><svg class="i" aria-hidden="true"><use href="#i-plug"/></svg>MCP for Claude Code, Codex, Cursor</li>
+        </ul>
+      </div>
+
+      <figure class="demo" style="margin:0" aria-label="An agent in a frontend repo writes and runs a flow across three backend services with Sapien">
+        <div class="demo-bar"><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>claude · ~/code/checkout-web</div>
+        <div class="demo-body">
+          <div class="demo-prompt"><span class="who">›</span><span>Using Sapien, write a flow that places an order, allocates a rider and checks they're online, then cancels the order and confirms the rider is released. Run it on stage.</span></div>
+<pre><span class="tool">get_context</span>            <span class="dim">orders → allocation → riders</span>
+<span class="tool">search_apis</span>            <span class="dim">5 operations across 3 services</span>
+<span class="tool">get_api</span>                <span class="dim">ready-to-send request bodies</span>
+<span class="tool">get_relevant_memories</span>  <span class="dim">1 invariant → assertion</span>
+<span class="tool">validate_flow</span>          <span class="ok">valid</span>
+<span class="tool">run_flow</span>               <span class="dim">cancel-releases-rider · stage</span></pre>
+          <div class="hr"></div>
+<pre><span class="dim">STEP      OPERATION                          HTTP  ASSERT</span>
+create    order-service.createOrder          <span class="ok">201</span>   1/1
+allocate  allocation-service.allocate        <span class="ok">201</span>   2/2
+rider     rider-service.getRider             <span class="ok">200</span>   2/2
+cancel    order-service.cancelOrder          <span class="ok">200</span>   2/2
+released  allocation-service.getAllocation   <span class="ok">200</span>   2/2
+
+<span class="ok">passed</span> · 5/5 steps · 412 ms</pre>
+        </div>
+      </figure>
+    </div>
+  </section>
+
+  <!-- ============ WHAT IT IS ============ -->
+  <section class="section" id="why">
+    <div class="wrap">
+      <header class="sec-head">
+        <p class="eyebrow">What it is</p>
+        <h2>Everything an agent needs to call your APIs, kept where your code already lives.</h2>
+        <p class="sub">A lightweight API discovery tool for agents and humans. It indexes the services your org runs, and the agents that already work in those repos keep it accurate.</p>
+      </header>
+
+      <div class="grid-2 pillars">
+        <article class="card">
+          <div class="tile"><svg class="i" aria-hidden="true"><use href="#i-git"/></svg></div>
+          <h3>Local + git first</h3>
+          <p>One small binary on your machine. Contracts, docs and flows are plain files in git, reviewed like any other change. Use it from whichever door fits the moment.</p>
+          <ul class="chips">
+            <li><svg class="i" aria-hidden="true"><use href="#i-terminal"/></svg>CLI</li>
+            <li><svg class="i" aria-hidden="true"><use href="#i-window"/></svg>UI</li>
+            <li><svg class="i" aria-hidden="true"><use href="#i-plug"/></svg>MCP</li>
+          </ul>
+        </article>
+
+        <article class="card">
+          <div class="tile"><svg class="i" aria-hidden="true"><use href="#i-doc"/></svg></div>
+          <h3>Business-first docs, written by agents</h3>
+          <p>Add Sapien to a service and its coding agent writes the docs that matter: when to call an operation, what must exist first, what it changes, which errors are normal. Alongside the OpenAPI schema and a sample payload for every request. Agents in other repos query it, and developers find it by intent.</p>
+        </article>
+
+        <article class="card feature">
+          <div>
+            <div class="tile"><svg class="i" aria-hidden="true"><use href="#i-flow"/></svg></div>
+            <h3>Multi-service flows from a sentence <span class="badge">The big one</span></h3>
+            <p>Describe a journey in plain language. The agent finds the operations across services, reads their rules and the team's known gotchas, then writes a flow with assertions, validates it and runs it. You don't paste in context about every service. Sapien already has it.</p>
+          </div>
+          <div class="mini-flow" aria-hidden="true">
+            <div class="ask">“Create an order, allocate a rider, cancel the order, and check the rider is freed.”</div>
+            <ol>
+              <li><svg class="i"><use href="#i-check"/></svg><span>order-service.createOrder</span><span class="svc">orders</span></li>
+              <li><svg class="i"><use href="#i-check"/></svg><span>allocation-service.allocate</span><span class="svc">allocation</span></li>
+              <li><svg class="i"><use href="#i-check"/></svg><span>rider-service.getRider</span><span class="svc">riders</span></li>
+              <li><svg class="i"><use href="#i-check"/></svg><span>order-service.cancelOrder</span><span class="svc">orders</span></li>
+              <li><svg class="i"><use href="#i-check"/></svg><span>allocation-service.getAllocation</span><span class="svc">allocation</span></li>
+            </ol>
+            <div class="result"><svg class="i"><use href="#i-check-circle"/></svg>passed · 5 steps · 9 assertions</div>
+          </div>
+        </article>
+
+        <article class="card">
+          <div class="tile"><svg class="i" aria-hidden="true"><use href="#i-users"/></svg></div>
+          <h3>Shared through free git workspaces</h3>
+          <p>A team workspace is a git repo listing your services, environments, flows and memories. Clone it and you have everything your team has built. No seats and no sync service: it's just git.</p>
+        </article>
+
+        <article class="card">
+          <div class="tile"><svg class="i" aria-hidden="true"><use href="#i-cloud-off"/></svg></div>
+          <h3>No backend</h3>
+          <p>Your data lives in your own git remotes and on your machine. There is no Sapien account, no Sapien server, and nothing phones home. Secrets stay in your OS keychain.</p>
+        </article>
+      </div>
+
+      <h3 class="subhead">Where everything lives</h3>
+      <div class="arch">
+        <div class="node">
+          <h4><svg class="i" aria-hidden="true"><use href="#i-git"/></svg>Service repos</h4>
+          <p>Each service's contract and docs sit next to its code, reviewed in the same pull requests.</p>
+          <ul><li>api/openapi.yaml</li><li>api/docs/*.md</li><li>api/examples/</li><li>api/flows/</li></ul>
+        </div>
+        <div class="arrow" aria-hidden="true"><svg class="i"><use href="#i-arrow"/></svg></div>
+        <div class="node">
+          <h4><svg class="i" aria-hidden="true"><use href="#i-users"/></svg>Workspace repo</h4>
+          <p>Which services make up the system, and what the team has learned about calling them.</p>
+          <ul><li>sapien.workspace.yaml</li><li>environments/</li><li>flows/ memories/</li><li>examples/</li></ul>
+        </div>
+        <div class="arrow" aria-hidden="true"><svg class="i"><use href="#i-arrow"/></svg></div>
+        <div class="node here">
+          <h4><svg class="i" aria-hidden="true"><use href="#i-laptop"/></svg>Your machine</h4>
+          <p>One local daemon indexes it all and runs your calls. It listens on 127.0.0.1 only.</p>
+          <ul><li>search index</li><li>run history</li><li>secrets in keychain</li></ul>
+        </div>
+        <div class="arrow" aria-hidden="true"><svg class="i"><use href="#i-arrow"/></svg></div>
+        <div class="node">
+          <h4><svg class="i" aria-hidden="true"><use href="#i-bot"/></svg>You and your agents</h4>
+          <p>The same engine behind every door, so what an agent saves, you see.</p>
+          <ul><li>sapien (CLI)</li><li>sapien ui</li><li>sapien mcp</li></ul>
+        </div>
+      </div>
+      <p class="nocloud"><svg class="i" aria-hidden="true"><use href="#i-cloud-off"/></svg>No Sapien cloud anywhere in this picture. Git carries everything that's shared.</p>
+    </div>
+  </section>
+
+  <!-- ============ STORIES ============ -->
+  <section class="section band" id="stories">
+    <div class="wrap">
+      <header class="sec-head">
+        <p class="eyebrow">Who it's for</p>
+        <h2>One catalog, four very different days.</h2>
+        <p class="sub">The same docs, examples and flows serve whoever is asking: the person who owns the service, the people who call it, and the agents doing both.</p>
+      </header>
+
+      <div class="grid-2">
+        <article class="card story lead">
+          <div class="story-head">
+            <div class="tile"><svg class="i" aria-hidden="true"><use href="#i-server"/></svg></div>
+            <div><h3>Backend developer</h3><p class="role">Where Sapien started</p></div>
+          </div>
+          <blockquote>“Agentic coding made development very fast, but dev testing in a microservice architecture became the bottleneck. Checking one change meant hand-crafting calls across three services to see whether the journey still worked. Flows have become a lifesaver.”</blockquote>
+          <ul class="ticks">
+            <li><svg class="i" aria-hidden="true"><use href="#i-check"/></svg><span>Describe the journey once; the agent writes the flow across every service involved.</span></li>
+            <li><svg class="i" aria-hidden="true"><use href="#i-check"/></svg><span>Rerun it after every change. A failure names the step, the request and the response.</span></li>
+            <li><svg class="i" aria-hidden="true"><use href="#i-check"/></svg><span>Resume from the failed step instead of starting over, then promote the flow so the whole team gets it.</span></li>
+          </ul>
+          <div class="snip">
+            <pre class="code"><span class="p">$ </span>sapien flow run cancel-releases-rider --env stage
+<span class="p">$ </span>sapien flow run cancel-releases-rider --env stage \
+    --resume &lt;run-id&gt;        <span class="c"># from the failed step</span></pre>
+          </div>
+        </article>
+
+        <article class="card story">
+          <div class="story-head">
+            <div class="tile"><svg class="i" aria-hidden="true"><use href="#i-screen"/></svg></div>
+            <div><h3>UI engineer</h3><p class="role">Building against services they don't own</p></div>
+          </div>
+          <p class="problem"><b>The problem</b>The screen needs an endpoint. Which one, what goes in the body, and which errors should the UI handle? The answer lives in a repo you don't have checked out.</p>
+          <ul class="ticks">
+            <li><svg class="i" aria-hidden="true"><use href="#i-check"/></svg><span>Search by intent in the browser (“cancel an order”) and open a ready-to-send request in Try it.</span></li>
+            <li><svg class="i" aria-hidden="true"><use href="#i-check"/></svg><span>Your agent in the frontend repo reads the backend's docs and payloads over MCP while it wires the screen.</span></li>
+            <li><svg class="i" aria-hidden="true"><use href="#i-check"/></svg><span>Get test data from a flow instead of a Slack thread with the backend team.</span></li>
+          </ul>
+          <figure class="prompt snip">
+            <figcaption><svg class="i" aria-hidden="true"><use href="#i-message"/></svg>Prompt</figcaption>
+            <blockquote>Using Sapien, find how to cancel an order and which errors it can return, then wire the Cancel button to it and handle each error.</blockquote>
+          </figure>
+        </article>
+
+        <article class="card story">
+          <div class="story-head">
+            <div class="tile"><svg class="i" aria-hidden="true"><use href="#i-qa"/></svg></div>
+            <div><h3>QA engineer</h3><p class="role">Owning journeys that cross service lines</p></div>
+          </div>
+          <p class="problem"><b>The problem</b>Cross-service regressions live in someone's head, or in a collection nobody updates when the API changes.</p>
+          <ul class="ticks">
+            <li><svg class="i" aria-hidden="true"><use href="#i-check"/></svg><span>Journeys become flows with assertions, and polling where the system is asynchronous.</span></li>
+            <li><svg class="i" aria-hidden="true"><use href="#i-check"/></svg><span>Every run keeps each step's request, response and timing, ready to attach to a bug.</span></li>
+            <li><svg class="i" aria-hidden="true"><use href="#i-check"/></svg><span>Invariants the team records as memories become assertions in the next flow an agent writes. Run the suite in CI with JUnit reports.</span></li>
+          </ul>
+          <div class="snip">
+            <pre class="code"><span class="p">$ </span>sapien flow run checkout-happy-path --env stage \
+    --report junit --out results.xml</pre>
+          </div>
+        </article>
+
+        <article class="card story">
+          <div class="story-head">
+            <div class="tile"><svg class="i" aria-hidden="true"><use href="#i-bot"/></svg></div>
+            <div><h3>Coding agent</h3><p class="role">Dropped into one repo, calling forty services</p></div>
+          </div>
+          <p class="problem"><b>The problem</b>It can read the repo it's in. Everything that repo calls is a guess: operation names, payloads, and the rules nobody wrote in the code.</p>
+          <ul class="ticks">
+            <li><svg class="i" aria-hidden="true"><use href="#i-check"/></svg><span><code>get_context</code> and <code>search_apis</code> find the right operation by intent, across every service.</span></li>
+            <li><svg class="i" aria-hidden="true"><use href="#i-check"/></svg><span><code>get_api</code> hands back a request example that's ready to send, not a field list to guess from.</span></li>
+            <li><svg class="i" aria-hidden="true"><use href="#i-check"/></svg><span><code>execute_api</code> resolves base URLs, auth and secrets, records the run and diagnoses failures. What worked is saved with <code>create_example</code> for the next agent.</span></li>
+          </ul>
+          <div class="snip">
+            <pre class="code" data-nocopy><span class="k">get_context</span>(<span class="s">"refund a cancelled order"</span>)
+<span class="k">get_api</span>(<span class="s">"payments.createRefund"</span>)
+<span class="c">  → request_example, rules, normal errors</span>
+<span class="k">execute_api</span>(…, env=<span class="s">"stage"</span>)
+<span class="c">  → 201, run recorded</span>
+<span class="k">create_example</span>(run_id)
+<span class="c">  → saved for the next agent</span></pre>
+          </div>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ INSTALL ============ -->
+  <section class="section" id="install">
+    <div class="wrap">
+      <header class="sec-head">
+        <p class="eyebrow">Install</p>
+        <h2>From zero to an agent that knows your APIs in four commands.</h2>
+        <p class="sub">One static binary for macOS and Linux, on amd64 and arm64. The UI and the MCP server ship inside it.</p>
+      </header>
+
+      <ol class="steps">
+        <li>
+          <div class="body">
+            <h3>Install the binary</h3>
+            <div data-tabs>
+              <div class="tablist" role="tablist" aria-label="Install method">
+                <button role="tab" id="t-script" aria-controls="p-script" aria-selected="true">Install script</button>
+                <button role="tab" id="t-brew" aria-controls="p-brew" aria-selected="false">Homebrew</button>
+                <button role="tab" id="t-go" aria-controls="p-go" aria-selected="false">Go</button>
+                <button role="tab" id="t-src" aria-controls="p-src" aria-selected="false">From source</button>
+              </div>
+              <div class="tabs-panels">
+                <div class="tabpanel" role="tabpanel" id="p-script" aria-labelledby="t-script">
+                  <pre class="code"><span class="p">$ </span>curl -fsSL https://gs-sinha.github.io/sapien/install.sh | sh</pre>
+                  <p class="note">Detects your OS and CPU (an Apple silicon Mac under Rosetta still gets the native build), verifies the release checksum, and installs to <code>/usr/local/bin</code>, or <code>~/.local/bin</code> when that isn't writable. Works with <code>wget</code> too. Pin a version with <code>SAPIEN_VERSION=v1.2.0</code>, or choose the directory with <code>sh -s -- --prefix ~/bin</code>.</p>
+                </div>
+                <div class="tabpanel" role="tabpanel" id="p-brew" aria-labelledby="t-brew">
+                  <pre class="code"><span class="p">$ </span>brew install gs-sinha/tap/sapien</pre>
+                </div>
+                <div class="tabpanel" role="tabpanel" id="p-go" aria-labelledby="t-go">
+                  <pre class="code"><span class="p">$ </span>go install github.com/gs-sinha/sapien/cmd/sapien@latest</pre>
+                  <p class="note">Needs Go 1.25+. A binary built this way reports its version as <code>dev</code>.</p>
+                </div>
+                <div class="tabpanel" role="tabpanel" id="p-src" aria-labelledby="t-src">
+                  <pre class="code"><span class="p">$ </span>git clone https://github.com/gs-sinha/sapien.git &amp;&amp; cd sapien
+<span class="p">$ </span>make build                                     <span class="c"># writes bin/sapien</span>
+<span class="p">$ </span>ln -s "$PWD/bin/sapien" /usr/local/bin/sapien</pre>
+                </div>
+              </div>
+            </div>
+            <p class="note">Windows isn't supported yet; run it inside WSL.</p>
+          </div>
+        </li>
+
+        <li>
+          <div class="body">
+            <h3>Create a workspace</h3>
+            <p>A workspace is the folder that lists the services one system is made of. Start local; you can make it a team workspace later. <a href="#workspaces">Local or team?</a></p>
+            <pre class="code"><span class="p">$ </span>sapien init ~/sapien-workspace &amp;&amp; cd ~/sapien-workspace</pre>
+          </div>
+        </li>
+
+        <li>
+          <div class="body">
+            <h3>Connect your agent</h3>
+            <p>Installs the Sapien MCP server for every Claude Code session on this machine, in any repo. Swap the client for <code>codex</code>, <code>cursor</code> or <code>cowork</code> (Claude Desktop), or use <code>generic</code> to print JSON for another host.</p>
+            <p><code>--allow-mutations</code> lets agents make POST, PUT, PATCH and DELETE calls, which running a flow that creates data needs. It applies to non-production environments on this machine only; production stays blocked. Leave it off and agents can only read.</p>
+            <pre class="code"><span class="p">$ </span>sapien mcp config --client claude-code --write --allow-mutations
+<span class="p">$ </span>claude mcp list                     <span class="c"># sapien: ✓ connected</span></pre>
+          </div>
+        </li>
+
+        <li>
+          <div class="body">
+            <h3>Open the UI</h3>
+            <p>The inspector is served by the local daemon, so there's nothing else to install: flows and their runs with every request and response, services and operations with intent search and Try it, examples, memories, and an Agent tab that runs your own <code>claude</code> or <code>codex</code> in a terminal.</p>
+            <pre class="code"><span class="p">$ </span>sapien ui                                <span class="c"># opens http://127.0.0.1:7717 in your browser</span>
+<span class="p">$ </span>sapien ui --install-app                  <span class="c"># macOS: Sapien.app for Spotlight and the Dock</span></pre>
+          </div>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <!-- ============ WORKSPACES ============ -->
+  <section class="section band" id="workspaces">
+    <div class="wrap">
+      <header class="sec-head">
+        <p class="eyebrow">Workspaces</p>
+        <h2>A workspace describes a system. It never owns the services in it.</h2>
+      </header>
+
+      <div class="ws-intro">
+        <div class="prose">
+          <p>Each service's contract and docs stay in that service's own repo. The workspace records which services belong together and where to read them, the environments to call them in, and the flows, memories and examples you build up along the way.</p>
+          <p>Keep <strong>one workspace per system</strong>: every service your team calls together, from however many repos. Search, context and flows all span a workspace, so splitting a system hides cross-service knowledge from your agents.</p>
+        </div>
+        <div class="tree">
+          <pre class="code" data-nocopy><span class="a">acme-workspace/</span>
+├── sapien.workspace.yaml        <span class="c">services and their sources</span>
+├── environments/                <span class="c">base URLs and auth</span>
+├── flows/ memories/ examples/   <span class="c">shared with the team</span>
+├── local/                       <span class="c">this machine only</span>
+└── sapien.workspace.local.yaml  <span class="c">your checkouts, gitignored</span></pre>
+        </div>
+      </div>
+
+      <div class="grid-2 compare">
+        <article class="card">
+          <h3><span class="tile"><svg class="i" aria-hidden="true"><use href="#i-laptop"/></svg></span>Local workspace</h3>
+          <p class="lead-line">A folder on your machine.</p>
+          <ul class="ticks">
+            <li><svg class="i" aria-hidden="true"><use href="#i-check"/></svg><span>Services are paths to checkouts you already have.</span></li>
+            <li><svg class="i" aria-hidden="true"><use href="#i-check"/></svg><span>Flows, memories and examples stay on this machine.</span></li>
+            <li><svg class="i" aria-hidden="true"><use href="#i-check"/></svg><span>Nothing to set up beyond <code>sapien init</code>.</span></li>
+          </ul>
+          <p class="best"><b>Best for</b> trying Sapien, solo work, or a system only you touch.</p>
+        </article>
+        <article class="card">
+          <h3><span class="tile"><svg class="i" aria-hidden="true"><use href="#i-users"/></svg></span>Team workspace</h3>
+          <p class="lead-line">The same folder, committed as a git repo your team clones.</p>
+          <ul class="ticks">
+            <li><svg class="i" aria-hidden="true"><use href="#i-check"/></svg><span>Services are git sources (repo and branch), fetched every ten minutes. Nobody needs every repo checked out.</span></li>
+            <li><svg class="i" aria-hidden="true"><use href="#i-check"/></svg><span>Bind a service to your own checkout to work on it; what you write about it rides your pull request.</span></li>
+            <li><svg class="i" aria-hidden="true"><use href="#i-check"/></svg><span>New flows, memories and examples start local, and you promote and push the ones worth sharing. Sapien never pushes on its own.</span></li>
+          </ul>
+          <p class="best"><b>Best for</b> teams and new hires. It's free: it's just a git repo.</p>
+        </article>
+      </div>
+
+      <div class="ws-flow" data-tabs>
+        <div class="tablist big" role="tablist" aria-label="Workspace guides">
+          <button role="tab" id="t-local" aria-controls="p-local" aria-selected="true"><svg class="i" aria-hidden="true"><use href="#i-laptop"/></svg>Create a local workspace</button>
+          <button role="tab" id="t-team" aria-controls="p-team" aria-selected="false"><svg class="i" aria-hidden="true"><use href="#i-plus"/></svg>Create a team workspace</button>
+          <button role="tab" id="t-join" aria-controls="p-join" aria-selected="false"><svg class="i" aria-hidden="true"><use href="#i-login"/></svg>Join a team workspace</button>
+        </div>
+
+        <div class="tabpanel" role="tabpanel" id="p-local" aria-labelledby="t-local">
+          <ol class="steps compact">
+            <li><div class="body">
+              <h4>Create it</h4>
+              <pre class="code"><span class="p">$ </span>sapien init ~/sapien-workspace &amp;&amp; cd ~/sapien-workspace</pre>
+            </div></li>
+            <li><div class="body">
+              <h4>Add the services you have checked out</h4>
+              <p>A service needs an <code>api/</code> package. If it doesn't have one yet, <a href="#onboard">onboard it with an agent</a> first.</p>
+              <pre class="code"><span class="p">$ </span>sapien service add ~/code/order-service
+<span class="p">$ </span>sapien service add ~/code/rider-service</pre>
+            </div></li>
+            <li><div class="body">
+              <h4>Set up environments</h4>
+              <p>Scaffold environment files from what the services declare, fill in auth, store secrets in your keychain, and check each service answers.</p>
+              <pre class="code"><span class="p">$ </span>sapien env scaffold
+<span class="p">$ </span>sapien secret set STAGE_TOKEN --stdin
+<span class="p">$ </span>sapien env probe stage</pre>
+            </div></li>
+            <li><div class="body">
+              <h4>Connect your agent and open the UI</h4>
+              <pre class="code"><span class="p">$ </span>sapien mcp config --client claude-code --write --allow-mutations
+<span class="p">$ </span>sapien ui</pre>
+            </div></li>
+          </ol>
+        </div>
+
+        <div class="tabpanel" role="tabpanel" id="p-team" aria-labelledby="t-team">
+          <p class="panel-intro">A team workspace is a local workspace committed to its own git repo, with every service listed as a git source so anyone who clones it can read them. Commit the workspace and add a remote before you add services: that's how Sapien knows it's shared.</p>
+          <ol class="steps compact">
+            <li><div class="body">
+              <h4>Create the workspace and push it to an empty repo</h4>
+              <pre class="code"><span class="p">$ </span>sapien init ~/acme-workspace &amp;&amp; cd ~/acme-workspace
+<span class="p">$ </span>git init -b main &amp;&amp; git add -A &amp;&amp; git commit -m "Sapien workspace"
+<span class="p">$ </span>git remote add origin git@github.com:acme/sapien-workspace.git
+<span class="p">$ </span>git push -u origin main</pre>
+            </div></li>
+            <li><div class="body">
+              <h4>Add services as git sources</h4>
+              <p>Give a repo URL, or the path to a checkout: Sapien records the checkout's origin as the team's source and binds your checkout on this machine. A service shows up for teammates once its <code>api/</code> package is on the branch.</p>
+              <pre class="code"><span class="p">$ </span>sapien service add git@github.com:acme/order-service.git --ref main
+<span class="p">$ </span>sapien service add ~/code/rider-service     <span class="c"># records its origin, binds this checkout</span></pre>
+            </div></li>
+            <li><div class="body">
+              <h4>Scaffold environments, point your agent here, and share</h4>
+              <p>Environment files reference secrets by name. The values stay in each person's keychain, and the agent permissions in <code>.sapien/</code> stay on your machine; neither goes into the repo.</p>
+              <pre class="code"><span class="p">$ </span>sapien env scaffold
+<span class="p">$ </span>sapien mcp config --client claude-code --write --allow-mutations
+<span class="p">$ </span>git add -A &amp;&amp; git commit -m "Add services and environments" &amp;&amp; git push</pre>
+            </div></li>
+          </ol>
+        </div>
+
+        <div class="tabpanel" role="tabpanel" id="p-join" aria-labelledby="t-join">
+          <p class="panel-intro">Clone the team's workspace and every service is searchable right away, read from the team's git sources. Then bind the services you actually work on to your own checkouts.</p>
+          <ol class="steps compact">
+            <li><div class="body">
+              <h4>Clone and register it</h4>
+              <pre class="code"><span class="p">$ </span>git clone git@github.com:acme/sapien-workspace.git ~/acme-workspace
+<span class="p">$ </span>sapien workspace add ~/acme-workspace
+<span class="p">$ </span>sapien workspace use ~/acme-workspace     <span class="c"># the default outside any workspace</span></pre>
+            </div></li>
+            <li><div class="body">
+              <h4>Connect your agent and add your own secrets</h4>
+              <pre class="code"><span class="p">$ </span>cd ~/acme-workspace
+<span class="p">$ </span>sapien mcp config --client claude-code --write --allow-mutations
+<span class="p">$ </span>sapien secret set STAGE_TOKEN --stdin
+<span class="p">$ </span>sapien ui</pre>
+            </div></li>
+            <li><div class="body">
+              <h4>Start work on a service: bind your checkout</h4>
+              <p>This machine now reads the service from your branch and re-indexes on every save. Docs, examples and flows about it are written into its <code>api/</code> folder and ship in your pull request. <code>sapien service unbind order-service</code> goes back to the team's version.</p>
+              <pre class="code"><span class="p">$ </span>cd ~/code/order-service
+<span class="p">$ </span>sapien service bind .                     <span class="c"># the service is inferred from origin</span></pre>
+            </div></li>
+            <li><div class="body">
+              <h4>Stay in sync, and share what you built</h4>
+              <p>The UI's status bar shows when teammates' commits are waiting, and offers Pull and Push buttons too.</p>
+              <pre class="code"><span class="p">$ </span>sapien workspace pull                             <span class="c"># fast-forward only</span>
+<span class="p">$ </span>sapien flow promote cancel-releases-rider --commit  <span class="c"># local → team, one commit</span>
+<span class="p">$ </span>sapien workspace push</pre>
+            </div></li>
+          </ol>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ ONBOARD ============ -->
+  <section class="section" id="onboard">
+    <div class="wrap">
+      <header class="sec-head">
+        <p class="eyebrow">Onboard a service</p>
+        <h2>Your agent documents a service in one session.</h2>
+        <p class="sub">Onboarding writes an <code>api/</code> package into the service's own repo: the contract, business-first docs, and an example for every request body. You review it and commit it like any other change.</p>
+      </header>
+
+      <div class="onboard">
+        <article class="card">
+          <h3><span class="tile"><svg class="i" aria-hidden="true"><use href="#i-sparkle"/></svg></span>No docs yet? Ask your agent.</h3>
+          <p>Open Claude Code, Codex or Cursor in the service's repo, or the Agent tab in <code>sapien ui</code>. The Sapien MCP server already tells it how to onboard a service, so either of these works:</p>
+
+          <div class="prompts">
+            <figure class="prompt">
+              <figcaption><svg class="i" aria-hidden="true"><use href="#i-message"/></svg>Quick start</figcaption>
+              <blockquote>Onboard this service to Sapien.</blockquote>
+            </figure>
+            <figure class="prompt">
+              <figcaption><svg class="i" aria-hidden="true"><use href="#i-sparkle"/></svg>Best results</figcaption>
+              <blockquote>Onboard this service to Sapien. Read the routes, handlers and types, then write the OpenAPI contract with an example on every request body, and business-first docs: when to call each operation, what must exist first, what it changes, whether a retry is safe and which errors are normal. Ask me one round of questions about what the code can't tell you, register the service, and close every coverage gap it reports. Finally, add the Sapien section to AGENTS.md (or CLAUDE.md) so future changes keep api/ current.</blockquote>
+            </figure>
+          </div>
+
+          <p class="divider">What the agent does</p>
+          <ol class="steps compact">
+            <li><div class="body"><p>Reads <code>get_dsl_reference("service")</code> for the package layout and the rules docs must follow.</p></div></li>
+            <li><div class="body"><p>Drafts <code>api/</code> from the real code, never inventing endpoints, fields or status codes.</p></div></li>
+            <li><div class="body"><p>Asks you one batched round of questions. Anything nobody can answer goes under “Open questions” instead of being guessed.</p></div></li>
+            <li><div class="body"><p>Registers the service with <code>add_service</code>, then closes the documentation and example gaps it reports.</p></div></li>
+            <li><div class="body"><p>Adds a Sapien section to <code>CLAUDE.md</code> or <code>AGENTS.md</code>, so the next agent that changes the code updates <code>api/</code> in the same change.</p></div></li>
+          </ol>
+          <pre class="code" data-nocopy><span class="a">api/</span>
+├── openapi.yaml   <span class="c">the contract, with request examples</span>
+├── service.yaml   <span class="c">owners, concepts, environments</span>
+└── docs/          <span class="c">overview.md + one file per area</span>
+
+<span class="b">order-service</span>: 12 operations, status <span class="ok">ok</span>
+docs: <span class="ok">12/12</span> operations documented in api/docs
+examples: <span class="ok">7/7</span> bodies have a request example</pre>
+        </article>
+
+        <article class="card">
+          <h3><span class="tile"><svg class="i" aria-hidden="true"><use href="#i-doc"/></svg></span>Already has a contract?</h3>
+          <p>If the repo has <code>api/openapi.yaml</code> (with optional <code>service.yaml</code> and <code>docs/</code>), register it directly.</p>
+
+          <div data-tabs>
+            <div class="tablist" role="tablist" aria-label="Register with">
+              <button role="tab" id="t-ob-cli" aria-controls="p-ob-cli" aria-selected="true">CLI</button>
+              <button role="tab" id="t-ob-ui" aria-controls="p-ob-ui" aria-selected="false">UI</button>
+              <button role="tab" id="t-ob-prompt" aria-controls="p-ob-prompt" aria-selected="false">Prompt</button>
+            </div>
+            <div class="tabpanel" role="tabpanel" id="p-ob-cli" aria-labelledby="t-ob-cli">
+              <pre class="code"><span class="c"># a checkout on this machine</span>
+<span class="p">$ </span>sapien service add ~/code/order-service
+
+<span class="c"># a remote repo, no checkout needed</span>
+<span class="p">$ </span>sapien service add \
+    git@github.com:acme/order-service.git \
+    --ref main --subdir api
+
+<span class="c"># a contract that lives somewhere else</span>
+<span class="p">$ </span>sapien service add ~/code/billing \
+    --contract openapi/billing.yaml</pre>
+            </div>
+            <div class="tabpanel" role="tabpanel" id="p-ob-ui" aria-labelledby="t-ob-ui">
+              <ol class="steps compact">
+                <li><div class="body"><p>Run <code>sapien ui</code> and open <b>Services</b>.</p></div></li>
+                <li><div class="body"><p>Use <b>Add service</b>: paste a checkout path or a git URL, with an optional name, ref, subdirectory or contract path.</p></div></li>
+                <li><div class="body"><p>Read the warnings it shows, then open the service to see its operations, docs and coverage.</p></div></li>
+              </ol>
+            </div>
+            <div class="tabpanel" role="tabpanel" id="p-ob-prompt" aria-labelledby="t-ob-prompt">
+              <figure class="prompt">
+                <figcaption><svg class="i" aria-hidden="true"><use href="#i-message"/></svg>Prompt</figcaption>
+                <blockquote>Add this service to Sapien using its existing OpenAPI spec, then write the business docs and request examples it's missing.</blockquote>
+              </figure>
+            </div>
+          </div>
+
+          <p class="after">A contract alone makes a service <em>findable</em>. Docs make it <em>usable</em>. Every add reports how many operations the docs reach and how many request bodies have an example, so you know exactly what's left.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ FLOWS ============ -->
+  <section class="section band" id="flows">
+    <div class="wrap">
+      <header class="sec-head">
+        <p class="eyebrow">Flows</p>
+        <h2>Multi-service journeys, from a prompt to a green run.</h2>
+        <p class="sub">A flow is a YAML file of calls across services, with values passed between steps, assertions, and polling where the system is asynchronous. Agents write them. You run them from the terminal, the UI, or CI.</p>
+      </header>
+
+      <div class="flows-grid">
+        <div>
+          <figure class="prompt hero-prompt">
+            <figcaption><svg class="i" aria-hidden="true"><use href="#i-message"/></svg>Example prompt</figcaption>
+            <blockquote>Using Sapien, write a flow that places a QCOM order, allocates a rider and checks the rider is online, then cancels the order and confirms the allocation was released. Validate it and run it on stage.</blockquote>
+          </figure>
+
+          <ol class="trace">
+            <li><span class="n">1</span><span><code>get_context</code> and <code>search_apis</code> find five operations across the order, allocation and rider services.</span></li>
+            <li><span class="n">2</span><span><code>get_api</code> returns a ready-to-send body for each, so nothing is assembled from a field list.</span></li>
+            <li><span class="n">3</span><span><code>get_relevant_memories</code> surfaces the team's invariants and gotchas, which become assertions or polling.</span></li>
+            <li><span class="n">4</span><span><code>validate_flow</code> until it's clean, then <code>create_flow</code>. New flows land in your local tier.</span></li>
+            <li><span class="n">5</span><span><code>run_flow</code> reports every step. A failure is diagnosed, and <code>patch_flow</code> fixes one step without rewriting the file.</span></li>
+          </ol>
+          <p class="note"><svg class="i" aria-hidden="true"><use href="#i-lock"/></svg> A flow that creates or changes data needs <code>--allow-mutations</code> from <a href="#install">step 3 of Install</a>. Environments marked production stay off limits to agents unless you grant that separately.</p>
+
+          <div class="more-prompts">
+            <p class="divider" style="margin-top:0">More prompts to try</p>
+            <div class="prompts">
+              <figure class="prompt"><blockquote>Reproduce the bug where a cancelled order keeps its rider busy, as a flow that fails today.</blockquote></figure>
+              <figure class="prompt"><blockquote>Put five orders in ALLOCATED state on stage so I can test the dispatch screen.</blockquote></figure>
+              <figure class="prompt"><blockquote>Run cancel-releases-rider on stage and explain the failing step.</blockquote></figure>
+              <figure class="prompt"><blockquote>Add a teardown to the checkout flow that cancels the order it created.</blockquote></figure>
+            </div>
+          </div>
+        </div>
+
+        <div class="flow-code">
+          <p class="label"><b>cancel-releases-rider.flow.yaml</b><span>written by the agent</span></p>
+          <pre class="code"><span class="k">version</span>: 1
+<span class="k">id</span>: cancel-releases-rider
+<span class="k">name</span>: Cancelling an allocated order frees its rider
+<span class="k">inputs</span>:
+  <span class="k">customerId</span>: { <span class="k">type</span>: string, <span class="k">default</span>: cust_8f21 }
+<span class="k">steps</span>:
+  - <span class="k">id</span>: create
+    <span class="k">call</span>: <span class="a">order-service.createOrder</span>
+    <span class="k">body</span>:
+      <span class="k">customerId</span>: <span class="s">"${inputs.customerId}"</span>
+      <span class="k">type</span>: QCOM
+      <span class="k">pickup</span>: { <span class="k">lat</span>: 12.9716, <span class="k">lng</span>: 77.5946 }
+      <span class="k">drop</span>: { <span class="k">lat</span>: 12.9352, <span class="k">lng</span>: 77.6146 }
+    <span class="k">extract</span>: { <span class="k">orderId</span>: body.orderId }
+    <span class="k">assert</span>: [status == 201]
+
+  - <span class="k">id</span>: allocate
+    <span class="k">call</span>: <span class="a">allocation-service.allocate</span>
+    <span class="k">body</span>: { <span class="k">orderId</span>: <span class="s">"${steps.create.out.orderId}"</span> }
+    <span class="k">extract</span>: { <span class="k">allocationId</span>: body.allocationId, <span class="k">riderId</span>: body.riderId }
+    <span class="k">assert</span>: [status == 201, body.status == <span class="s">"ALLOCATED"</span>]
+
+  - <span class="k">id</span>: rider
+    <span class="k">call</span>: <span class="a">rider-service.getRider</span>
+    <span class="k">input</span>: { <span class="k">riderId</span>: <span class="s">"${steps.allocate.out.riderId}"</span> }
+    <span class="k">assert</span>: [status == 200, body.online == true]
+
+  - <span class="k">id</span>: cancel
+    <span class="k">call</span>: <span class="a">order-service.cancelOrder</span>
+    <span class="k">input</span>: { <span class="k">orderId</span>: <span class="s">"${steps.create.out.orderId}"</span> }
+    <span class="k">assert</span>: [status == 200, body.status == <span class="s">"CANCELLED"</span>]
+
+  - <span class="k">id</span>: released
+    <span class="k">call</span>: <span class="a">allocation-service.getAllocation</span>
+    <span class="k">input</span>: { <span class="k">allocationId</span>: <span class="s">"${steps.allocate.out.allocationId}"</span> }
+    <span class="k">assert</span>: [status == 200, body.status == <span class="s">"RELEASED"</span>]</pre>
+          <pre class="code run-out" data-nocopy style="margin-top:12px"><span class="p">$ </span>sapien flow run cancel-releases-rider --env stage
+<span class="c">STEP      OPERATION                         STATUS  HTTP  LATENCY  ASSERTIONS</span>
+create    order-service.createOrder         <span class="ok">passed</span>  201   212 ms   1/1
+allocate  allocation-service.allocate       <span class="ok">passed</span>  201   97 ms    2/2
+rider     rider-service.getRider            <span class="ok">passed</span>  200   41 ms    2/2
+cancel    order-service.cancelOrder         <span class="ok">passed</span>  200   38 ms    2/2
+released  allocation-service.getAllocation  <span class="ok">passed</span>  200   24 ms    2/2
+
+<span class="ok">passed</span> · 5/5 steps · 412 ms</pre>
+        </div>
+      </div>
+
+      <h3 class="subhead">Share a flow once it's green</h3>
+      <div class="tiers" style="margin-top:0">
+        <div class="tier">
+          <h4><svg class="i" aria-hidden="true"><use href="#i-laptop"/></svg>Local</h4>
+          <p class="path">local/flows/</p>
+          <p>This machine only, ignored by git. Every new flow starts here, so experiments never leak.</p>
+        </div>
+        <div class="arrow" aria-hidden="true"><svg class="i"><use href="#i-arrow"/></svg></div>
+        <div class="tier">
+          <h4><svg class="i" aria-hidden="true"><use href="#i-users"/></svg>Team</h4>
+          <p class="path">flows/</p>
+          <p>In the workspace repo, for everyone who clones it. <code>sapien flow promote &lt;id&gt; --commit</code>, then push.</p>
+        </div>
+        <div class="arrow" aria-hidden="true"><svg class="i"><use href="#i-arrow"/></svg></div>
+        <div class="tier">
+          <h4><svg class="i" aria-hidden="true"><use href="#i-git"/></svg>Service</h4>
+          <p class="path">&lt;service&gt;/api/flows/</p>
+          <p>Ships with the service it tests, in your pull request. <code>--to service --service &lt;name&gt;</code> on a bound service.</p>
+        </div>
+      </div>
+
+      <div class="grid-2 run-anywhere">
+        <div>
+          <p class="label"><b>In CI</b><span>exit code follows the run</span></p>
+          <pre class="code"><span class="p">$ </span>sapien flow run cancel-releases-rider --env stage \
+    --report junit --out flow.xml</pre>
+        </div>
+        <div>
+          <p class="label"><b>In the UI</b><span>Flows → Run</span></p>
+          <pre class="code" data-nocopy><span class="c">Run, then watch each step go green live;</span>
+<span class="c">open any step for its request, response and timing.</span></pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ RELEASES ============ -->
+  <!-- Update on every release: move "Next" under a version heading. -->
+  <section class="section" id="releases">
+    <div class="wrap">
+      <header class="sec-head">
+        <p class="eyebrow">Releases</p>
+        <h2>Versions and changelog</h2>
+      </header>
+
+      <div class="releases">
+        <div class="card latest">
+          <p class="eyebrow" style="margin:0"><svg class="i" aria-hidden="true"><use href="#i-tag"/></svg>Latest release</p>
+          <p class="ver" data-latest>v1.2.0</p>
+          <p class="date" data-latest-date>September 13, 2026</p>
+          <p class="note" style="margin:0">Need an older version? Set it for the install script: <code>curl … | SAPIEN_VERSION=v1.1.0 sh</code></p>
+          <div class="links">
+            <a class="btn" href="https://github.com/gs-sinha/sapien/releases" data-latest-link>Release notes</a>
+            <a class="btn" href="https://github.com/gs-sinha/sapien/blob/main/CHANGELOG.md">Full changelog</a>
+          </div>
+        </div>
+
+        <ol class="timeline">
+          <li>
+            <h3>Next <span class="next">on main</span></h3>
+            <ul>
+              <li>Team workspaces: bind a service to your own checkout with <code>sapien service bind .</code>, while everyone else reads the team's git source.</li>
+              <li>Tiers for flows, memories and examples (local → team → service), with commit and push from the CLI and the UI.</li>
+              <li>The workspace repo is fetched in the background; the status bar offers Pull when teammates have pushed.</li>
+              <li><code>report_friction</code>: agents can file what got in their way, and you decide what gets sent.</li>
+            </ul>
+          </li>
+          <li>
+            <h3>v1.2.0 <span class="when">September 13, 2026</span></h3>
+            <ul>
+              <li>A ready-to-send request example on every operation, from <code>get_api</code> and the Try it form.</li>
+              <li>Documentation and example coverage, measured and linted on every add and sync.</li>
+              <li>Onboarding interviews the service's owner for what the code can't say.</li>
+              <li><code>sapien ui --install-app</code>, a per-tab workspace picker, and a fixed local port (7717).</li>
+            </ul>
+          </li>
+          <li>
+            <h3>v1.1.0 <span class="when">September 6, 2026</span></h3>
+            <ul>
+              <li>Multiple workspaces served by one daemon, switchable from the CLI, the UI and MCP.</li>
+            </ul>
+          </li>
+          <li>
+            <h3>v1.0.1 <span class="when">September 6, 2026</span></h3>
+            <ul>
+              <li>The flow page reorganised around running, with live step progress in place.</li>
+              <li>First release built by the release pipeline; module path is now <code>github.com/gs-sinha/sapien</code>.</li>
+            </ul>
+          </li>
+          <li>
+            <h3>v1.0.0 <span class="when">September 6, 2026</span></h3>
+            <ul>
+              <li>First public release: catalog and search, flows with assertions, memories, examples, the MCP server, git sources, the live inspector UI and the agent pane.</li>
+            </ul>
+          </li>
+        </ol>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="footer">
+  <div class="wrap foot">
+    <div>
+      <a class="brand" href="#top"><span class="mark" aria-hidden="true">🗿</span>sapien</a>
+      <p>Local-first, git-first API discovery for agents and humans. Apache-2.0.</p>
+    </div>
+    <nav aria-label="More">
+      <a href="https://github.com/gs-sinha/sapien">GitHub</a>
+      <a href="https://github.com/gs-sinha/sapien/blob/main/docs/getting-started.md">Getting started</a>
+      <a href="https://github.com/gs-sinha/sapien/blob/main/docs/onboarding.md">Onboarding guide</a>
+      <a href="https://github.com/gs-sinha/sapien/blob/main/docs/flows.md">Flow reference</a>
+      <a href="https://github.com/gs-sinha/sapien/blob/main/docs/mcp.md">MCP tools</a>
+      <a href="https://github.com/gs-sinha/sapien/blob/main/docs/faq.md">FAQ</a>
+      <a href="https://github.com/gs-sinha/sapien/blob/main/CHANGELOG.md">Changelog</a>
+      <a href="https://github.com/gs-sinha/sapien/issues">Issues</a>
+    </nav>
+  </div>
+</footer>
+
+<script src="main.js"></script>
+</body>
+</html>

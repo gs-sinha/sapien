@@ -1,5 +1,7 @@
 # Sapien
 
+Website: https://gs-sinha.github.io/sapien/
+
 Sapien is a local-first, agent-native API workspace engine: point it at a
 set of service repos (each with an OpenAPI contract, a small
 `service.yaml`, flows, and memories) and it builds a normalized,
