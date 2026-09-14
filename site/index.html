@@ -293,7 +293,7 @@ released  allocation-service.getAllocation   <span class="ok">200</span>   2/2
     <div class="wrap">
       <header class="sec-head">
         <p class="eyebrow">Install</p>
-        <h2>From zero to an agent that knows your APIs in four commands.</h2>
+        <h2>From zero to an agent that knows your APIs in a few commands.</h2>
         <p class="sub">One static binary for macOS and Linux, on amd64 and arm64. The UI and the MCP server ship inside it.</p>
       </header>
 
@@ -346,6 +346,37 @@ released  allocation-service.getAllocation   <span class="ok">200</span>   2/2
             <p><code>--allow-mutations</code> lets agents make POST, PUT, PATCH and DELETE calls, which running a flow that creates data needs. It applies to non-production environments on this machine only; production stays blocked. Leave it off and agents can only read.</p>
             <pre class="code"><span class="p">$ </span>sapien mcp config --client claude-code --write --allow-mutations
 <span class="p">$ </span>claude mcp list                     <span class="c"># sapien: ✓ connected</span></pre>
+          </div>
+        </li>
+
+        <li>
+          <div class="body">
+            <h3>Turn on semantic search <span class="badge">Recommended</span></h3>
+            <p>Search works without a model. Add a small embedding model and it also matches paraphrases, so an agent or a teammate who describes an operation in different words from its docs still finds it. The model runs locally in <a href="https://ollama.com">Ollama</a>, so nothing leaves your machine. Skip this on a machine short on memory.</p>
+            <div data-tabs>
+              <div class="tablist" role="tablist" aria-label="Install Ollama on">
+                <button role="tab" id="t-ollama-mac" aria-controls="p-ollama-mac" aria-selected="true">macOS</button>
+                <button role="tab" id="t-ollama-linux" aria-controls="p-ollama-linux" aria-selected="false">Linux</button>
+              </div>
+              <div class="tabpanel" role="tabpanel" id="p-ollama-mac" aria-labelledby="t-ollama-mac">
+                <pre class="code"><span class="p">$ </span>brew install ollama &amp;&amp; brew services start ollama
+<span class="p">$ </span>ollama pull nomic-embed-text</pre>
+              </div>
+              <div class="tabpanel" role="tabpanel" id="p-ollama-linux" aria-labelledby="t-ollama-linux">
+                <pre class="code"><span class="p">$ </span>curl -fsSL https://ollama.com/install.sh | sh
+<span class="p">$ </span>ollama pull nomic-embed-text</pre>
+              </div>
+            </div>
+            <p>Then turn it on for every workspace on this machine. The first start builds the vectors in the background, and search works as before while it does.</p>
+            <pre class="code"><span class="p">$ </span>cat &gt;&gt; ~/.sapien/config.yaml &lt;&lt;'EOF'
+semantic:
+  enabled: true
+  kind: ollama
+  base_url: http://127.0.0.1:11434
+  model: nomic-embed-text
+  batch_size: 8
+EOF</pre>
+            <p class="note">Turning it on later? Run <code>sapien daemon stop</code> in the workspace so the next start picks it up. A workspace can opt out with <code>semantic: {enabled: false}</code> in its own <code>.sapien/config.yaml</code>.</p>
           </div>
         </li>
 

@@ -122,6 +122,11 @@ call, and onboard your services.
    request so flows, other agents, and the UI reuse it. See
    [`docs/examples.md`](docs/examples.md).
 
+Recommended once it works: turn on [semantic search](#optional-semantic-search)
+with a local Ollama model, so search also matches operations described in
+other words. It takes an `ollama pull` and a config block, and nothing leaves
+the machine.
+
 Keep one workspace per system: every service your team calls together,
 from however many repos. Search, `get_context`, memory-driven expansion,
 and flows all span a workspace, and each MCP entry binds one workspace,
