@@ -101,13 +101,20 @@ type terminalDir struct {
 }
 
 // terminalDirs enumerates the directories the terminal endpoint accepts
-// (PLAN §34c Phase 7b item 2): the workspace directory, every registered
-// service's PackageDir and (for a local source) its resolved repo
-// directory, and the user's home directory. Entries are de-duplicated by
-// resolved path and skipped if the path doesn't actually exist as a
-// directory -- both so the picker never offers a dead end and so
-// validateDir (which checks a request's dir against exactly this list)
-// can't be tricked by a path that merely looks equal.
+// (PLAN §34c Phase 7b item 2): only places an agent can write. The
+// workspace directory; each service that this machine reads from a local
+// checkout, at that checkout (a bound service counts, since binding makes
+// it local); and the user's home directory. A service still read from its
+// team git source is deliberately absent: its package directory is a
+// managed clone under ~/.sapien/repos that the daemon resets on every
+// sync, so an agent started there would be working in a cache (PLAN §7b).
+// The api/ directory inside a checkout is not offered either -- an agent
+// working on a service wants the repository, and the picker stays short.
+// Entries are de-duplicated by resolved path and skipped if the path
+// doesn't actually exist as a directory -- both so the picker never
+// offers a dead end and so validateDir (which checks a request's dir
+// against exactly this list) can't be tricked by a path that merely looks
+// equal.
 func (s *Server) terminalDirs(ctx context.Context) []terminalDir {
 	var dirs []terminalDir
 	seen := map[string]bool{}
@@ -130,14 +137,17 @@ func (s *Server) terminalDirs(ctx context.Context) []terminalDir {
 
 	if svcs, err := engineFrom(ctx).Services().List(ctx); err == nil {
 		for _, svc := range svcs {
-			add(svc.Name, svc.PackageDir)
-			if svc.Source.Kind == domain.SourceLocal && svc.Source.Path != "" {
-				repoDir := svc.Source.Path
-				if !filepath.IsAbs(repoDir) && ws != nil {
-					repoDir = filepath.Join(ws.Dir, repoDir)
-				}
-				add(svc.Name+" (repo)", repoDir)
+			if svc.Source.Kind != domain.SourceLocal || svc.Source.Path == "" {
+				continue
 			}
+			repoDir := svc.Source.Path
+			if b := svc.Binding; b != nil && b.Local != nil && b.Local.Path != "" {
+				repoDir = b.Local.Path
+			}
+			if !filepath.IsAbs(repoDir) && ws != nil {
+				repoDir = filepath.Join(ws.Dir, repoDir)
+			}
+			add(svc.Name, repoDir)
 		}
 	}
 

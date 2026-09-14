@@ -738,3 +738,12 @@ the tree made `workspace sync` report "not pulled: uncommitted changes (1
 files)" and `workspace pull` refuse with E_CONFLICT and the commit-or-
 stash hint. Go suite green with `-race` (38 packages, vet clean), 174 UI
 tests, bundle 68.5 KB initial / 220.8 KB total gzipped.
+
+A small follow-on from the user noticing the Agent tab's directory
+list: it offered every service's package directory, which for a
+team-source service is the managed clone under `~/.sapien/repos` -- an
+agent started there would have been writing into a cache the daemon
+resets. `terminalDirs` now lists only writable places: the workspace,
+each locally-read service at its checkout (a bound service at the path
+it is bound to), and home; the `api/` entries went too, since the
+repository is where an agent works.

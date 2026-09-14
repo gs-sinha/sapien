@@ -56,6 +56,13 @@ and phase numbers refer to PLAN.md §34's roadmap.
   repository: fetch, then pull when clean and behind, otherwise say why
   not. `sapien workspace status` and `GET /v1/workspace/repo` report it.
   Never a push.
+- **The Agent tab offers only writable directories.** The workspace, each
+  service this machine reads from a local checkout (a bound service at its
+  checkout), and home. A service still read from its team git source no
+  longer appears: its package directory is a managed clone the daemon
+  resets, so an agent started there would have been working in a cache.
+  The `api/` subdirectory entries are gone too; the repository is the
+  place to work.
 - **Flow tiers.** A new flow lands in `local/flows` (this machine, ignored
   by git) by default; `sapien flow promote`, the `rescope_flow` MCP tool and
   the flow page move it to the team's `flows/` and, when the owning service

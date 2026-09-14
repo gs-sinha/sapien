@@ -97,6 +97,16 @@ func TestTerminalTargets(t *testing.T) {
 	pkgDir := t.TempDir()
 	_, err := fake.Services().Add(context.Background(), "svc1", domain.Source{Kind: domain.SourceLocal, Path: pkgDir})
 	require.NoError(t, err)
+	// A service read from its team git source has no writable place on this
+	// machine: its clone is a cache the daemon resets. Binding it to a
+	// checkout is what makes it appear, at the checkout.
+	_, err = fake.Services().Add(context.Background(), "team-svc", domain.Source{Kind: domain.SourceGit, URL: "git@github.com:org/team-svc.git", Ref: "main"})
+	require.NoError(t, err)
+	_, err = fake.Services().Add(context.Background(), "bound-svc", domain.Source{Kind: domain.SourceGit, URL: "git@github.com:org/bound-svc.git", Ref: "main"})
+	require.NoError(t, err)
+	boundDir := t.TempDir()
+	_, err = fake.Services().Bind(context.Background(), "bound-svc", boundDir)
+	require.NoError(t, err)
 
 	srv := New(Options{
 		Engine:  fake,
@@ -124,7 +134,18 @@ func TestTerminalTargets(t *testing.T) {
 		paths = append(paths, d.Path)
 	}
 	assert.Contains(t, paths, ws.Dir, "workspace dir should be offered")
-	assert.Contains(t, paths, pkgDir, "registered service's package dir should be offered")
+	assert.Contains(t, paths, pkgDir, "a local service's checkout should be offered")
+	assert.Contains(t, paths, boundDir, "a bound service's checkout should be offered")
+	labels := map[string]string{}
+	for _, d := range body.Dirs {
+		labels[d.Label] = d.Path
+	}
+	assert.Equal(t, pkgDir, labels["svc1"], "the checkout is labelled by service name, no (repo) suffix")
+	assert.Equal(t, boundDir, labels["bound-svc"])
+	assert.NotContains(t, labels, "team-svc", "a service read from its team git source has no writable directory here")
+	for _, d := range body.Dirs {
+		assert.NotContains(t, d.Label, "(repo)")
+	}
 }
 
 // wsFrame is one message read off a terminal WebSocket by readTerminalFrames.
