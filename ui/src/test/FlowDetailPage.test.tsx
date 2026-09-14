@@ -4,7 +4,7 @@ import { MemoryRouter, Route, Routes, useParams } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import FlowDetailPage from '../pages/FlowDetailPage';
 import { useEvents } from '../state/events';
-import type { Environment, Operation, Run } from '../api/types';
+import type { Environment, Operation, Run, Service } from '../api/types';
 
 const stageEnv: Environment = { version: 1, name: 'stage', production: false };
 const prodEnv: Environment = { version: 1, name: 'prod', production: true };
@@ -59,6 +59,25 @@ const flowsRun = vi.fn(
       releaseRun = resolve;
     }),
 );
+const flowsRescope = vi.fn(async (id: string, ownerKind: string, ownerId?: string) => ({
+  version: 1,
+  id,
+  steps: [],
+  owner_kind: ownerKind,
+  owner_id: ownerId,
+}));
+// No service is bound to a checkout unless a test says so, so the default
+// page has exactly one <select> (the environment picker).
+const servicesList = vi.fn(async (): Promise<Service[]> => []);
+const qcomBound: Service = {
+  id: 'qcom',
+  name: 'qcom',
+  status: 'ok',
+  source: { type: 'git', url: 'git@github.com:acme/qcom.git' },
+  package_dir: '/home/me/code/qcom/api',
+  operation_count: 1,
+  binding: { mode: 'local', team: { type: 'git', url: 'git@github.com:acme/qcom.git' }, local: { path: '/home/me/code/qcom' }, writable: true },
+};
 const environmentsList = vi.fn(async (): Promise<Environment[]> => [stageEnv]);
 const environmentsGetDefault = vi.fn(async () => ({ name: 'stage' }));
 const runsRunSource = vi.fn(
@@ -76,7 +95,11 @@ vi.mock('../api/client', () => ({
     get: (id: string) => flowsGet(id),
     update: (id: string, req: { yaml: string }) => flowsUpdate(id, req),
     run: (id: string, opts: unknown) => flowsRun(id, opts),
+    rescope: (id: string, ownerKind: string, ownerId?: string) => flowsRescope(id, ownerKind, ownerId),
     validate: vi.fn(async () => ({ valid: true, diagnostics: [] })),
+  },
+  services: {
+    list: () => servicesList(),
   },
   operations: {
     get: vi.fn(async (id: string): Promise<Operation> => {
@@ -123,9 +146,28 @@ afterEach(() => {
   environmentsGetDefault.mockClear();
   environmentsGetDefault.mockImplementation(async () => ({ name: 'stage' }));
   flowsUpdate.mockClear();
+  flowsRescope.mockClear();
+  servicesList.mockClear();
+  servicesList.mockImplementation(async () => []);
   runsRunSource.mockClear();
   flowsRun.mockClear();
 });
+
+function flowAtTier(ownerKind: string, ownerId?: string) {
+  return {
+    version: 1,
+    id: 'qcom-order',
+    name: 'QCOM order',
+    description: 'Places and allocates an order',
+    tags: ['qcom'],
+    path: ownerKind === 'local' ? 'local/flows/qcom-order.flow.yaml' : 'flows/qcom-order.flow.yaml',
+    owner_kind: ownerKind,
+    owner_id: ownerId,
+    inputs: {},
+    steps: [{ id: 'create', call: 'qcom.createOrder' }],
+    source: sampleSource,
+  };
+}
 
 // Pushes an already-summarized event through the store the same way an
 // incoming WebSocket frame would, so the page's subscriptions fire.
@@ -319,6 +361,60 @@ describe('FlowDetailPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
     expect(screen.queryByText('Open run details →')).not.toBeInTheDocument();
+  });
+
+  it('a local flow: shows its tier and promotes to the team with one click', async () => {
+    const user = userEvent.setup();
+    flowsGet.mockImplementationOnce(async () => flowAtTier('local'));
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText('QCOM order')).toBeInTheDocument());
+    // The badge sits with the title; the KeyValue's own "owner" row also says local.
+    expect(screen.getByRole('heading', { name: 'QCOM order' }).parentElement).toHaveTextContent('local');
+    expect(screen.queryByRole('button', { name: 'Move to local' })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Promote to team' }));
+    await waitFor(() => expect(flowsRescope).toHaveBeenCalledWith('qcom-order', 'workspace', undefined));
+    // The page reloads to pick up the new tier.
+    await waitFor(() => expect(flowsGet.mock.calls.length).toBeGreaterThanOrEqual(2));
+  });
+
+  it('a team flow: offers local, and the service tier only for a called service bound to a checkout', async () => {
+    const user = userEvent.setup();
+    servicesList.mockImplementation(async () => [qcomBound, { ...qcomBound, id: 'billing', name: 'billing' }]);
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText('QCOM order')).toBeInTheDocument());
+    expect(screen.getByRole('heading', { name: 'QCOM order' }).parentElement).toHaveTextContent('team');
+    expect(screen.getByRole('button', { name: 'Move to local' })).toBeInTheDocument();
+
+    // Only qcom is called by the flow's steps; billing is bound but irrelevant.
+    const select = await screen.findByRole('combobox', { name: 'Move to service' });
+    expect(within(select).getByRole('option', { name: 'qcom' })).toBeInTheDocument();
+    expect(within(select).queryByRole('option', { name: 'billing' })).not.toBeInTheDocument();
+
+    await user.selectOptions(select, 'qcom');
+    await waitFor(() => expect(flowsRescope).toHaveBeenCalledWith('qcom-order', 'service', 'qcom'));
+  });
+
+  it('a team flow whose services read from the team source cannot move to a service', async () => {
+    renderPage();
+    await waitFor(() => expect(screen.getByText('QCOM order')).toBeInTheDocument());
+    await waitFor(() => expect(servicesList).toHaveBeenCalled());
+    expect(screen.queryByRole('combobox', { name: 'Move to service' })).not.toBeInTheDocument();
+    expect(screen.getByText(/none of qcom is read from a local checkout here/)).toBeInTheDocument();
+  });
+
+  it('a service flow: moves back to the team', async () => {
+    const user = userEvent.setup();
+    flowsGet.mockImplementationOnce(async () => flowAtTier('service', 'qcom'));
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText('QCOM order')).toBeInTheDocument());
+    expect(screen.getByRole('heading', { name: 'QCOM order' }).parentElement).toHaveTextContent('service:qcom');
+
+    await user.click(screen.getByRole('button', { name: 'Move to team' }));
+    await waitFor(() => expect(flowsRescope).toHaveBeenCalledWith('qcom-order', 'workspace', undefined));
   });
 
   it('warns once, then PUTs the edited YAML and clears the edits on "Save to flow"', async () => {

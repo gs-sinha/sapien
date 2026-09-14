@@ -70,6 +70,10 @@ type server struct {
 	cfg       *configSource
 	reference func(topic string) (string, error)
 	logger    *slog.Logger
+	// version is the Sapien build serving this session, recorded on
+	// friction reports so a human can tell whether the friction is still
+	// current.
+	version string
 }
 
 // engine returns the currently bound engine.
@@ -216,6 +220,7 @@ func NewServer(opts Options) *sdkmcp.Server {
 	if version == "" {
 		version = "dev"
 	}
+	srv.version = version
 
 	s := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "sapien", Version: version}, &sdkmcp.ServerOptions{
 		Instructions: instructions,

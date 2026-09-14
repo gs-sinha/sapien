@@ -128,6 +128,7 @@ vi.mock('../api/client', () => ({
     list: vi.fn(async () => [nullyFlowSummary]),
     get: vi.fn(async () => nullyFlow),
     validate: vi.fn(async () => ({ valid: true, diagnostics: null })),
+    rescope: vi.fn(async () => nullyFlow),
   },
   runs: {
     list: vi.fn(async () => [nullyRun]),
@@ -137,6 +138,13 @@ vi.mock('../api/client', () => ({
     list: vi.fn(async () => [nullyService]),
     get: vi.fn(async () => nullyService),
     sync: vi.fn(async () => [nullyService]),
+    // BindingInfo.candidates is omitempty on the Go side; a literal null here
+    // is the shape the panel's own `?? []` has to survive.
+    binding: vi.fn(async () => ({
+      service: 'orders',
+      binding: { mode: 'local', local: { path: '/repo/orders' }, writable: true },
+      candidates: null,
+    })),
   },
   operations: {
     search: vi.fn(async () => [nullyOperation]),

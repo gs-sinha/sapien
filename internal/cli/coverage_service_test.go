@@ -2,6 +2,8 @@ package cli_test
 
 import (
 	"encoding/json"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -197,4 +199,101 @@ func TestReindex_JSON_Fake(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(stdout), &got))
 	assert.Contains(t, got, "services")
 	assert.Contains(t, got, "stats")
+}
+
+// --- service bind / unbind and the READS column ---
+
+func TestServiceBind_JSON(t *testing.T) {
+	dir, fake := setupFakeEngine(t)
+	checkout := t.TempDir()
+	stdout, stderr, code := run(t, "--workspace", dir, "service", "bind", "order-service", checkout, "--json")
+	require.Equal(t, 0, code, "stderr: %s", stderr)
+
+	var got map[string]any
+	require.NoError(t, json.Unmarshal([]byte(stdout), &got))
+	binding := got["binding"].(map[string]any)
+	assert.Equal(t, "local", binding["mode"])
+	assert.Equal(t, true, binding["writable"])
+
+	call := lastCall(fake, "Services.Bind")
+	args := call.Args.(map[string]any)
+	assert.Equal(t, "order-service", args["name"])
+	assert.Equal(t, checkout, args["path"])
+}
+
+func TestServiceBind_RelativePathIsResolvedAgainstCwd(t *testing.T) {
+	dir, fake := setupFakeEngine(t)
+	_, stderr, code := run(t, "--workspace", dir, "service", "bind", "order-service", "./checkout")
+	require.Equal(t, 0, code, "stderr: %s", stderr)
+
+	path := lastCall(fake, "Services.Bind").Args.(map[string]any)["path"].(string)
+	assert.True(t, filepath.IsAbs(path), "expected an absolute path, got %q", path)
+	assert.Equal(t, "checkout", filepath.Base(path))
+}
+
+func TestServiceBind_Human_ThenUnbind(t *testing.T) {
+	dir, _ := setupFakeEngine(t)
+	_, _, code := run(t, "--workspace", dir, "service", "add", "git@github.com:acme/widgets.git", "--name", "widgets", "--ref", "main")
+	require.Equal(t, 0, code)
+
+	checkout := t.TempDir()
+	stdout, stderr, code := run(t, "--workspace", dir, "service", "bind", "widgets", checkout)
+	require.Equal(t, 0, code, "stderr: %s", stderr)
+	assert.Contains(t, stdout, "widgets: reads local at "+checkout)
+	assert.Contains(t, stdout, "git@github.com:acme/widgets.git")
+	assert.Contains(t, stdout, "writable")
+
+	stdout, stderr, code = run(t, "--workspace", dir, "service", "unbind", "widgets")
+	require.Equal(t, 0, code, "stderr: %s", stderr)
+	assert.Contains(t, stdout, "widgets: reads team main from git@github.com:acme/widgets.git")
+	assert.Contains(t, stdout, "read-only")
+}
+
+func TestServiceBind_UnknownService(t *testing.T) {
+	dir, _ := setupFakeEngine(t)
+	_, stderr, code := run(t, "--workspace", dir, "service", "bind", "nope", t.TempDir(), "--json")
+	assert.Equal(t, 2, code)
+	var got map[string]any
+	require.NoError(t, json.Unmarshal([]byte(stderr), &got))
+	assert.Equal(t, "E_SERVICE_NOT_FOUND", got["code"])
+}
+
+func TestServiceList_ReadsColumn(t *testing.T) {
+	dir, _ := setupFakeEngine(t)
+	_, _, code := run(t, "--workspace", dir, "service", "add", "git@github.com:acme/widgets.git", "--name", "widgets", "--ref", "main")
+	require.Equal(t, 0, code)
+	_, _, code = run(t, "--workspace", dir, "service", "add", "git@github.com:acme/gadgets.git", "--name", "gadgets")
+	require.Equal(t, 0, code)
+	_, _, code = run(t, "--workspace", dir, "service", "bind", "gadgets", t.TempDir())
+	require.Equal(t, 0, code)
+
+	stdout, stderr, code := run(t, "--workspace", dir, "service", "list")
+	require.Equal(t, 0, code, "stderr: %s", stderr)
+
+	lines := strings.Split(strings.TrimSpace(stdout), "\n")
+	require.NotEmpty(t, lines)
+	header := strings.Fields(lines[0])
+	require.GreaterOrEqual(t, len(header), 2)
+	assert.Equal(t, "NAME", header[0])
+	assert.Equal(t, "READS", header[1], "READS sits right after NAME")
+
+	reads := map[string]string{}
+	for _, line := range lines[1:] {
+		f := strings.Fields(line)
+		if len(f) < 3 {
+			continue
+		}
+		cell := f[1]
+		if f[1] == "team" || f[1] == "local" {
+			// "team main" / "local feature" span two fields; a bare "local"
+			// is followed by the STATUS column.
+			if f[2] != "ok" && f[2] != "error" && f[2] != "pending" {
+				cell += " " + f[2]
+			}
+		}
+		reads[f[0]] = cell
+	}
+	assert.Equal(t, "local", reads["order-service"], "a committed local source reads local")
+	assert.Equal(t, "team main", reads["widgets"])
+	assert.Equal(t, "local", reads["gadgets"], "bound to a checkout git cannot describe")
 }

@@ -36,6 +36,68 @@ func TestTool_GetService(t *testing.T) {
 	assert.Contains(t, out.Docs, "docs/allocation.md")
 }
 
+// TestTool_GetService_ReadsLine: get_service and list_services say where a
+// service is read from on this machine, because that is what decides
+// whether service-scoped memories, examples and flows can be written for it.
+func TestTool_GetService_ReadsLine(t *testing.T) {
+	t.Run("BoundLocalCheckout", func(t *testing.T) {
+		cs, eng := newTestSessionAndEngine(t, Config{Default: DefaultPermissions()}, "claude-code")
+		eng.st.mu.Lock()
+		eng.st.services[0].Binding = &domain.ServiceBinding{
+			Mode:     domain.BindingLocal,
+			Team:     &domain.Source{Kind: domain.SourceGit, URL: "git@github.com:org/rider.git", Ref: "main"},
+			Local:    &domain.LocalCheckout{Path: "~/code/rider", Branch: "feat/x", Commit: "abc123", Dirty: 3},
+			Writable: true,
+		}
+		eng.st.mu.Unlock()
+
+		res := callTool(t, cs, "get_service", map[string]any{"name": "rider-service"})
+		require.False(t, res.IsError, firstText(res))
+		assert.Contains(t, firstText(res), "reads: local ~/code/rider (branch feat/x, 3 uncommitted)\n")
+		out := decodeStructured[GetServiceOutput](t, res.StructuredContent)
+		assert.Equal(t, domain.BindingLocal, out.Binding.Mode)
+		assert.True(t, out.Binding.Writable)
+		require.NotNil(t, out.Binding.Local)
+		assert.Equal(t, "~/code/rider", out.Binding.Local.Path)
+
+		list := callTool(t, cs, "list_services", map[string]any{})
+		assert.Contains(t, firstText(list), "  reads: local ~/code/rider (branch feat/x, 3 uncommitted)\n")
+		listOut := decodeStructured[ListServicesOutput](t, list.StructuredContent)
+		require.Len(t, listOut.Services, 1)
+		assert.Equal(t, domain.BindingLocal, listOut.Services[0].Binding.Mode)
+	})
+
+	t.Run("TeamGitSourceDerivedWhenBindingMissing", func(t *testing.T) {
+		cs, eng := newTestSessionAndEngine(t, Config{Default: DefaultPermissions()}, "claude-code")
+		eng.st.mu.Lock()
+		eng.st.services[0].Binding = nil
+		eng.st.services[0].Source = domain.Source{Kind: domain.SourceGit, URL: "git@github.com:org/rider-service.git", Ref: "stage"}
+		eng.st.mu.Unlock()
+
+		res := callTool(t, cs, "get_service", map[string]any{"name": "rider-service"})
+		require.False(t, res.IsError, firstText(res))
+		assert.Contains(t, firstText(res), "reads: team git@github.com:org/rider-service.git @ stage (read-only; bind a checkout to contribute)\n")
+		out := decodeStructured[GetServiceOutput](t, res.StructuredContent)
+		assert.Equal(t, domain.BindingTeam, out.Binding.Mode)
+		assert.False(t, out.Binding.Writable)
+		require.NotNil(t, out.Binding.Team)
+		assert.Equal(t, "git@github.com:org/rider-service.git", out.Binding.Team.URL)
+	})
+
+	t.Run("PlainLocalSourceDerivedWhenBindingMissing", func(t *testing.T) {
+		cs, eng := newTestSessionAndEngine(t, Config{Default: DefaultPermissions()}, "claude-code")
+		eng.st.mu.Lock()
+		eng.st.services[0].Binding = nil
+		eng.st.services[0].Source = domain.Source{Kind: domain.SourceLocal, Path: "/srv/rider"}
+		eng.st.mu.Unlock()
+
+		res := callTool(t, cs, "get_service", map[string]any{"name": "rider-service"})
+		require.False(t, res.IsError, firstText(res))
+		assert.Contains(t, firstText(res), "reads: local /srv/rider\n")
+		assert.True(t, decodeStructured[GetServiceOutput](t, res.StructuredContent).Binding.Writable)
+	})
+}
+
 // TestTool_GetService_WarningsAndAcceptedWarnings checks that get_service
 // surfaces both halves of a service's warning split (domain.Service.Warnings
 // vs AcceptedWarnings): unaccepted warnings as-is, and accepted ones with

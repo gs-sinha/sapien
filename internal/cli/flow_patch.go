@@ -17,8 +17,12 @@ import (
 // flowSaveSummary is what the authoring commands print after a write: enough
 // to confirm what landed where, never the document (PLAN §34d).
 type flowSaveSummary struct {
-	ID            string   `json:"id"`
-	Path          string   `json:"path"`
+	ID   string `json:"id"`
+	Path string `json:"path"`
+	// Tier is the owner kind the file lives in (local, workspace, service);
+	// Service names the owner for the service tier.
+	Tier          string   `json:"tier"`
+	Service       string   `json:"service,omitempty"`
 	Steps         int      `json:"steps"`
 	SetupSteps    int      `json:"setup_steps"`
 	TeardownSteps int      `json:"teardown_steps"`
@@ -36,7 +40,11 @@ func summarizeFlow(f *domain.Flow) flowSaveSummary {
 			}
 		}
 	}
-	return flowSaveSummary{ID: f.ID, Path: f.Path, Steps: len(f.Steps), SetupSteps: len(f.Setup), TeardownSteps: len(f.Teardown), Operations: ops}
+	sum := flowSaveSummary{ID: f.ID, Path: f.Path, Tier: f.OwnerKind, Steps: len(f.Steps), SetupSteps: len(f.Setup), TeardownSteps: len(f.Teardown), Operations: ops}
+	if f.OwnerKind == domain.FlowOwnerService {
+		sum.Service = f.OwnerID
+	}
+	return sum
 }
 
 func printFlowSaved(app *App, verb string, f *domain.Flow) error {
@@ -52,7 +60,7 @@ func printFlowSaved(app *App, verb string, f *domain.Flow) error {
 	if sum.Path != "" {
 		where = " at " + sum.Path
 	}
-	app.Printer.Line("%s flow %s%s, %d steps%s", verb, sum.ID, where, sum.Steps, extra)
+	app.Printer.Line("%s flow %s%s [%s], %d steps%s", verb, sum.ID, where, flowTier(f.OwnerKind, f.OwnerID), sum.Steps, extra)
 	return nil
 }
 

@@ -91,6 +91,27 @@ func TestLocator_DirFor(t *testing.T) {
 		assert.Equal(t, filepath.Join("/ws", "memories"), dir)
 	})
 
+	// A local-tier flow's memories stay inside the local tier, so nothing
+	// about the flow reaches the team's memories/ until it is promoted.
+	t.Run("flow scope owned by the local tier lands under local/memories", func(t *testing.T) {
+		locWithOwner := loc
+		locWithOwner.LocalDir = filepath.Join("/ws", "local")
+		locWithOwner.FlowOwner = func(flowID string) (string, string) { return domain.FlowOwnerLocal, "" }
+		dir, err := locWithOwner.DirFor(domain.Memory{Scope: domain.ScopeFlow, Subject: domain.Subject{Flow: "scratch"}})
+		require.NoError(t, err)
+		assert.Equal(t, filepath.Join("/ws", "local", "memories"), dir)
+	})
+
+	// A Locator built without a local tier (LocalDir empty) still has
+	// somewhere to put such a memory: the workspace's memories/.
+	t.Run("flow scope owned by the local tier without LocalDir falls back to workspace", func(t *testing.T) {
+		locWithOwner := loc
+		locWithOwner.FlowOwner = func(flowID string) (string, string) { return domain.FlowOwnerLocal, "" }
+		dir, err := locWithOwner.DirFor(domain.Memory{Scope: domain.ScopeFlow, Subject: domain.Subject{Flow: "scratch"}})
+		require.NoError(t, err)
+		assert.Equal(t, filepath.Join("/ws", "memories"), dir)
+	})
+
 	t.Run("unknown scope errors", func(t *testing.T) {
 		_, err := loc.DirFor(domain.Memory{Scope: domain.MemoryScope("bogus")})
 		require.Error(t, err)
@@ -126,9 +147,29 @@ func TestLocator_Files(t *testing.T) {
 	assert.True(t, sort.StringsAreSorted(files), "Files() must return a sorted list, got %v", files)
 }
 
+// Reindex reads Files(), so a memory written under local/memories is only
+// ever indexed if Files() scans the local tier too.
+func TestLocator_Files_IncludesLocalTier(t *testing.T) {
+	ws := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(ws, "memories"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(ws, "memories", "team.md"), []byte("t"), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Join(ws, "local", "memories"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(ws, "local", "memories", "mine.md"), []byte("m"), 0o644))
+
+	loc := memory.Locator{WorkspaceDir: ws, LocalDir: filepath.Join(ws, "local")}
+	files, err := loc.Files()
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{
+		filepath.Join(ws, "memories", "team.md"),
+		filepath.Join(ws, "local", "memories", "mine.md"),
+	}, files)
+	assert.True(t, sort.StringsAreSorted(files), "Files() must return a sorted list, got %v", files)
+}
+
 func TestLocator_Files_MissingDirsAreSkipped(t *testing.T) {
 	loc := memory.Locator{
 		WorkspaceDir: filepath.Join(t.TempDir(), "does-not-exist"),
+		LocalDir:     filepath.Join(t.TempDir(), "no-local-tier"),
 		ServiceDirs:  map[string]string{"svc": filepath.Join(t.TempDir(), "also-missing")},
 	}
 	files, err := loc.Files()

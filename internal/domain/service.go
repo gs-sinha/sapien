@@ -92,9 +92,9 @@ type Service struct {
 	Commit           string                `json:"commit,omitempty"` // git sources: resolved commit
 	// Binding says which source this machine reads the service from and
 	// whether service-scoped knowledge can be written into it (PLAN §7b).
-	Binding          *ServiceBinding       `json:"binding,omitempty"`
-	OperationCount   int                   `json:"operation_count"`
-	WarningRules     []AcceptedWarning     `json:"-" yaml:"-"`
+	Binding        *ServiceBinding   `json:"binding,omitempty"`
+	OperationCount int               `json:"operation_count"`
+	WarningRules   []AcceptedWarning `json:"-" yaml:"-"`
 }
 
 // LintWarning is a non-fatal problem found while ingesting a contract.

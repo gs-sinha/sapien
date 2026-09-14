@@ -18,7 +18,7 @@ import (
 // For a CLI that parses one spec and exits, that is free. For the daemon it
 // is a leak with no ceiling: the watcher re-ingests a service on every
 // change to its package, and every one of those parses is retained forever.
-// Measured on the 1.2 MB contract in ~/.sapien/repos/…-sarathy, parsing the
+// Measured on a 1.2 MB contract in a managed clone, parsing the
 // same document repeatedly and dropping every reference to it:
 //
 //	without ClearAllCaches   18.6, 35.6, 52.5, 69.4 … MB of live heap

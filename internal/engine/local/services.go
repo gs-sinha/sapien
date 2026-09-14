@@ -2,11 +2,16 @@ package local
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"strings"
 
+	"github.com/gs-sinha/sapien/internal/config"
 	"github.com/gs-sinha/sapien/internal/domain"
 	"github.com/gs-sinha/sapien/internal/engine"
 	"github.com/gs-sinha/sapien/internal/errs"
 	"github.com/gs-sinha/sapien/internal/events"
+	"github.com/gs-sinha/sapien/internal/gitsrc"
 	"github.com/gs-sinha/sapien/internal/registry"
 	"github.com/gs-sinha/sapien/internal/workspace"
 )
@@ -171,16 +176,240 @@ func (l *Local) emit(typ domain.EventType, payload any) {
 	events.Emit(l.bus, typ, payload)
 }
 
-// Bind, Unbind and Binding implement per-machine source overrides (PLAN
-// §7b). Phase 0 stubs: replaced by the binding work in this same change.
+// Bind makes this machine read name from the local checkout at path
+// (PLAN §7b). The override goes to sapien.workspace.local.yaml and never to
+// the committed file, so it cannot reach a teammate through a commit; the
+// root .gitignore is made to say so for workspaces older than the file.
+// The override is kept even when the resync fails, for the reason Add
+// keeps a failed registration: the developer fixes the checkout and syncs
+// rather than binding again.
 func (s *serviceAPI) Bind(ctx context.Context, name, path string) (*domain.Service, error) {
-	return nil, errs.New(errs.NotImplemented, "service binding is not available yet")
+	l := s.l
+	dir, err := checkoutDir(path)
+	if err != nil {
+		return nil, err
+	}
+	if err := workspace.Bind(l.ws, name, dir); err != nil {
+		return nil, err
+	}
+	if err := workspace.SaveLocal(l.ws); err != nil {
+		return nil, err
+	}
+	if err := workspace.EnsureLocalIgnored(l.ws); err != nil {
+		return nil, err
+	}
+	return s.resyncRebound(ctx, name)
 }
 
+// Unbind removes name's override so it is read from its committed source
+// again -- a fetch of the managed clone, for a git source -- and resyncs.
 func (s *serviceAPI) Unbind(ctx context.Context, name string) (*domain.Service, error) {
-	return nil, errs.New(errs.NotImplemented, "service binding is not available yet")
+	l := s.l
+	ref, ok := findRef(l.ws, name)
+	if !ok {
+		return nil, errs.New(errs.ServiceNotFound, "service %q not found", name).WithDetail("name", name)
+	}
+	if ref.Team == nil {
+		return nil, errs.New(errs.Invalid, "service %q is not bound to a local checkout", name).
+			WithDetail("name", name).
+			WithHint("it is already read from its committed source; `sapien service list` shows what each service reads")
+	}
+	if err := workspace.Unbind(l.ws, name); err != nil {
+		return nil, err
+	}
+	if err := workspace.SaveLocal(l.ws); err != nil {
+		return nil, err
+	}
+	return s.resyncRebound(ctx, name)
 }
 
+// resyncRebound re-reads name from its now-effective source and refreshes
+// what Add refreshes after a sync: the fingerprint, the service-dir map and
+// the read-only set the locators share by reference. Then it restarts the
+// file watcher, whose watch set was built from the previous source and
+// would otherwise keep watching a directory the service no longer reads.
+// The sync error, if any, is returned alongside the resulting Service
+// record, as Add does.
+func (s *serviceAPI) resyncRebound(ctx context.Context, name string) (*domain.Service, error) {
+	l := s.l
+	svc, syncErr := l.syncer.SyncOne(ctx, name)
+	if ref, ok := findRef(l.ws, name); ok {
+		l.refreshFingerprint(ctx, ref)
+		l.setReadOnly(name, ref.Source)
+	}
+	if svc != nil && svc.PackageDir != "" {
+		l.serviceDirs[name] = svc.PackageDir
+	}
+	if svc != nil && svc.Status == domain.SyncOK {
+		l.enqueueSemanticIndex(name)
+	}
+	if l.watcher != nil {
+		if err := l.restartWatch(); err != nil {
+			l.logger.Warn("restarting the file watcher after rebinding failed", "service", name, "error", err)
+		}
+	}
+	return svc, syncErr
+}
+
+// Binding reports what name is read from on this machine, plus every local
+// checkout of the same repository this machine already reads some service
+// from (findCheckouts), so a UI can offer "read from ~/code/x instead" as
+// one click. The catalog row's Binding is used when it has one; a row that
+// predates bindings, or one left by a failed sync, gets the binding
+// derived from the workspace entry instead, so the answer never depends on
+// whether the last sync succeeded.
 func (s *serviceAPI) Binding(ctx context.Context, name string) (*engine.BindingInfo, error) {
-	return nil, errs.New(errs.NotImplemented, "service binding is not available yet")
+	l := s.l
+	ref, ok := findRef(l.ws, name)
+	if !ok {
+		return nil, errs.New(errs.ServiceNotFound, "service %q not found", name).WithDetail("name", name)
+	}
+
+	info := &engine.BindingInfo{Service: name}
+	if svc, err := l.cat.GetService(ctx, name); err == nil && svc.Binding != nil {
+		info.Binding = *svc.Binding
+	} else {
+		info.Binding = *l.bindingFromRef(ctx, ref)
+	}
+
+	team := &ref.Source
+	if ref.Team != nil {
+		team = ref.Team
+	}
+	if team.Kind != domain.SourceGit {
+		return info, nil
+	}
+	want := gitsrc.NormalizeRemote(team.URL)
+	if want == "" {
+		return info, nil
+	}
+	exclude := ""
+	if info.Binding.Mode == domain.BindingLocal && info.Binding.Local != nil {
+		exclude = info.Binding.Local.Path
+	}
+	info.Candidates = l.findCheckouts(ctx, want, exclude)
+	return info, nil
+}
+
+// bindingFromRef derives a binding from the workspace entry alone, for a
+// service whose catalog row carries none.
+func (l *Local) bindingFromRef(ctx context.Context, ref domain.ServiceRef) *domain.ServiceBinding {
+	root := ""
+	if ref.Source.Kind == domain.SourceLocal {
+		if r, err := workspace.ResolveSourcePath(l.ws, ref.Source); err == nil {
+			root = r
+		}
+	}
+	return registry.BindingFor(ctx, l.gitMgr, ref, root)
+}
+
+// findCheckouts lists the local checkouts of the repository want (in
+// gitsrc.NormalizeRemote form) that this machine already reads a service
+// from: the local-source services of this workspace and of every other
+// registered one, minus the checkout at exclude (the one currently bound).
+// Every candidate is described through git, which is why only Binding
+// does this and a listing never pays for it. A workspace that cannot be
+// loaded or a source that cannot be resolved is skipped: this is an offer
+// of shortcuts, not a report on the machine.
+func (l *Local) findCheckouts(ctx context.Context, want, exclude string) []domain.LocalCheckout {
+	dirs := []string{l.ws.Dir}
+	if known, err := config.KnownWorkspaces(); err == nil {
+		dirs = append(dirs, known...)
+	}
+
+	var out []domain.LocalCheckout
+	var visited []string
+	for _, dir := range dirs {
+		if containsDir(visited, dir) {
+			continue
+		}
+		visited = append(visited, dir)
+
+		ws := l.ws
+		if !workspace.SameDir(dir, l.ws.Dir) {
+			loaded, err := workspace.Load(filepath.Join(dir, domain.WorkspaceFileName))
+			if err != nil {
+				continue
+			}
+			ws = loaded
+		}
+
+		for _, ref := range ws.Services {
+			if ref.Source.Kind != domain.SourceLocal {
+				continue
+			}
+			root, err := workspace.ResolveSourcePath(ws, ref.Source)
+			if err != nil {
+				continue
+			}
+			if exclude != "" && workspace.SameDir(root, exclude) {
+				continue
+			}
+			seen := false
+			for _, c := range out {
+				if workspace.SameDir(c.Path, root) {
+					seen = true
+					break
+				}
+			}
+			if seen {
+				continue
+			}
+			co, err := l.gitMgr.Describe(ctx, root)
+			if err != nil || co == nil || gitsrc.NormalizeRemote(co.Remote) != want {
+				continue
+			}
+			out = append(out, *co)
+		}
+	}
+	return out
+}
+
+// containsDir reports whether dirs already names dir (by directory, not by
+// spelling; see workspace.SameDir).
+func containsDir(dirs []string, dir string) bool {
+	for _, d := range dirs {
+		if workspace.SameDir(d, dir) {
+			return true
+		}
+	}
+	return false
+}
+
+// checkoutDir resolves the path a developer typed for Bind to an absolute
+// directory that exists. "~" is expanded here because the path is stored
+// absolute: the override file is per machine, so there is nothing to keep
+// portable, and an absolute path is the one a UI can open.
+func checkoutDir(path string) (string, error) {
+	if strings.TrimSpace(path) == "" {
+		return "", errs.New(errs.Invalid, "bind: a checkout path is required").
+			WithHint("pass the directory of your clone: `sapien service bind <name> <path>`")
+	}
+	p := path
+	if p == "~" || strings.HasPrefix(p, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", errs.Wrap(errs.Internal, err, "resolving home directory")
+		}
+		p = filepath.Join(home, strings.TrimPrefix(p, "~"))
+	}
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return "", errs.Wrap(errs.Internal, err, "resolving %q", path)
+	}
+	info, err := os.Stat(abs)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", errs.New(errs.Invalid, "checkout path does not exist: %s", abs).
+				WithDetail("path", abs).
+				WithHint("clone the repository first, then bind the directory of the clone")
+		}
+		return "", errs.Wrap(errs.Internal, err, "checking %s", abs)
+	}
+	if !info.IsDir() {
+		return "", errs.New(errs.Invalid, "checkout path is not a directory: %s", abs).
+			WithDetail("path", abs).
+			WithHint("bind the repository root (or the directory that holds api/), not a file")
+	}
+	return abs, nil
 }

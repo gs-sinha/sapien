@@ -20,11 +20,18 @@ type Locator struct {
 	// (the "…/api" directory, PLAN §6). Service-scoped memories live under
 	// ServiceDirs[name]/memories.
 	ServiceDirs map[string]string
+	// LocalDir is the workspace's local tier (<workspace>/local, PLAN §7b).
+	// A flow-scoped memory whose flow is local-tier lives under
+	// LocalDir/memories, so promoting the flow is what moves the memory
+	// into the team's memories/ and nothing about a local flow leaks there
+	// on its own. Empty means the workspace has no local tier: local-owned
+	// flows then fall back to WorkspaceDir/memories.
+	LocalDir string
 	// FlowOwner reports which entity owns a flow ID: kind is "service" (with
-	// id the owning service name) or "workspace" (id ignored). A nil
-	// FlowOwner, or one returning an unrecognized kind, is treated as
-	// "workspace" (PLAN §12: "flow ... stored as workspace or service
-	// memory with subject.flow set").
+	// id the owning service name), "local" (id ignored; see LocalDir), or
+	// "workspace" (id ignored). A nil FlowOwner, or one returning an
+	// unrecognized kind, is treated as "workspace" (PLAN §12: "flow ...
+	// stored as workspace or service memory with subject.flow set").
 	FlowOwner func(flowID string) (kind, id string)
 	// ReadOnly names services whose package must not be written into; see
 	// ReadOnlyServices. Shared by reference with the engine, like ServiceDirs.
@@ -53,6 +60,15 @@ func (l Locator) workspaceMemoriesDir() string {
 	return filepath.Join(l.WorkspaceDir, domain.MemoriesDir)
 }
 
+// localMemoriesDir is where a local-tier flow's memories live, or the
+// workspace memories dir when the Locator was built without a local tier.
+func (l Locator) localMemoriesDir() string {
+	if l.LocalDir == "" {
+		return l.workspaceMemoriesDir()
+	}
+	return filepath.Join(l.LocalDir, domain.MemoriesDir)
+}
+
 // serviceDirForSubject resolves the memories directory for scope=service:
 // subject.Service if set, else the service inferred from subject.Operation's
 // "<service>.<op>" prefix.
@@ -79,15 +95,19 @@ func (l Locator) serviceMemoriesDir(service string) (string, error) {
 }
 
 // flowDir resolves the memories directory for scope=flow: the flow's owner
-// (via FlowOwner), defaulting to the workspace when FlowOwner is nil or
-// reports an unrecognized/workspace owner.
+// (via FlowOwner) -- the service's package, the local tier, or the
+// workspace -- defaulting to the workspace when FlowOwner is nil or reports
+// an unrecognized/workspace owner.
 func (l Locator) flowDir(subj domain.Subject) (string, error) {
 	if subj.Flow == "" {
 		return "", errs.New(errs.Invalid, "memory: flow scope requires subject.flow")
 	}
 	if l.FlowOwner != nil {
-		if kind, id := l.FlowOwner(subj.Flow); kind == "service" {
+		switch kind, id := l.FlowOwner(subj.Flow); kind {
+		case domain.FlowOwnerService:
 			return l.serviceMemoriesDir(id)
+		case domain.FlowOwnerLocal:
+			return l.localMemoriesDir(), nil
 		}
 	}
 	return l.workspaceMemoriesDir(), nil
@@ -104,13 +124,17 @@ func serviceFromOperation(opID string) string {
 }
 
 // Files returns every "*.md" file under every memory directory Locator
-// knows about (the workspace's and every known service's), sorted
-// lexicographically. Missing directories are skipped rather than treated as
-// errors (a workspace or service with no memories yet has none).
+// knows about (the workspace's, its local tier's, and every known
+// service's), sorted lexicographically. Missing directories are skipped
+// rather than treated as errors (a workspace or service with no memories
+// yet has none, and most workspaces never grow a local tier).
 func (l Locator) Files() ([]string, error) {
 	var dirs []string
 	if l.WorkspaceDir != "" {
 		dirs = append(dirs, l.workspaceMemoriesDir())
+	}
+	if l.LocalDir != "" {
+		dirs = append(dirs, filepath.Join(l.LocalDir, domain.MemoriesDir))
 	}
 
 	names := make([]string, 0, len(l.ServiceDirs))

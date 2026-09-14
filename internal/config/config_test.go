@@ -248,3 +248,61 @@ func TestWorkspacePath(t *testing.T) {
 	ws := newTestWorkspace(t)
 	assert.Equal(t, filepath.Join(ws.Dir, ".sapien", "config.yaml"), config.WorkspacePath(ws))
 }
+
+// --- friction ---
+
+func TestDefaults_Friction(t *testing.T) {
+	d := config.Defaults()
+	assert.Equal(t, "gs-sinha/sapien", d.Friction.Repo)
+	assert.Equal(t, "General", d.Friction.Category)
+}
+
+// A partial friction: file overrides only the field it sets, exactly like
+// every other section (TestLoad_WorkspaceOverridesUser above): category is
+// set, repo is not mentioned and stays at its default.
+func TestLoad_Friction_PartialOverride(t *testing.T) {
+	isolateUserConfig(t, `
+friction:
+  category: "Agent Feedback"
+`)
+
+	cfg, err := config.Load(nil)
+	require.NoError(t, err)
+	assert.Equal(t, "Agent Feedback", cfg.Friction.Category)
+	assert.Equal(t, "gs-sinha/sapien", cfg.Friction.Repo) // untouched default
+}
+
+func TestLoad_Friction_RepoOverride(t *testing.T) {
+	isolateUserConfig(t, `
+friction:
+  repo: acme/internal-tools
+`)
+
+	cfg, err := config.Load(nil)
+	require.NoError(t, err)
+	assert.Equal(t, "acme/internal-tools", cfg.Friction.Repo)
+	assert.Equal(t, "General", cfg.Friction.Category) // untouched default
+}
+
+func TestLoad_Friction_WorkspaceOverridesUser(t *testing.T) {
+	isolateUserConfig(t, `
+friction:
+  repo: acme/user-level
+  category: user-level-category
+`)
+
+	ws := newTestWorkspace(t)
+	require.NoError(t, os.MkdirAll(filepath.Join(ws.Dir, domain.WorkspaceStateDir), 0o755))
+	require.NoError(t, os.WriteFile(config.WorkspacePath(ws), []byte(`
+friction:
+  category: workspace-level-category
+`), 0o644))
+
+	cfg, err := config.Load(ws)
+	require.NoError(t, err)
+	// Workspace wins on the field it sets.
+	assert.Equal(t, "workspace-level-category", cfg.Friction.Category)
+	// The field the workspace file never mentions still comes from the
+	// user level, not reset to the default.
+	assert.Equal(t, "acme/user-level", cfg.Friction.Repo)
+}

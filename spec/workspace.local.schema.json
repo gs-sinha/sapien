@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "sapien.workspace.local.yaml -- per-machine bindings beside the committed workspace file; gitignored. See PLAN.md section 7b and internal/workspace/local.go",
+  "title": "Sapien per-machine workspace overrides",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version"],
+  "properties": {
+    "version": { "const": 1 },
+    "services": {
+      "type": "object",
+      "description": "Service name (as in sapien.workspace.yaml) to the local checkout this machine reads it from instead of the committed source.",
+      "additionalProperties": { "$ref": "#/$defs/binding" }
+    }
+  },
+  "$defs": {
+    "binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1, "description": "Repository root or api/ package directory; ~ and paths relative to the workspace are allowed." },
+        "contract": { "type": "string", "minLength": 1, "description": "Explicit contract file, as source.contract in the committed file." }
+      }
+    }
+  }
+}

@@ -23,7 +23,7 @@ type Flow struct {
 
 	// Populated by the loader, not part of the file.
 	Path      string `yaml:"-" json:"path,omitempty"`
-	OwnerKind string `yaml:"-" json:"owner_kind,omitempty"` // "workspace" | "service"
+	OwnerKind string `yaml:"-" json:"owner_kind,omitempty"` // FlowOwnerLocal | FlowOwnerWorkspace | FlowOwnerService
 	OwnerID   string `yaml:"-" json:"owner_id,omitempty"`
 	Source    string `yaml:"-" json:"source,omitempty"` // raw YAML; carried over the daemon API so Remote, the MCP bridge, and the UI see it
 }

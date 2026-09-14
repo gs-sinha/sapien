@@ -540,3 +540,91 @@ exchange, the shell and the sockets; the mutation path needs either a click
 or a `Sec-Fetch-Site: same-origin` fallback in the middleware, which was not
 added here because it changes a security-sensitive path and was outside what
 was agreed.
+
+## Team workspaces: one committed composition, per-machine bindings, tiers (2026-09-14)
+
+Reported from real use of the `team` workspace built on 2026-09-06 (every
+service a git source, the workspace itself a repo a new hire clones): "git
+linked repos get lost with every sync tick and untracked don't get synced",
+and the new hire "can't write to it". Traced before designing anything: a
+git source is read from a managed sparse clone under `~/.sapien/repos`
+that the daemon `reset --hard`s every ten minutes, so a doc promotion
+written into it was reverted, a memory written into it was stranded where
+nothing pushes from, and a colleague's uncommitted knowledge was invisible
+by construction. Meanwhile the user's own knowledge was split across two
+workspaces listing the same seven services, one as git sources and one as
+local paths -- the shadow pattern, done by hand.
+
+The user set the product frame: a developer and their agents discover
+organizational context through APIs, docs and flows, and contribute to it
+with local changes reaching their own catalog instantly and teammates'
+changes arriving as soon as the code hits GitHub. Both propagation paths
+already existed (the watcher, the git timer); the failure was forcing each
+service to be one or the other for everyone. PLAN §7b records the model:
+the team commits the composition, each machine binds the services it is
+working on, and contributions ride the developer's own pull request --
+knowledge agents consume needs the same review gate as code, so Sapien
+never commits or pushes.
+
+Built with the shared contracts laid first (domain types, engine
+interfaces, fakes, `workspace.Save` writing the committed source) so four
+agents could work in parallel on disjoint files:
+
+- **`sapien.workspace.local.yaml`** (`internal/workspace/local.go`),
+  gitignored, binds a service name to a local checkout; `Load` applies it
+  so every path sees a local source, `ServiceRef.Team` keeps the committed
+  one, and `Save` writes `Team` back -- the invariant the tests pin is that
+  a committed file never acquires an override path. `sapien service bind |
+  unbind`, `PUT|DELETE /v1/services/{name}/binding`, and the service page's
+  Source panel drive it; `GET .../binding` lists candidate checkouts found
+  by matching `origin` (normalized) against the team URL across every
+  registered workspace, which is how the old hand-built split becomes one
+  click. Binding restarts the watcher so the checkout is watched at once.
+- **Read-only clones.** `memory.Locator` and `example.Locator` refuse
+  service scope for a service read from its git source, with a hint to bind
+  or use workspace scope; the flow tier does the same. As insurance,
+  `gitsrc.Manager.Sync` now refuses to reset a clone with modified tracked
+  files and names them -- the registry test that asserted the old
+  "fetch discards edits" behaviour was rewritten to assert the refusal.
+- **"Listening to" is visible.** `Service.Binding` records mode, the
+  committed source, and for a checkout its branch, commit, origin and
+  uncommitted count from read-only git queries (`gitsrc.Manager.Describe`);
+  `service list` gained a READS column, MCP `get_service` a `reads:` line,
+  the services page a "Reads from" pill.
+- **Flow tiers.** New flows land in `local/flows` (self-ignoring
+  `local/.gitignore`, this machine only) by default; `Flows().Rescope`
+  moves a flow to `flows/` (the team repo) or `api/flows` of a bound
+  service, keeping the name and reindexing both owners; `scope: flow`
+  memories follow their flow into `local/memories`. `sapien flow create
+  --scope`, `flow promote`, `rescope_flow`, tier column and chips on the
+  flows page, promote controls on the flow page. Memories keep their
+  existing ladder (personal -> workspace -> service), which was already the
+  same idea; the UI just names the rungs. The acceptance scenario now
+  creates local and promotes to workspace before running.
+- **`report_friction`**, asked for mid-build: an agent files feedback about
+  Sapien itself; it is queued under `~/.sapien/friction` (secrets refused,
+  since it goes public), reviewed with `sapien friction list | show`, and
+  posted as a GitHub Discussion by `sapien friction send` through `gh`.
+  HTTP routes and a Friction page give the UI the same review-then-post
+  loop. Discussions are not yet enabled on `gs-sinha/sapien`; `send` says
+  so with the setting to flip.
+
+Verified against the real `team` workspace with the dev binary, not only
+in tests: binding one git-sourced service to its checkout on this machine
+wrote the override (ignored), created `.gitignore`, left
+`sapien.workspace.yaml` untouched (`git diff` empty), and the listing read
+`local stage`; `GET /v1/services/{name}/binding` on a dev daemon returned mode team
+for a second service with its checkout as a candidate, matched through the
+other registered workspace where it is a local source; the service page in Chrome
+showed "listening to local · branch stage · 74809c0 / can listen to team ·
+stage" with the Read-from-team-source button, and the flows page its TIER
+column and chips; `unbind` restored `team stage` and removed the file. Go
+suite green with `-race` (38 packages, `go vet` clean), 131 UI tests, bundle
+67.3 KB initial / 217.2 KB total gzipped against the 120/300 budget.
+
+Not done, deliberately: fetching the workspace repo on the tick to show
+"behind by N", and a read-only unshipped-files view -- both wait until
+bindings have been used for a while. One rough edge seen live: a one-shot
+`service bind` logs `semantic: list operations failed ... context canceled`
+because the CLI exits while the semantic enqueue is in flight; harmless,
+pre-existing for `service add`, worth silencing.

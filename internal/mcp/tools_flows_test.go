@@ -18,6 +18,31 @@ func TestTool_ListFlows(t *testing.T) {
 	out := decodeStructured[ListFlowsOutput](t, res.StructuredContent)
 	require.Len(t, out.Flows, 1)
 	assert.Equal(t, "rider-flow", out.Flows[0].ID)
+	// The tier rides in both forms: structured (owner_kind) and the text line.
+	assert.Equal(t, domain.FlowOwnerWorkspace, out.Flows[0].OwnerKind)
+	assert.Contains(t, firstText(res), "rider-flow (1 steps, workspace)")
+}
+
+func TestTool_ListFlows_ShowsServiceTier(t *testing.T) {
+	cs := newTestSession(t, Config{Default: DefaultPermissions()}, "claude-code")
+	res := callTool(t, cs, "create_flow", map[string]any{
+		"flow_yaml": "version: 1\nid: svc-flow\nsteps:\n  - id: a\n    call: rider-service.getRider\n",
+		"scope":     "service", "service": "rider-service",
+	})
+	require.False(t, res.IsError, firstText(res))
+
+	list := callTool(t, cs, "list_flows", map[string]any{})
+	out := decodeStructured[ListFlowsOutput](t, list.StructuredContent)
+	var svcFlow *domain.FlowSummary
+	for i := range out.Flows {
+		if out.Flows[i].ID == "svc-flow" {
+			svcFlow = &out.Flows[i]
+		}
+	}
+	require.NotNil(t, svcFlow)
+	assert.Equal(t, domain.FlowOwnerService, svcFlow.OwnerKind)
+	assert.Equal(t, "rider-service", svcFlow.OwnerID)
+	assert.Contains(t, firstText(list), "svc-flow (1 steps, service:rider-service)")
 }
 
 func TestTool_GetFlow(t *testing.T) {
@@ -54,7 +79,11 @@ func TestTool_CreateFlow(t *testing.T) {
 	require.False(t, res.IsError, firstText(res))
 	out := decodeStructured[FlowSaveResult](t, res.StructuredContent)
 	assert.Equal(t, "new-flow", out.ID)
-	assert.Equal(t, "new-flow.flow.yaml", out.Path)
+	// No scope: the local tier, this machine only, reported by the path an
+	// agent can paste straight back into update_flow.
+	assert.Equal(t, "local/flows/new-flow.flow.yaml", out.Path)
+	assert.Equal(t, domain.FlowOwnerLocal, out.Tier)
+	assert.Empty(t, out.Service)
 	assert.Equal(t, 2, out.Steps)
 	assert.Equal(t, 0, out.SetupSteps)
 	assert.Equal(t, 0, out.TeardownSteps)
@@ -63,7 +92,7 @@ func TestTool_CreateFlow(t *testing.T) {
 	assert.Empty(t, out.Diagnostics)
 
 	text := firstText(res)
-	assert.Contains(t, text, "created flow new-flow at new-flow.flow.yaml, 2 steps")
+	assert.Contains(t, text, "created flow new-flow at local/flows/new-flow.flow.yaml (local tier; promote with rescope_flow when it works), 2 steps")
 	// Item 4 (docs/feedback/2026-09-05-41-step-flow-session.md): the flow
 	// document itself must never be echoed back.
 	assert.NotContains(t, text, "call: rider-service.getRider")
@@ -96,7 +125,125 @@ func TestTool_CreateFlow_CustomPath(t *testing.T) {
 	})
 	require.False(t, res.IsError, firstText(res))
 	out := decodeStructured[FlowSaveResult](t, res.StructuredContent)
-	assert.Equal(t, "sub/dir/nested.flow.yaml", out.Path)
+	assert.Equal(t, "local/flows/sub/dir/nested.flow.yaml", out.Path, "path is relative to the tier's flows directory")
+}
+
+func TestTool_CreateFlow_WorkspaceScope(t *testing.T) {
+	cs := newTestSession(t, Config{Default: DefaultPermissions()}, "claude-code")
+	res := callTool(t, cs, "create_flow", map[string]any{
+		"flow_yaml": "version: 1\nid: team-flow\nsteps:\n  - id: a\n    call: rider-service.getRider\n",
+		"scope":     "workspace",
+	})
+	require.False(t, res.IsError, firstText(res))
+	out := decodeStructured[FlowSaveResult](t, res.StructuredContent)
+	assert.Equal(t, domain.FlowOwnerWorkspace, out.Tier)
+	assert.Equal(t, "flows/team-flow.flow.yaml", out.Path)
+	assert.Contains(t, firstText(res), "(workspace tier: the team's repo)")
+}
+
+func TestTool_CreateFlow_ServiceScope(t *testing.T) {
+	cs := newTestSession(t, Config{Default: DefaultPermissions()}, "claude-code")
+	res := callTool(t, cs, "create_flow", map[string]any{
+		"flow_yaml": "version: 1\nid: svc-flow\nsteps:\n  - id: a\n    call: rider-service.getRider\n",
+		"scope":     "service", "service": "rider-service",
+	})
+	require.False(t, res.IsError, firstText(res))
+	out := decodeStructured[FlowSaveResult](t, res.StructuredContent)
+	assert.Equal(t, domain.FlowOwnerService, out.Tier)
+	assert.Equal(t, "rider-service", out.Service)
+	assert.Contains(t, firstText(res), "service tier: rider-service/api/flows")
+}
+
+func TestTool_CreateFlow_ScopeArgsRejected(t *testing.T) {
+	cs := newTestSession(t, Config{Default: DefaultPermissions()}, "claude-code")
+	yaml := "version: 1\nid: x\nsteps:\n  - id: a\n    call: rider-service.getRider\n"
+
+	res := callTool(t, cs, "create_flow", map[string]any{"flow_yaml": yaml, "scope": "service"})
+	require.True(t, res.IsError)
+	assert.Contains(t, firstText(res), "service scope requires service")
+
+	res = callTool(t, cs, "create_flow", map[string]any{"flow_yaml": yaml, "scope": "global"})
+	require.True(t, res.IsError)
+	assert.Contains(t, firstText(res), `unknown scope "global"`)
+
+	res = callTool(t, cs, "create_flow", map[string]any{"flow_yaml": yaml, "scope": "local", "service": "rider-service"})
+	require.True(t, res.IsError)
+	assert.Contains(t, firstText(res), "service applies to scope service only")
+
+	// None of those reached the engine.
+	list := callTool(t, cs, "list_flows", map[string]any{})
+	assert.Len(t, decodeStructured[ListFlowsOutput](t, list.StructuredContent).Flows, 1)
+}
+
+// --- rescope_flow ---
+
+func TestTool_RescopeFlow_LocalToWorkspaceToService(t *testing.T) {
+	cs := newTestSession(t, Config{Default: DefaultPermissions()}, "claude-code")
+	created := callTool(t, cs, "create_flow", map[string]any{
+		"flow_yaml": "version: 1\nid: ladder\nsteps:\n  - id: a\n    call: rider-service.getRider\n",
+	})
+	require.False(t, created.IsError, firstText(created))
+
+	res := callTool(t, cs, "rescope_flow", map[string]any{"id": "ladder", "scope": "workspace"})
+	require.False(t, res.IsError, firstText(res))
+	out := decodeStructured[RescopeFlowOutput](t, res.StructuredContent)
+	assert.Equal(t, "ladder", out.ID)
+	assert.Equal(t, domain.FlowOwnerWorkspace, out.Tier)
+	assert.Equal(t, "local/flows/ladder.flow.yaml", out.OldPath)
+	assert.Equal(t, "flows/ladder.flow.yaml", out.NewPath)
+	assert.Equal(t, out.NewPath, out.Path)
+	assert.Equal(t, 1, out.Steps)
+	assert.Equal(t, []string{"rider-service.getRider"}, out.Operations)
+	assert.Contains(t, firstText(res), "rescoped flow ladder to workspace tier: the team's repo (local/flows/ladder.flow.yaml -> flows/ladder.flow.yaml)")
+
+	res = callTool(t, cs, "rescope_flow", map[string]any{"id": "ladder", "scope": "service", "service": "rider-service"})
+	require.False(t, res.IsError, firstText(res))
+	out = decodeStructured[RescopeFlowOutput](t, res.StructuredContent)
+	assert.Equal(t, domain.FlowOwnerService, out.Tier)
+	assert.Equal(t, "rider-service", out.Service)
+	assert.Equal(t, "flows/ladder.flow.yaml", out.OldPath)
+	assert.Equal(t, "rider-service/api/flows/ladder.flow.yaml", out.NewPath)
+
+	got := callTool(t, cs, "get_flow", map[string]any{"id": "ladder"})
+	gotOut := decodeStructured[GetFlowOutput](t, got.StructuredContent)
+	assert.Equal(t, domain.FlowOwnerService, gotOut.Flow.OwnerKind)
+	assert.Equal(t, "rider-service", gotOut.Flow.OwnerID)
+}
+
+func TestTool_RescopeFlow_Rejections(t *testing.T) {
+	cs := newTestSession(t, Config{Default: DefaultPermissions()}, "claude-code")
+
+	// scope is required in the schema, so the SDK refuses a call without
+	// it before the handler runs; an explicit empty string gets past the
+	// schema and is refused by the handler with the ladder in the hint.
+	res := callTool(t, cs, "rescope_flow", map[string]any{"id": "rider-flow"})
+	require.True(t, res.IsError)
+	assert.Contains(t, firstText(res), "scope")
+
+	res = callTool(t, cs, "rescope_flow", map[string]any{"id": "rider-flow", "scope": ""})
+	require.True(t, res.IsError)
+	assert.Contains(t, firstText(res), "requires scope")
+
+	res = callTool(t, cs, "rescope_flow", map[string]any{"id": "rider-flow", "scope": "service"})
+	require.True(t, res.IsError)
+	assert.Contains(t, firstText(res), "service scope requires service")
+
+	res = callTool(t, cs, "rescope_flow", map[string]any{"id": "no-such-flow", "scope": "local"})
+	require.True(t, res.IsError)
+	assert.Contains(t, firstText(res), "E_FLOW_NOT_FOUND")
+
+	// Nothing above moved the fixture flow.
+	got := callTool(t, cs, "get_flow", map[string]any{"id": "rider-flow"})
+	assert.Equal(t, domain.FlowOwnerWorkspace, decodeStructured[GetFlowOutput](t, got.StructuredContent).Flow.OwnerKind)
+}
+
+func TestTool_RescopeFlow_PermissionDenied(t *testing.T) {
+	p := DefaultPermissions()
+	p.WriteFlows = false
+	cs := newTestSession(t, Config{Default: p}, "claude-code")
+	res := callTool(t, cs, "rescope_flow", map[string]any{"id": "rider-flow", "scope": "local"})
+	require.True(t, res.IsError)
+	assert.Contains(t, firstText(res), "write_flows")
 }
 
 func TestTool_CreateFlow_InvalidRejected(t *testing.T) {
@@ -174,6 +321,63 @@ func TestTool_UpdateFlow_FromPath(t *testing.T) {
 	got := callTool(t, cs, "get_flow", map[string]any{"id": "rider-flow"})
 	gotOut := decodeStructured[GetFlowOutput](t, got.StructuredContent)
 	assert.Equal(t, "Edited on disk", gotOut.Flow.Name)
+}
+
+// TestTool_UpdateFlow_FromTierPaths covers the two root-relative forms
+// readWorkspaceFlowFile accepts on top of the flows-relative one: the path
+// create_flow reports for a local-tier flow (local/flows/...) and the
+// workspace one with its flows/ prefix, so an agent can paste either back
+// without stripping a prefix.
+func TestTool_UpdateFlow_FromTierPaths(t *testing.T) {
+	cs, eng := newTestSessionAndEngine(t, Config{Default: DefaultPermissions()}, "claude-code")
+	tmpDir := withTempWorkspaceDir(t, eng)
+
+	localDir := filepath.Join(tmpDir, domain.LocalDir, domain.FlowsDir)
+	require.NoError(t, os.MkdirAll(localDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(localDir, "rider-flow.flow.yaml"),
+		[]byte("version: 1\nid: rider-flow\nname: Edited in local tier\nsteps:\n  - id: a\n    call: rider-service.getRider\n"), 0o644))
+
+	res := callTool(t, cs, "update_flow", map[string]any{"id": "rider-flow", "path": "local/flows/rider-flow.flow.yaml"})
+	require.False(t, res.IsError, firstText(res))
+	got := callTool(t, cs, "get_flow", map[string]any{"id": "rider-flow"})
+	assert.Equal(t, "Edited in local tier", decodeStructured[GetFlowOutput](t, got.StructuredContent).Flow.Name)
+
+	flowsDir := filepath.Join(tmpDir, domain.FlowsDir)
+	require.NoError(t, os.MkdirAll(flowsDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(flowsDir, "rider-flow.flow.yaml"),
+		[]byte("version: 1\nid: rider-flow\nname: Edited in workspace tier\nsteps:\n  - id: a\n    call: rider-service.getRider\n"), 0o644))
+
+	res = callTool(t, cs, "update_flow", map[string]any{"id": "rider-flow", "path": "flows/rider-flow.flow.yaml"})
+	require.False(t, res.IsError, firstText(res))
+	got = callTool(t, cs, "get_flow", map[string]any{"id": "rider-flow"})
+	assert.Equal(t, "Edited in workspace tier", decodeStructured[GetFlowOutput](t, got.StructuredContent).Flow.Name)
+
+	// validate_flow shares the resolver.
+	res = callTool(t, cs, "validate_flow", map[string]any{"path": "local/flows/rider-flow.flow.yaml"})
+	require.False(t, res.IsError, firstText(res))
+	assert.Equal(t, true, decodeStructured[map[string]any](t, res.StructuredContent)["valid"])
+}
+
+// TestTool_UpdateFlow_RootRelativeOutsideFlowsRejected: a file that exists
+// at the workspace root but outside flows/ and local/flows/ is not readable
+// through the root-relative form, so the tools stay confined to the two
+// flow tiers.
+func TestTool_UpdateFlow_RootRelativeOutsideFlowsRejected(t *testing.T) {
+	cs, eng := newTestSessionAndEngine(t, Config{Default: DefaultPermissions()}, "claude-code")
+	tmpDir := withTempWorkspaceDir(t, eng)
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "memories"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "memories", "rider-flow.flow.yaml"),
+		[]byte("version: 1\nid: rider-flow\nsteps: []\n"), 0o644))
+
+	res := callTool(t, cs, "update_flow", map[string]any{"id": "rider-flow", "path": "memories/rider-flow.flow.yaml"})
+	require.True(t, res.IsError)
+	assert.Contains(t, firstText(res), "reading")
+
+	// A flows-relative path that happens to start with "local/" still tries
+	// <ws>/flows/local/... first and must not fall through to the root
+	// form when that prefix is only "local", not "local/flows".
+	res = callTool(t, cs, "update_flow", map[string]any{"id": "rider-flow", "path": "local/rider-flow.flow.yaml"})
+	require.True(t, res.IsError)
 }
 
 func TestTool_UpdateFlow_PathEscapeRejected(t *testing.T) {

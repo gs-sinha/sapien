@@ -260,6 +260,7 @@ func (b *Builder) Build(ctx context.Context, ref domain.ServiceRef) (*Snapshot, 
 		TaskCoverage:     &taskCoverage,
 		LastIndexed:      time.Now(),
 		Commit:           gitCommit,
+		Binding:          BindingFor(ctx, b.git, ref, root),
 		OperationCount:   len(merged.Operations),
 		WarningRules:     meta.AcceptedWarnings,
 	}
@@ -275,6 +276,44 @@ func (b *Builder) Build(ctx context.Context, ref domain.ServiceRef) (*Snapshot, 
 		Tasks:         tasks,
 		ContractFiles: contractHashes,
 	}, nil
+}
+
+// BindingFor describes where this machine reads ref from (PLAN §7b): the
+// managed clone of its git source, or the local checkout at root -- the
+// resolved directory of a local source, "" when it could not be resolved,
+// in which case the source's own path stands in. A local source is
+// writable whether it was committed that way or is a per-machine override
+// of a git source (ref.Team, carried through so a UI can offer the team
+// source as the thing to fall back to); a git source never is, because its
+// clone is reset on every sync.
+//
+// git is optional. With one, a local checkout is described by git
+// (branch, commit, origin, dirty count); a failure there degrades to the
+// path alone rather than failing the build, since what the checkout is on
+// is information about the service, not a condition of indexing it.
+func BindingFor(ctx context.Context, git *gitsrc.Manager, ref domain.ServiceRef, root string) *domain.ServiceBinding {
+	if ref.Source.Kind == domain.SourceGit {
+		team := ref.Source
+		return &domain.ServiceBinding{Mode: domain.BindingTeam, Team: &team}
+	}
+
+	b := &domain.ServiceBinding{Mode: domain.BindingLocal, Writable: true}
+	if ref.Team != nil {
+		team := *ref.Team
+		b.Team = &team
+	}
+
+	if root == "" {
+		b.Local = &domain.LocalCheckout{Path: ref.Source.Path}
+		return b
+	}
+	b.Local = &domain.LocalCheckout{Path: root}
+	if git != nil {
+		if described, err := git.Describe(ctx, root); err == nil && described != nil {
+			b.Local = described
+		}
+	}
+	return b
 }
 
 // resolveContracts decides the final, absolute contract file list: the

@@ -124,6 +124,37 @@ search ranking, so writing one is how a discovery survives past the end of
 your session. `get_dsl_reference("memory")` has the types and scoping
 rules.
 
+## Where your work lives: tiers and bindings
+
+A team commits one workspace that lists every service as a git source.
+That is the team's view: Sapien reads each service from a managed clone
+it refreshes from GitHub, and that clone is read-only -- nothing you
+write into a service read this way can survive, so service scope is
+refused there. `list_services` and `get_service` say what each service is
+read from: `team` (the git source, read-only) or `local` (a checkout on
+this machine, writable, with its branch). A developer binds a service to
+their checkout with `sapien service bind <name> <path>`; from then on
+service-scoped memories, examples and flows land in that checkout's
+`api/` and ship in their pull request. If you need to record something
+about a read-only service, use workspace scope with a service subject; a
+human can promote it later.
+
+Flows climb a ladder. `create_flow` writes to the local tier by default
+(`<workspace>/local/flows`, this machine only, never committed): run it
+there until it is green, then `rescope_flow` to `workspace` so the team
+gets it, or to `service` when that service is bound. Memories climb the
+same way with `rescope_memory`: personal (this machine) -> workspace (the
+team's repo) -> service (the owning repo). Nothing is committed or pushed
+by Sapien; what reaches the team is what the developer commits.
+
+## When Sapien itself gets in your way
+
+If a tool returned the wrong shape, a capability was missing, or the
+documentation misled you, file it with `report_friction`. The report is
+queued on this machine and never posted by you; a human reviews it and
+may publish it as a GitHub Discussion on the Sapien repo, so keep
+secrets, hostnames and payloads out of it.
+
 ## What Sapien does not do
 
 It does not proxy traffic, replace a gateway, or hold runtime state. It

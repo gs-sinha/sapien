@@ -62,6 +62,24 @@ func (l *Local) startWatch() error {
 	return nil
 }
 
+// restartWatch tears the watcher down and starts a fresh one, so its watch
+// set follows a source that just changed under it: a bind moves a service
+// from the managed clone to a checkout the old watcher never looked at,
+// and an unbind moves it back. Cancelling watchCancel also stops the
+// SyncGitPeriodically goroutine startWatch began beside the old watcher,
+// and startWatch begins a new one on the new context, so the daemon's git
+// timer is restarted rather than doubled.
+func (l *Local) restartWatch() error {
+	if l.watchCancel != nil {
+		l.watchCancel()
+	}
+	if l.watcher != nil {
+		_ = l.watcher.Close()
+	}
+	l.watcher, l.watchCancel = nil, nil
+	return l.startWatch()
+}
+
 // resolvePackageRootForWatch resolves the directory startWatch should pass
 // to registry.DiscoverPackage for ref: the resolved local path, or -- for a
 // git source -- the managed clone's checkout directory, resolved via

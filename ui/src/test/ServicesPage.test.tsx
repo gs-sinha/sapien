@@ -17,14 +17,25 @@ vi.mock('../api/client', () => ({
         warnings: [{ code: 'W1', message: 'missing example' }],
         accepted_warnings: [{ code: 'W2', message: 'ok as-is', reason: 'documented' }],
         last_indexed: '2026-01-01T00:00:00Z',
+        binding: { mode: 'local', local: { path: '/repo/orders', branch: 'main', commit: 'abc1234567' }, writable: true },
       },
       {
         id: 'riders',
         name: 'riders',
         status: 'error',
-        source: { type: 'git', url: 'git@github.com:acme/riders.git' },
+        source: { type: 'git', url: 'git@github.com:acme/riders.git', ref: 'v2' },
         package_dir: '/repo/riders/api',
         operation_count: 4,
+        binding: { mode: 'team', team: { type: 'git', url: 'git@github.com:acme/riders.git', ref: 'v2' }, writable: false },
+      },
+      // A daemon from before bindings: no `binding`, so the label comes from the source kind alone.
+      {
+        id: 'billing',
+        name: 'billing',
+        status: 'ok',
+        source: { type: 'git', url: 'git@github.com:acme/billing.git' },
+        package_dir: '/repo/billing/api',
+        operation_count: 2,
       },
     ]),
     add: vi.fn(),
@@ -55,5 +66,26 @@ describe('ServicesPage', () => {
     expect(screen.getAllByText('1').length).toBeGreaterThanOrEqual(2); // unaccepted + accepted warning counts
     expect(screen.getByRole('button', { name: /sync all/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /add service/i })).toBeInTheDocument();
+  });
+
+  it('shows which source each service is read from, next to its name', async () => {
+    render(
+      <MemoryRouter>
+        <ServicesPage />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getByRole('link', { name: 'orders' })).toBeInTheDocument());
+
+    const headers = screen.getAllByRole('columnheader').map((h) => h.textContent);
+    expect(headers.indexOf('Reads from')).toBe(headers.indexOf('Name') + 1);
+
+    const rowOf = (name: string) => screen.getByRole('link', { name }).closest('tr')!;
+    // Bound to a checkout: the branch this machine reads.
+    expect(rowOf('orders')).toHaveTextContent('local · main');
+    // The committed git source: the ref every other machine reads.
+    expect(rowOf('riders')).toHaveTextContent('team · v2');
+    // No binding reported: the source kind alone.
+    expect(rowOf('billing')).toHaveTextContent('team');
+    expect(rowOf('billing')).not.toHaveTextContent('team ·');
   });
 });

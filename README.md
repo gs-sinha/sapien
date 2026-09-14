@@ -122,6 +122,51 @@ workspace folder is separate from the service repos and can be its own
 git repo, so the flows, memories, and environments you build up are
 versioned too.
 
+## Team workspaces
+
+Commit the workspace folder as its own git repo and list every service as
+a git source. Anyone who clones it gets the whole system: services,
+environments, the team's flows, memories and examples, refreshed from
+GitHub every ten minutes.
+
+```yaml
+# sapien.workspace.yaml (committed)
+version: 1
+name: logistics
+services:
+  - name: rider-service
+    source: { type: git, url: git@github.com:company/rider-service.git, ref: stage }
+```
+
+A git source is read from a managed clone that Sapien resets on every
+sync, so it is read-only. When you work on a service, bind it to your
+checkout:
+
+```sh
+sapien service bind rider-service ~/code/rider-service
+```
+
+That writes `sapien.workspace.local.yaml` beside the committed file
+(gitignored, one per machine). From then on this machine reads rider-service
+from your checkout, on the branch you have out, re-indexed on every
+save, and service-scoped memories, examples and flows are written into
+its `api/` directory, so they ship in your pull request like any other
+change. `sapien service list` and the service page say what each service
+is listening to: `local feat/x` or `team stage`. `sapien service unbind
+rider-service` goes back to the team's source.
+
+Flows have tiers. A new flow lands in `local/flows/`, this machine only,
+ignored by git. Run it until it is green, then promote it:
+
+```sh
+sapien flow promote order-cancel            # local -> flows/ (the team repo)
+sapien flow promote order-cancel --to service --service rider-service
+```
+
+Memories climb the same way: personal (this machine) -> workspace (the
+team repo) -> service (the owning repo), with `sapien memory rescope`.
+Sapien never commits or pushes; what reaches the team is what you commit.
+
 ## Optional semantic search
 
 Sapien uses its local SQLite task, operation, and documentation indexes by
@@ -271,6 +316,19 @@ wrote docs for. An agent new to Sapien starts with
 `get_dsl_reference("sapien")`: one page on what Sapien holds and how to
 use it. See [`docs/mcp.md`](docs/mcp.md) for the full tool list,
 permissions, and host setup for every client.
+
+## Telling us what got in the way
+
+Agents hit friction that never reaches a human: a tool that returned the
+wrong shape, a capability that was missing, a doc that misled them. The
+`report_friction` MCP tool lets an agent file it. Nothing leaves the
+machine: the report is queued under `~/.sapien/friction`, you review it
+with `sapien friction list` and `show`, and `sapien friction send` posts
+it as a GitHub Discussion on this repo through the `gh` CLI (which holds
+your GitHub auth; Sapien stores none). Reports that look like they carry
+a secret are refused when filed, because they end up public. `sapien
+friction add` files one by hand; `friction.repo` and `friction.category`
+in `~/.sapien/config.yaml` point sends at another repository.
 
 ## Learn more
 

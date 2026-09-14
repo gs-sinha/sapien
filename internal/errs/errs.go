@@ -34,6 +34,7 @@ const (
 	MemoryNotFound    Code = "E_MEMORY_NOT_FOUND"
 	ExampleNotFound   Code = "E_EXAMPLE_NOT_FOUND"
 	DocNotFound       Code = "E_DOC_NOT_FOUND"
+	FrictionNotFound  Code = "E_FRICTION_NOT_FOUND"
 	Conflict          Code = "E_CONFLICT"
 	Invalid           Code = "E_INVALID"
 	NotImplemented    Code = "E_NOT_IMPLEMENTED"
@@ -138,7 +139,7 @@ func ExitCode(err error) int {
 // HTTPStatus maps an error to an HTTP status.
 func HTTPStatus(err error) int {
 	switch CodeOf(err) {
-	case WorkspaceNotFound, ServiceNotFound, OperationNotFound, FlowNotFound, RunNotFound, MemoryNotFound, ExampleNotFound, DocNotFound, EnvNotFound:
+	case WorkspaceNotFound, ServiceNotFound, OperationNotFound, FlowNotFound, RunNotFound, MemoryNotFound, ExampleNotFound, DocNotFound, EnvNotFound, FrictionNotFound:
 		return 404
 	case FlowInvalid, Expr, InputMissing, Invalid, ContractParse:
 		return 400

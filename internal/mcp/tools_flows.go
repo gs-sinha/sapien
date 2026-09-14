@@ -40,7 +40,7 @@ func (s *server) listFlows(ctx context.Context, req *sdkmcp.CallToolRequest, in 
 	out := ListFlowsOutput{Flows: flows}
 	var b strings.Builder
 	for _, f := range flows {
-		fmt.Fprintf(&b, "- %s (%d steps): %s [%s]\n", f.ID, f.StepCount, f.Name, strings.Join(f.Tags, ","))
+		fmt.Fprintf(&b, "- %s (%d steps, %s): %s [%s]\n", f.ID, f.StepCount, flowTierLabel(f.OwnerKind, f.OwnerID), f.Name, strings.Join(f.Tags, ","))
 	}
 	if len(flows) == 0 {
 		b.WriteString("no flows\n")
@@ -130,7 +130,7 @@ func renderFlowOutline(f *domain.Flow) string {
 // ValidateFlowInput is validate_flow's arguments.
 type ValidateFlowInput struct {
 	FlowYAML string `json:"flow_yaml,omitempty" jsonschema:"flow YAML source to validate; or pass path"`
-	Path     string `json:"path,omitempty" jsonschema:"a flow file inside the workspace flows directory, already edited on disk, to validate without echoing its text"`
+	Path     string `json:"path,omitempty" jsonschema:"a flow file already on disk to validate without echoing its text: relative to <workspace>/flows, or to the workspace root when inside flows/ or local/flows/"`
 }
 
 func (s *server) validateFlow(ctx context.Context, req *sdkmcp.CallToolRequest, in ValidateFlowInput) (*sdkmcp.CallToolResult, any, error) {
@@ -194,8 +194,12 @@ func renderValidation(r *domain.ValidationResult) string {
 // patch_flow: enough to confirm what was written and where, without ever
 // echoing the flow document itself back at the caller.
 type FlowSaveResult struct {
-	ID            string   `json:"id"`
-	Path          string   `json:"path"`
+	ID   string `json:"id"`
+	Path string `json:"path"`
+	// Tier is the owner kind the file landed in: local, workspace, or
+	// service; Service names the owning service for the service tier.
+	Tier          string   `json:"tier"`
+	Service       string   `json:"service,omitempty"`
 	Steps         int      `json:"steps"`
 	SetupSteps    int      `json:"setup_steps"`
 	TeardownSteps int      `json:"teardown_steps"`
@@ -214,11 +218,15 @@ func buildFlowSaveResult(f *domain.Flow, wsDir string, valResult *domain.Validat
 	out := FlowSaveResult{
 		ID:            f.ID,
 		Path:          displayFlowPath(wsDir, f.Path),
+		Tier:          f.OwnerKind,
 		Steps:         len(f.Steps),
 		SetupSteps:    len(f.Setup),
 		TeardownSteps: len(f.Teardown),
 		Operations:    distinctOperations(f),
 		Bytes:         len(f.Source),
+	}
+	if f.OwnerKind == domain.FlowOwnerService {
+		out.Service = f.OwnerID
 	}
 	if valResult != nil {
 		for _, d := range valResult.Diagnostics {
@@ -265,13 +273,19 @@ func displayFlowPath(wsDir, p string) string {
 	return filepath.ToSlash(rel)
 }
 
-// readWorkspaceFlowFile validates rel as a safe path inside
-// <wsDir>/flows -- not empty, not absolute, no ".." segment -- and reads
-// it, for update_flow's and patch_flow's file-path inputs. It does not
-// require the domain.FlowFileSuffix create_flow's destination path does:
-// this always names a file that already exists (already produced by
-// create_flow, or hand-edited by the calling agent), never a new one that
-// needs to be indexable at a fresh location.
+// readWorkspaceFlowFile validates rel as a safe path -- not empty, not
+// absolute, no ".." segment -- and reads it for update_flow's, patch_flow's
+// and validate_flow's file-path inputs. rel is tried relative to
+// <wsDir>/flows first, as the tools have always documented; when nothing
+// is there and rel itself starts with flows/ or local/flows/, it is read
+// relative to the workspace root instead. That second form exists because
+// create_flow now reports local-tier paths as local/flows/x.flow.yaml, and
+// an agent pasting that back should not have to know which prefix to
+// strip. Nothing outside those two directories is readable this way. It
+// does not require the domain.FlowFileSuffix create_flow's destination
+// path does: this always names a file that already exists (already
+// produced by create_flow, or hand-edited by the calling agent), never a
+// new one that needs to be indexable at a fresh location.
 func readWorkspaceFlowFile(wsDir, rel string) (string, error) {
 	flowsDir := filepath.Join(wsDir, domain.FlowsDir)
 	if strings.TrimSpace(rel) == "" {
@@ -290,10 +304,30 @@ func readWorkspaceFlowFile(wsDir, rel string) (string, error) {
 	}
 	joined := filepath.Join(flowsDir, rel)
 	data, err := os.ReadFile(joined)
-	if err != nil {
-		return "", errs.Wrap(errs.Invalid, err, "reading %s", joined)
+	if err == nil {
+		return string(data), nil
 	}
-	return string(data), nil
+	if os.IsNotExist(err) && isFlowsDirPath(rel) {
+		alt := filepath.Join(wsDir, rel)
+		if altData, altErr := os.ReadFile(alt); altErr == nil {
+			return string(altData), nil
+		}
+	}
+	return "", errs.Wrap(errs.Invalid, err, "reading %s", joined)
+}
+
+// isFlowsDirPath reports whether rel, taken relative to the workspace
+// root, lies inside one of the two workspace flow tiers (flows/ or
+// local/flows/) -- the only root-relative forms readWorkspaceFlowFile
+// accepts.
+func isFlowsDirPath(rel string) bool {
+	rel = filepath.ToSlash(rel)
+	for _, dir := range []string{domain.FlowsDir, domain.LocalDir + "/" + domain.FlowsDir} {
+		if strings.HasPrefix(rel, dir+"/") && len(rel) > len(dir)+1 {
+			return true
+		}
+	}
+	return false
 }
 
 // --- create_flow -----------------------------------------------------
@@ -301,29 +335,147 @@ func readWorkspaceFlowFile(wsDir, rel string) (string, error) {
 // CreateFlowInput is create_flow's arguments.
 type CreateFlowInput struct {
 	FlowYAML string `json:"flow_yaml" jsonschema:"flow YAML source"`
-	// Path is relative to the workspace's flows directory (<workspace>/flows),
-	// not the workspace root: "sub/dir/x.flow.yaml" saves to
-	// <workspace>/flows/sub/dir/x.flow.yaml. Must not be absolute or contain
-	// "..", and must end in .flow.yaml so list_flows finds it. Default:
-	// "<id>.flow.yaml" from the flow's own `id:`.
-	Path string `json:"path,omitempty" jsonschema:"destination path relative to the workspace's flows directory (not the workspace root); default <id>.flow.yaml; must stay inside the flows directory and end in .flow.yaml"`
+	// Path is relative to the chosen tier's flows directory, not the
+	// workspace root: "sub/dir/x.flow.yaml" saves to
+	// <workspace>/local/flows/sub/dir/x.flow.yaml for the default local
+	// scope. Must not be absolute or contain "..", and must end in
+	// .flow.yaml so list_flows finds it. Default: "<id>.flow.yaml" from the
+	// flow's own `id:`.
+	Path string `json:"path,omitempty" jsonschema:"destination path relative to the chosen tier's flows directory (not the workspace root); default <id>.flow.yaml; must stay inside that directory and end in .flow.yaml"`
+	// Scope is the tier: local (default) is this machine only, workspace is
+	// the team's repo, service is the owning service's api/flows and needs
+	// Service plus a bound local checkout.
+	Scope   string `json:"scope,omitempty" jsonschema:"tier to save into: local (default; this machine only, <workspace>/local/flows), workspace (the team's repo, <workspace>/flows), or service (<service>/api/flows; needs service and a bound local checkout)"`
+	Service string `json:"service,omitempty" jsonschema:"owning service name; required for scope service"`
 }
 
 func (s *server) createFlow(ctx context.Context, req *sdkmcp.CallToolRequest, in CreateFlowInput) (*sdkmcp.CallToolResult, any, error) {
 	if _, _, denied := s.checkPermission(req.Session, classWriteFlows); denied != nil {
 		return denied, nil, nil
 	}
+	kind, service, err := flowScopeArgs("create_flow", in.Scope, in.Service)
+	if err != nil {
+		return errResult(err), nil, nil
+	}
 	// Best-effort: gathers warning diagnostics to report alongside the lean
-	// output. Create validates yamlSrc itself and is authoritative on
+	// output. CreateIn validates yamlSrc itself and is authoritative on
 	// whether the flow is valid; this call's own result/error is otherwise
 	// unused.
 	valResult, _ := s.engine().Flows().Validate(ctx, in.FlowYAML)
-	flow, err := s.engine().Flows().Create(ctx, in.FlowYAML, in.Path)
+	flow, err := s.engine().Flows().CreateIn(ctx, in.FlowYAML, engine.CreateFlowOptions{
+		Path: in.Path, OwnerKind: kind, OwnerID: service,
+	})
 	if err != nil {
 		return errResult(err), nil, nil
 	}
 	out := buildFlowSaveResult(flow, s.workspaceDir(), valResult)
-	text := fmt.Sprintf("created flow %s at %s, %d steps\n", out.ID, out.Path, out.Steps)
+	text := fmt.Sprintf("created flow %s at %s (%s), %d steps\n", out.ID, out.Path, flowTierNote(out.Tier, out.Service), out.Steps)
+	return result(text, out), nil, nil
+}
+
+// flowScopeArgs turns a tool's scope/service inputs into the owner kind
+// and id the engine takes: an empty scope is the local tier, service scope
+// must name its service, and anything else is refused with the ladder in
+// the hint so the agent can retry without another lookup.
+func flowScopeArgs(tool, scope, service string) (kind, owner string, err error) {
+	scope = strings.TrimSpace(scope)
+	service = strings.TrimSpace(service)
+	switch scope {
+	case "":
+		kind = domain.FlowOwnerLocal
+	case domain.FlowOwnerLocal, domain.FlowOwnerWorkspace, domain.FlowOwnerService:
+		kind = scope
+	default:
+		return "", "", errs.New(errs.Invalid, "%s: unknown scope %q", tool, scope).
+			WithHint("scope is local (this machine), workspace (the team's repo), or service (the owning service; pass service)")
+	}
+	if kind == domain.FlowOwnerService {
+		if service == "" {
+			return "", "", errs.New(errs.Invalid, "%s: service scope requires service", tool).
+				WithHint("pass service=<name> (list_services shows names); the service must be bound to a local checkout here")
+		}
+		return kind, service, nil
+	}
+	// A service name with another scope is almost always a slip; ignoring
+	// it would file the flow somewhere the caller did not mean.
+	if service != "" {
+		return "", "", errs.New(errs.Invalid, "%s: service applies to scope service only, not %s", tool, kind).
+			WithHint("drop service, or pass scope=service")
+	}
+	return kind, "", nil
+}
+
+// flowTierLabel is the short form list_flows shows per flow: the tier,
+// with the service named when the tier is service.
+func flowTierLabel(kind, ownerID string) string {
+	if kind == domain.FlowOwnerService && ownerID != "" {
+		return kind + ":" + ownerID
+	}
+	if kind == "" {
+		return domain.FlowOwnerWorkspace
+	}
+	return kind
+}
+
+// flowTierNote is the parenthetical create_flow and rescope_flow print
+// after the path: where the flow now lives in terms of who can see it, and
+// for the local tier the one thing to do next.
+func flowTierNote(kind, service string) string {
+	switch kind {
+	case domain.FlowOwnerLocal:
+		return "local tier; promote with rescope_flow when it works"
+	case domain.FlowOwnerService:
+		return fmt.Sprintf("service tier: %s/api/flows, rides your branch", service)
+	default:
+		return "workspace tier: the team's repo"
+	}
+}
+
+// --- rescope_flow -----------------------------------------------------
+
+// RescopeFlowInput is rescope_flow's arguments.
+type RescopeFlowInput struct {
+	ID      string `json:"id" jsonschema:"flow id"`
+	Scope   string `json:"scope" jsonschema:"tier to move the flow to: local (this machine only), workspace (the team's repo), or service (the owning service's api/flows; needs service and a bound local checkout)"`
+	Service string `json:"service,omitempty" jsonschema:"owning service name; required for scope service"`
+}
+
+// RescopeFlowOutput is rescope_flow's structured output: the same lean
+// summary create_flow returns, plus where the file was and where it is
+// now.
+type RescopeFlowOutput struct {
+	FlowSaveResult
+	OldPath string `json:"old_path"`
+	NewPath string `json:"new_path"`
+}
+
+func (s *server) rescopeFlow(ctx context.Context, req *sdkmcp.CallToolRequest, in RescopeFlowInput) (*sdkmcp.CallToolResult, any, error) {
+	if _, _, denied := s.checkPermission(req.Session, classWriteFlows); denied != nil {
+		return denied, nil, nil
+	}
+	if strings.TrimSpace(in.Scope) == "" {
+		return errResult(errs.New(errs.Invalid, "rescope_flow requires scope").
+			WithHint("pass scope local, workspace, or service (with service=<name>)")), nil, nil
+	}
+	kind, service, err := flowScopeArgs("rescope_flow", in.Scope, in.Service)
+	if err != nil {
+		return errResult(err), nil, nil
+	}
+	existing, err := s.engine().Flows().Get(ctx, in.ID)
+	if err != nil {
+		return errResult(err), nil, nil
+	}
+	moved, err := s.engine().Flows().Rescope(ctx, in.ID, kind, service)
+	if err != nil {
+		return errResult(err), nil, nil
+	}
+	wsDir := s.workspaceDir()
+	out := RescopeFlowOutput{
+		FlowSaveResult: buildFlowSaveResult(moved, wsDir, nil),
+		OldPath:        displayFlowPath(wsDir, existing.Path),
+		NewPath:        displayFlowPath(wsDir, moved.Path),
+	}
+	text := fmt.Sprintf("rescoped flow %s to %s (%s -> %s)\n", out.ID, flowTierNote(out.Tier, out.Service), out.OldPath, out.NewPath)
 	return result(text, out), nil, nil
 }
 
@@ -341,7 +493,7 @@ type UpdateFlowInput struct {
 	// Sapien re-reads that file's current content instead of requiring it
 	// resent inline. Alternative to FlowYAML; must stay inside the flows
 	// directory.
-	Path string `json:"path,omitempty" jsonschema:"path inside the workspace's flows directory to re-read the new YAML from (already edited on disk); alternative to flow_yaml"`
+	Path string `json:"path,omitempty" jsonschema:"file to re-read the new YAML from (already edited on disk): relative to <workspace>/flows, or to the workspace root when inside flows/ or local/flows/ (as create_flow reports it); alternative to flow_yaml"`
 }
 
 func (s *server) updateFlow(ctx context.Context, req *sdkmcp.CallToolRequest, in UpdateFlowInput) (*sdkmcp.CallToolResult, any, error) {

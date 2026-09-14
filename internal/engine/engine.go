@@ -58,7 +58,7 @@ type ServiceAPI interface {
 
 // BindingInfo is Services().Binding's answer: the service's current binding
 // plus local checkouts of the same repository found on this machine, so a
-// UI can offer "read from ~/code/sarathy instead" as one click.
+// UI can offer "read from ~/code/rider-service instead" as one click.
 type BindingInfo struct {
 	Service    string                 `json:"service"`
 	Binding    domain.ServiceBinding  `json:"binding"`

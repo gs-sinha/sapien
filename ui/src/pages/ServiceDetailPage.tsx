@@ -9,6 +9,7 @@ import { Table } from '../components/Table';
 import { useAsync } from '../lib/useAsync';
 import { subscribe } from '../state/events';
 import { pushToast } from '../state/toast';
+import { BindingPanel } from './services/BindingPanel';
 import type { Doc, Environment, Operation, Service } from '../api/types';
 
 interface DetailData {
@@ -169,6 +170,8 @@ export default function ServiceDetailPage() {
           </div>
         </div>
       )}
+
+      <BindingPanel service={service} onChanged={reload} />
 
       <KeyValue
         pairs={[

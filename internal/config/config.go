@@ -1,6 +1,7 @@
 // Package config loads Sapien's engine-level settings (PLAN.md §16, §18,
 // §21): whether/how semantic search is enabled, git managed-clone
-// behavior, and the daemon's idle-exit timeout and heap ceiling.
+// behavior, the daemon's idle-exit timeout and heap ceiling, and where
+// `sapien friction send` posts a queued friction report.
 //
 // Settings live in two YAML files, merged with the workspace winning over
 // the user level:
@@ -11,10 +12,10 @@
 // Both files may carry other top-level keys this package does not know
 // about -- most notably `mcp:`, read separately by internal/mcp.Permissions
 // -- which are silently ignored here, exactly as this package's own keys
-// (`semantic:`, `git:`, `daemon:`) are ignored by that package's own
-// loader. Neither loader declares the other's keys, and neither enables
-// yaml.v3's "reject unknown fields" mode, so the two coexist in one file
-// without either needing to know the other's schema.
+// (`semantic:`, `git:`, `daemon:`, `friction:`) are ignored by that
+// package's own loader. Neither loader declares the other's keys, and
+// neither enables yaml.v3's "reject unknown fields" mode, so the two
+// coexist in one file without either needing to know the other's schema.
 package config
 
 import (
@@ -99,19 +100,42 @@ type Daemon struct {
 	MemoryLimit string `yaml:"memory_limit"`
 }
 
+// Friction configures where `sapien friction send` posts a queued report
+// (internal/friction): the repository a GitHub Discussion is created on,
+// and which discussion category it lands in. Reports are never sent
+// automatically -- this only decides the destination once a human runs
+// `send`.
+type Friction struct {
+	// Repo is "owner/name". Empty defaults to "gs-sinha/sapien".
+	Repo string `yaml:"repo"`
+	// Category is a GitHub Discussion category name or slug on Repo. Empty
+	// defaults to "General".
+	Category string `yaml:"category"`
+}
+
+// defaultFrictionRepo and defaultFrictionCategory are Friction's defaults:
+// this repository's own Discussions, "General" category, so `sapien
+// friction send` works out of the box for reports about Sapien itself.
+const (
+	defaultFrictionRepo     = "gs-sinha/sapien"
+	defaultFrictionCategory = "General"
+)
+
 // Config is Sapien's merged engine-level configuration.
 type Config struct {
 	Semantic Semantic `yaml:"semantic"`
 	Git      Git      `yaml:"git"`
 	Daemon   Daemon   `yaml:"daemon"`
+	Friction Friction `yaml:"friction"`
 }
 
 // Defaults returns the configuration Load would produce if neither the
 // user nor the workspace config file existed.
 func Defaults() Config {
 	return Config{
-		Git:    Git{SyncInterval: defaultGitSyncIntervalStr},
-		Daemon: Daemon{IdleTimeout: defaultDaemonIdleTimeoutS, MemoryLimit: defaultDaemonMemoryLimit},
+		Git:      Git{SyncInterval: defaultGitSyncIntervalStr},
+		Daemon:   Daemon{IdleTimeout: defaultDaemonIdleTimeoutS, MemoryLimit: defaultDaemonMemoryLimit},
+		Friction: Friction{Repo: defaultFrictionRepo, Category: defaultFrictionCategory},
 	}
 }
 
@@ -269,6 +293,11 @@ type rawDaemon struct {
 	MemoryLimit *string `yaml:"memory_limit"`
 }
 
+type rawFriction struct {
+	Repo     *string `yaml:"repo"`
+	Category *string `yaml:"category"`
+}
+
 // rawConfig is the shape of one config.yaml. Unknown top-level keys (`mcp:`
 // chief among them) are simply not declared here, so yaml.v3 -- which
 // ignores keys it has no destination field for, unless KnownFields(true) is
@@ -277,6 +306,7 @@ type rawConfig struct {
 	Semantic rawSemantic `yaml:"semantic"`
 	Git      rawGit      `yaml:"git"`
 	Daemon   rawDaemon   `yaml:"daemon"`
+	Friction rawFriction `yaml:"friction"`
 }
 
 // mergeFile reads path (a no-op, not an error, if it does not exist) and
@@ -337,6 +367,14 @@ func applyRaw(cfg *Config, raw rawConfig) {
 	}
 	if raw.Daemon.MemoryLimit != nil {
 		d.MemoryLimit = *raw.Daemon.MemoryLimit
+	}
+
+	f := &cfg.Friction
+	if raw.Friction.Repo != nil {
+		f.Repo = *raw.Friction.Repo
+	}
+	if raw.Friction.Category != nil {
+		f.Category = *raw.Friction.Category
 	}
 }
 

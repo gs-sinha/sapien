@@ -288,3 +288,68 @@ func missingEnvHint(ws *domain.Workspace, svc *domain.Service) string {
 	return fmt.Sprintf("environments declared by %s but not defined in this workspace: %s; run `sapien env scaffold --workspace %s` to create them from service.yaml, then fill in auth\n",
 		svc.Name, strings.Join(missing, ", "), ws.Dir)
 }
+
+// --- binding: what a service is read from (PLAN §7b) -------------------
+
+// bindingOf is the ServiceBinding to describe svc with. The registry fills
+// Service.Binding on every sync, but a daemon that predates it, or a fake,
+// leaves it nil; deriving from Source then says the same thing the
+// registry would (a git source is read from the managed clone, a local
+// one from its path) rather than showing nothing.
+func bindingOf(svc *domain.Service) domain.ServiceBinding {
+	if svc.Binding != nil {
+		return *svc.Binding
+	}
+	if svc.Source.Kind == domain.SourceGit {
+		team := svc.Source
+		return domain.ServiceBinding{Mode: domain.BindingTeam, Team: &team}
+	}
+	return domain.ServiceBinding{
+		Mode:     domain.BindingLocal,
+		Local:    &domain.LocalCheckout{Path: svc.Source.Path},
+		Writable: true,
+	}
+}
+
+// renderServiceReads is the one line get_service and list_services print
+// about where a service's knowledge comes from on this machine, e.g.
+//
+//	reads: local ~/code/rider-service (branch feat/x, 3 uncommitted)
+//	reads: team git@github.com:org/rider-service.git @ stage (read-only; bind a checkout to contribute)
+//
+// It is the difference between "I can write a service memory here" and
+// "the call will be refused", so it is said before the agent finds out by
+// failing.
+func renderServiceReads(svc *domain.Service) string {
+	b := bindingOf(svc)
+	if b.Mode == domain.BindingTeam {
+		src := ""
+		if b.Team != nil {
+			src = b.Team.URL
+			if b.Team.Ref != "" {
+				src += " @ " + b.Team.Ref
+			}
+		}
+		if src == "" {
+			src = "git source"
+		}
+		return fmt.Sprintf("reads: team %s (read-only; bind a checkout to contribute)\n", src)
+	}
+	line := "reads: local"
+	if b.Local != nil {
+		if b.Local.Path != "" {
+			line += " " + b.Local.Path
+		}
+		var notes []string
+		if b.Local.Branch != "" {
+			notes = append(notes, "branch "+b.Local.Branch)
+		}
+		if b.Local.Dirty > 0 {
+			notes = append(notes, fmt.Sprintf("%d uncommitted", b.Local.Dirty))
+		}
+		if len(notes) > 0 {
+			line += " (" + strings.Join(notes, ", ") + ")"
+		}
+	}
+	return line + "\n"
+}

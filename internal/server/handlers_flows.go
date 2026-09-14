@@ -4,6 +4,10 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/engine"
+	"github.com/gs-sinha/sapien/internal/errs"
 )
 
 func (s *Server) handleFlowsList(w http.ResponseWriter, r *http.Request) {
@@ -16,18 +20,71 @@ func (s *Server) handleFlowsList(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+// createFlowRequest is POST /v1/flows' body: the YAML plus where it goes.
+// Path is relative to the chosen tier's flows directory; owner_kind names
+// the tier (local, workspace, service) and owner_id the service for the
+// service tier.
+type createFlowRequest struct {
+	YAML      string `json:"yaml"`
+	Path      string `json:"path,omitempty"`
+	OwnerKind string `json:"owner_kind,omitempty"`
+	OwnerID   string `json:"owner_id,omitempty"`
+}
+
 func (s *Server) handleFlowCreate(w http.ResponseWriter, r *http.Request) {
-	var req flowYAMLRequest
+	var req createFlowRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, err)
 		return
 	}
-	out, err := engineFrom(r.Context()).Flows().Create(r.Context(), req.YAML, req.Path)
+	flows := engineFrom(r.Context()).Flows()
+	var out *domain.Flow
+	var err error
+	if req.OwnerKind == "" {
+		// The engine's CreateIn defaults an empty owner to the local tier,
+		// but on the wire an absent owner_kind means an older client: a
+		// remote CLI, UI build or MCP bridge that predates tiers and has
+		// only ever known <workspace>/flows. Keeping Create here means an
+		// upgraded daemon does not quietly start filing those callers' flows
+		// somewhere the team never sees; a client that wants local says so.
+		out, err = flows.Create(r.Context(), req.YAML, req.Path)
+	} else {
+		out, err = flows.CreateIn(r.Context(), req.YAML, engine.CreateFlowOptions{
+			Path: req.Path, OwnerKind: req.OwnerKind, OwnerID: req.OwnerID,
+		})
+	}
 	if err != nil {
 		writeError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, out)
+}
+
+// rescopeFlowRequest is POST /v1/flows/{id}/rescope's body: the tier to
+// move the flow to, and the service when that tier is service.
+type rescopeFlowRequest struct {
+	OwnerKind string `json:"owner_kind"`
+	OwnerID   string `json:"owner_id,omitempty"`
+}
+
+func (s *Server) handleFlowRescope(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var req rescopeFlowRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, err)
+		return
+	}
+	if req.OwnerKind == "" {
+		writeError(w, errs.New(errs.Invalid, "owner_kind is required").
+			WithHint("pass owner_kind local, workspace, or service (with owner_id naming the service)"))
+		return
+	}
+	out, err := engineFrom(r.Context()).Flows().Rescope(r.Context(), id, req.OwnerKind, req.OwnerID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) handleFlowGet(w http.ResponseWriter, r *http.Request) {

@@ -19,6 +19,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/errs"
 	"github.com/gs-sinha/sapien/internal/gitsrc"
 	"github.com/gs-sinha/sapien/internal/registry"
 )
@@ -383,9 +384,23 @@ func TestSyncer_SyncOneFromDisk_DoesNotFetchOrDiscardLocalEdits(t *testing.T) {
 	assert.Equal(t, first, runGit(t, clone, env, "rev-parse", "HEAD"),
 		"SyncOneFromDisk must not fetch: the clone must still be on the commit it had")
 
-	// A sync a user or the periodic timer asked for still fetches and resets.
+	// A sync a user or the periodic timer asked for fetches, but refuses to
+	// reset a clone that carries a modified tracked file: the edit is work
+	// that exists nowhere else, and a cache is not where it belongs (PLAN
+	// §7b). It stays on disk and the error names it.
+	_, err = s.SyncOne(context.Background(), "order-service")
+	require.Error(t, err)
+	assert.Equal(t, errs.ServiceSource, errs.As(err).Code)
+	got, rerr = os.ReadFile(edited)
+	require.NoError(t, rerr)
+	assert.Equal(t, "written by an agent", string(got),
+		"a refused sync must leave the edit in place")
+	assert.Equal(t, first, runGit(t, clone, env, "rev-parse", "HEAD"))
+
+	// Once the edit is gone, the same sync brings the clone up to date.
+	runGit(t, clone, env, "checkout", "--", ".")
 	_, err = s.SyncOne(context.Background(), "order-service")
 	require.NoError(t, err)
 	assert.Equal(t, second, runGit(t, clone, env, "rev-parse", "HEAD"),
-		"SyncOne must still bring the clone up to date")
+		"SyncOne must bring a clean clone up to date")
 }

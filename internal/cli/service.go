@@ -28,6 +28,8 @@ func newServiceCmd(app *App) *cobra.Command {
 		newServiceListCmd(app),
 		newServiceRemoveCmd(app),
 		newServiceSyncCmd(app),
+		newServiceBindCmd(app),
+		newServiceUnbindCmd(app),
 	)
 	return cmd
 }
@@ -211,13 +213,47 @@ func newServiceListCmd(app *App) *cobra.Command {
 					last = s.LastIndexed.UTC().Format(time.RFC3339)
 				}
 				rows = append(rows, []string{
-					s.Name, string(s.Status), strconv.Itoa(s.OperationCount), coverageCell(s.Coverage), strconv.Itoa(len(s.AcceptedWarnings)), sourceString(s.Source), last,
+					s.Name, readsCell(s), string(s.Status), strconv.Itoa(s.OperationCount), coverageCell(s.Coverage), strconv.Itoa(len(s.AcceptedWarnings)), sourceString(s.Source), last,
 				})
 			}
-			app.Printer.Table([]string{"NAME", "STATUS", "OPS", "DOCS", "ACCEPTED", "SOURCE", "LAST INDEXED"}, rows)
+			app.Printer.Table([]string{"NAME", "READS", "STATUS", "OPS", "DOCS", "ACCEPTED", "SOURCE", "LAST INDEXED"}, rows)
 			return nil
 		},
 	}
+}
+
+// readsCell is the READS column: which source this machine reads the
+// service from (PLAN §7b). "local <branch>" for a checkout git can
+// describe, "local" for one it cannot, "team <ref>" for the managed clone
+// of the committed git source. It sits right after NAME because on a team
+// workspace it is the one thing that differs between two machines running
+// the same command. A row indexed before bindings existed has no Binding;
+// its effective Source says the same thing, minus the branch.
+func readsCell(svc domain.Service) string {
+	if b := svc.Binding; b != nil {
+		switch b.Mode {
+		case domain.BindingLocal:
+			if b.Local != nil && b.Local.Branch != "" {
+				return "local " + b.Local.Branch
+			}
+			return "local"
+		case domain.BindingTeam:
+			return "team " + teamRef(b.Team)
+		}
+	}
+	if svc.Source.Kind == domain.SourceGit {
+		return "team " + teamRef(&svc.Source)
+	}
+	return "local"
+}
+
+// teamRef names the ref a team source tracks, "default" when the
+// workspace entry leaves it to the remote's default branch.
+func teamRef(src *domain.Source) string {
+	if src == nil || src.Ref == "" {
+		return "default"
+	}
+	return src.Ref
 }
 
 // coverageCell is the "DOCS" column: documented operations over total, so a
@@ -309,6 +345,100 @@ func newServiceSyncCmd(app *App) *cobra.Command {
 
 	cmd.Flags().BoolVar(&showAccepted, "show-accepted", false, "also print each accepted warning and the reason it was accepted")
 	return cmd
+}
+
+func newServiceBindCmd(app *App) *cobra.Command {
+	return &cobra.Command{
+		Use:   "bind <name> <path>",
+		Short: "Read a service from a local checkout on this machine instead of its committed source",
+		Long: `Bind makes this machine read <name> from the checkout at <path> instead of
+the git source committed in sapien.workspace.yaml. The override is recorded
+in sapien.workspace.local.yaml (gitignored, per machine), never in the
+committed file, so teammates keep reading the team source. A bound service
+is reindexed on every save, and its service-scoped memories, examples and
+flows become writable: they land in the checkout and ride your own branch
+and pull request. Sapien never commits, pushes or checks out there.`,
+		Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			eng, err := app.Engine()
+			if err != nil {
+				return err
+			}
+			defer eng.Close()
+
+			svc, bindErr := eng.Services().Bind(cmd.Context(), args[0], absolutizeAgainstCwd(args[1]))
+			return printBindingResult(app, svc, bindErr)
+		},
+	}
+}
+
+func newServiceUnbindCmd(app *App) *cobra.Command {
+	return &cobra.Command{
+		Use:   "unbind <name>",
+		Short: "Read a service from its committed source again, dropping this machine's override",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			eng, err := app.Engine()
+			if err != nil {
+				return err
+			}
+			defer eng.Close()
+
+			svc, unbindErr := eng.Services().Unbind(cmd.Context(), args[0])
+			return printBindingResult(app, svc, unbindErr)
+		},
+	}
+}
+
+// printBindingResult renders the service a bind or unbind produced: the
+// Service under --json, otherwise one line saying what the service reads
+// now. Like add and sync, the record is printed even when the resync
+// failed, since the override was still recorded and the error says what
+// to fix.
+func printBindingResult(app *App, svc *domain.Service, err error) error {
+	if app.Printer.IsJSON() {
+		if svc != nil {
+			if jerr := app.Printer.JSON(svc); jerr != nil {
+				return jerr
+			}
+		}
+		return err
+	}
+	if svc != nil {
+		app.Printer.Line("%s", bindingLine(svc))
+		if svc.Error != "" {
+			app.Printer.Line("error: %s", svc.Error)
+		}
+	}
+	return err
+}
+
+// bindingLine states what svc reads on this machine and what that means
+// for writing knowledge into it, in one line.
+func bindingLine(svc *domain.Service) string {
+	b := svc.Binding
+	if b != nil && b.Mode == domain.BindingLocal {
+		where := svc.Source.Path
+		branch := ""
+		if b.Local != nil {
+			where = b.Local.Path
+			branch = b.Local.Branch
+		}
+		reads := "local"
+		if branch != "" {
+			reads += " " + branch
+		}
+		team := ""
+		if b.Team != nil && b.Team.Kind == domain.SourceGit {
+			team = " (team source: " + b.Team.URL + ")"
+		}
+		return svc.Name + ": reads " + reads + " at " + where + team + "; service-scoped memories, examples and flows are writable"
+	}
+	src := &svc.Source
+	if b != nil && b.Team != nil {
+		src = b.Team
+	}
+	return svc.Name + ": reads team " + teamRef(src) + " from " + sourceString(*src) + "; service-scoped knowledge is read-only until bound"
 }
 
 // absolutizeAgainstCwd resolves a relative local path against the current

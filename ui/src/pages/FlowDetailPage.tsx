@@ -9,6 +9,8 @@ import { FlowDescription } from './flows/FlowDescription';
 import { FlowStepCard } from './flows/FlowStepCard';
 import { RecentRuns } from './flows/RecentRuns';
 import { RunPanel } from './flows/RunPanel';
+import { isFlowOwnerKind, TierBadge } from './flows/tier';
+import { TierControl } from './flows/TierControl';
 import { ValidatePanel } from './flows/ValidatePanel';
 import { YamlSourcePanel } from './flows/YamlSourcePanel';
 import { applyStepEditsToYaml, hasAnyEdits, loadStepEdits, saveStepEdits } from './flows/stepEdits';
@@ -169,6 +171,8 @@ export default function FlowDetailPage() {
 
   const dirty = hasAnyEdits(edits);
   const liveStatuses = activeRun ? stepStatuses(activeRun) : {};
+  // A daemon from before tiers sends no owner_kind: no badge, no promote row.
+  const hasTier = isFlowOwnerKind(flow.owner_kind);
 
   // Order follows what this page is for: run the flow, watch it, read its
   // steps. The YAML source and the validator sit at the bottom, collapsed,
@@ -176,7 +180,10 @@ export default function FlowDetailPage() {
   return (
     <div className="space-y-4 p-4">
       <div>
-        <h1 className="mb-1 text-lg font-semibold">{flow.name || flow.id}</h1>
+        <div className="mb-1 flex flex-wrap items-center gap-2">
+          <h1 className="text-lg font-semibold">{flow.name || flow.id}</h1>
+          {hasTier && <TierBadge ownerKind={flow.owner_kind} ownerId={flow.owner_id} />}
+        </div>
         <FlowDescription text={flow.description} />
         <div className="max-w-2xl">
           <KeyValue
@@ -188,6 +195,11 @@ export default function FlowDetailPage() {
             ]}
           />
         </div>
+        {hasTier && (
+          <div className="mt-2">
+            <TierControl flow={flow} onChanged={reload} />
+          </div>
+        )}
       </div>
 
       <div>

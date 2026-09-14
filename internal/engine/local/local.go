@@ -202,6 +202,7 @@ func Open(ws *domain.Workspace, opts Options) (*Local, error) {
 
 	loc := memory.Locator{
 		WorkspaceDir: ws.Dir,
+		LocalDir:     workspace.LocalDir(ws),
 		ServiceDirs:  l.serviceDirs,
 		ReadOnly:     l.readOnlyServices,
 		FlowOwner: func(flowID string) (string, string) {

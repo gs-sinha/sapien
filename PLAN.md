@@ -305,6 +305,39 @@ auth:
 
 ---
 
+## 7b. Team workspaces: one committed composition, per-machine bindings, tiers (decided 2026-09-14)
+
+Two propagation paths already existed and each was half of what a team needs: a local source is watched, so a change on disk is in the catalog within a second; a git source is fetched on a timer, so a merge to the pinned branch reaches every teammate within ten minutes. The `team` workspace of 2026-09-06 (every service a git source, the workspace itself a git repo a new hire clones) failed because every service was forced to be one or the other for everyone, and because the managed clone a git source is read from is a cache the daemon `reset --hard`s on every tick: a doc promotion written into it was reverted, a memory written into it was stranded where nothing pushes from, and a colleague's uncommitted knowledge was invisible by construction.
+
+The model: the team commits the composition, each machine binds the services it is working on.
+
+```
+<workspace>/
+  sapien.workspace.yaml         committed: every service, as a git source
+  sapien.workspace.local.yaml   gitignored: this machine's bindings
+  .gitignore                    carries sapien.workspace.local.yaml (Init writes it; bind ensures it)
+  flows/  memories/  examples/  workspace tier: the team's, versioned with this repo
+  local/                        this machine's tier; self-ignoring (local/.gitignore = "*")
+    flows/  memories/
+  .sapien/                      state; self-ignoring
+```
+
+```yaml
+# sapien.workspace.local.yaml
+version: 1
+services:
+  rider-service:
+    path: ~/code/rider-service        # read rider-service from here instead of the committed git source
+```
+
+- **Binding.** `workspace.Load` applies the local file: the bound service's `Source` becomes the checkout (`ServiceRef.Team` keeps the committed source) so every path -- builder, watcher, syncer, locators -- treats it as a local source, and `workspace.Save` writes `Team` back so an override never leaks into the committed file. The git timer skips it, the file watcher covers it. `sapien service bind <name> <path>` / `unbind`, `PUT|DELETE /v1/services/{name}/binding`, and the service page's Source panel do this; `GET .../binding` also lists candidate checkouts (local sources of any registered workspace whose `origin` normalizes to the same repository).
+- **Read-only clones.** A service still read from its git source is read-only for service-scoped memories, examples and flows: the locators refuse with a hint to bind a checkout or use workspace scope. As insurance, `gitsrc.Manager.Sync` refuses to reset a clone with modified tracked files and names them. Nothing is ever written into `~/.sapien/repos`.
+- **"Listening to" is visible.** `domain.Service.Binding` records the mode (`local` | `team`), the committed source, and for a checkout its branch, commit, origin and count of uncommitted files, from read-only git queries. Sapien still never fetches, checks out or commits in a developer's repository.
+- **Tiers.** Flows: `local` (`local/flows`, this machine, the default for a new flow) -> `workspace` (`flows/`, the team repo) -> `service` (`api/flows` of a bound service). `Flows().Rescope` moves the file, keeping its name, and reindexes both owners; a `scope: flow` memory follows its flow (`local/memories` for a local flow). Memories keep their existing ladder personal (SQLite) -> workspace -> service, which is the same idea; examples stay workspace/service. Promotion is explicit: `sapien flow promote`, `rescope_flow`, the flow page.
+- **Contribution rides the developer's pull request.** Knowledge agents consume needs the same review gate as code; one agent's wrong "invariant" pushed straight to a shared branch would poison every agent on the team. So Sapien never commits or pushes: a promoted flow is an uncommitted file in the workspace repo, a service memory is an uncommitted file on the developer's branch, and the developer ships both the way they ship code. Not built yet, deliberately: fetching the workspace repo on the tick to show "behind by N", and a read-only unshipped-files view; both are the next step once bindings have been used for a while.
+
+---
+
 ## 8. Flow DSL
 
 ```yaml

@@ -16,6 +16,28 @@ function sourceLabel(s: Service): string {
   return s.source.path || 'local';
 }
 
+// Which source this machine reads the service from: "local · <branch>" for
+// a checkout, "team · <ref>" for the committed git source. Falls back to the
+// source kind for a daemon that does not report bindings yet.
+export function readsFromLabel(s: Service): string {
+  const b = s.binding;
+  if (b?.mode === 'local') return b.local?.branch ? `local · ${b.local.branch}` : 'local';
+  if (b?.mode === 'team') return b.team?.ref ? `team · ${b.team.ref}` : 'team';
+  return s.source.type === 'git' ? 'team' : 'local';
+}
+
+function ReadsFromPill({ service }: { service: Service }) {
+  const writable = service.binding ? service.binding.writable : service.source.type !== 'git';
+  return (
+    <span
+      title={writable ? 'Read from a local checkout: service-scoped knowledge is writable here' : 'Read from the team source: read-only here'}
+      className="inline-block rounded-full bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700 dark:bg-slate-800 dark:text-slate-300"
+    >
+      {readsFromLabel(service)}
+    </span>
+  );
+}
+
 export default function ServicesPage() {
   const { data, error, loading, reload } = useAsync(() => services.list(), []);
   const [syncingAll, setSyncingAll] = useState(false);
@@ -77,6 +99,7 @@ export default function ServicesPage() {
                 </Link>
               ),
             },
+            { key: 'reads', header: 'Reads from', render: (s) => <ReadsFromPill service={s} /> },
             { key: 'status', header: 'Status', render: (s) => <StatusPill status={s.status} /> },
             { key: 'ops', header: 'Operations', render: (s) => s.operation_count },
             {

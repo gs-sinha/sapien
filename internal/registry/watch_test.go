@@ -171,6 +171,73 @@ func TestWatcher_WorkspaceFlowsDirChange(t *testing.T) {
 	})
 }
 
+// The local tier does not exist when a fresh workspace's daemon starts
+// (newTestWorkspace creates no local/): Start must still end up watching
+// local/flows, and a flow written there reports as the "flows" area, the
+// same one <ws>/flows reports as.
+func TestWatcher_LocalFlowsDirChange(t *testing.T) {
+	ws, dir := newTestWorkspace(t)
+	_, statErr := os.Stat(filepath.Join(dir, domain.LocalDir))
+	require.True(t, os.IsNotExist(statErr), "the test workspace must start without a local tier")
+
+	rec := &changeRecorder{}
+	w, err := registry.NewWatcher(ws, nil, 50*time.Millisecond, rec.onChange)
+	require.NoError(t, err)
+	defer w.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	require.NoError(t, w.Start(ctx))
+
+	// Start created the tier, self-ignoring, so the watch could be set up.
+	assert.FileExists(t, filepath.Join(dir, domain.LocalDir, ".gitignore"))
+
+	time.Sleep(50 * time.Millisecond)
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir, domain.LocalDir, domain.FlowsDir, "scratch.flow.yaml"), []byte("version: 1\nsteps: []\n"), 0o644))
+
+	waitFor(t, 2*time.Second, func() bool {
+		for _, c := range rec.snapshot() {
+			for _, s := range c.Workspace {
+				if s == "flows" {
+					return true
+				}
+			}
+		}
+		return false
+	})
+}
+
+// A memory written under local/memories reports as "memories", so the
+// engine's one memory reindex (which reads both tiers) picks it up.
+func TestWatcher_LocalMemoriesDirChange(t *testing.T) {
+	ws, dir := newTestWorkspace(t)
+
+	rec := &changeRecorder{}
+	w, err := registry.NewWatcher(ws, nil, 50*time.Millisecond, rec.onChange)
+	require.NoError(t, err)
+	defer w.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	require.NoError(t, w.Start(ctx))
+
+	time.Sleep(50 * time.Millisecond)
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir, domain.LocalDir, domain.MemoriesDir, "note.md"), []byte("---\nid: mem_x\n---\nnote\n"), 0o644))
+
+	waitFor(t, 2*time.Second, func() bool {
+		for _, c := range rec.snapshot() {
+			for _, s := range c.Workspace {
+				if s == "memories" {
+					return true
+				}
+			}
+		}
+		return false
+	})
+}
+
 func TestWatcher_WorkspaceFileChange(t *testing.T) {
 	ws, _ := newTestWorkspace(t)
 

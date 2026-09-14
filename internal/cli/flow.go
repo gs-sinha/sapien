@@ -29,6 +29,8 @@ func newFlowCmd(app *App) *cobra.Command {
 		newFlowCreateCmd(app),
 		newFlowUpdateCmd(app),
 		newFlowPatchCmd(app),
+		newFlowPromoteCmd(app),
+		newFlowRescopeCmd(app),
 		newFlowDeleteCmd(app),
 		newFlowReferenceCmd(app),
 		newFlowRunCmd(app),
@@ -62,21 +64,44 @@ func newFlowListCmd(app *App) *cobra.Command {
 			}
 			rows := make([][]string, 0, len(flows))
 			for _, f := range flows {
-				rows = append(rows, []string{f.ID, f.Name, ownerString(f), strconv.Itoa(f.StepCount), strings.Join(f.Operations, ",")})
+				rows = append(rows, []string{f.ID, f.Name, flowTier(f.OwnerKind, f.OwnerID), strconv.Itoa(f.StepCount), strings.Join(f.Operations, ",")})
 			}
-			app.Printer.Table([]string{"ID", "NAME", "OWNER", "STEPS", "OPERATIONS"}, rows)
+			app.Printer.Table([]string{"ID", "NAME", "TIER", "STEPS", "OPERATIONS"}, rows)
 			return nil
 		},
 	}
 }
 
-// ownerString renders a flow's owner column: the specific owner id when the
-// flow belongs to a service, else its owner kind ("workspace").
-func ownerString(f domain.FlowSummary) string {
-	if f.OwnerID != "" {
-		return f.OwnerID
+// flowTier renders a flow's tier for the TIER column and the save
+// summaries: local (this machine), team (the workspace repo), or
+// service:<name>. "team" rather than "workspace" because the column answers
+// "who else sees this?", and the workspace directory is where the team's
+// copy lives.
+func flowTier(kind, ownerID string) string {
+	switch kind {
+	case domain.FlowOwnerLocal:
+		return "local"
+	case domain.FlowOwnerService:
+		if ownerID != "" {
+			return "service:" + ownerID
+		}
+		return "service"
+	default:
+		return "team"
 	}
-	return f.OwnerKind
+}
+
+// flowTierDescription is the longer form the tier commands print: where the
+// flow lives and who can see it there.
+func flowTierDescription(kind, ownerID string) string {
+	switch kind {
+	case domain.FlowOwnerLocal:
+		return "local tier: this machine only"
+	case domain.FlowOwnerService:
+		return "service tier: " + ownerID + "/api/flows, rides your branch"
+	default:
+		return "team tier: the workspace repo"
+	}
 }
 
 func newFlowShowCmd(app *App) *cobra.Command {
@@ -99,6 +124,9 @@ func newFlowShowCmd(app *App) *cobra.Command {
 			if app.Printer.IsJSON() {
 				return app.Printer.JSON(flow)
 			}
+			// The tier rides as a YAML comment so `flow show x > x.flow.yaml`
+			// still produces a file `flow create` accepts unchanged.
+			app.Printer.Line("# tier: %s (%s)", flowTier(flow.OwnerKind, flow.OwnerID), flow.Path)
 			app.Printer.Line("%s", flow.Source)
 			return nil
 		},
@@ -183,15 +211,28 @@ func printDiagnostics(p *Printer, result *domain.ValidationResult) {
 }
 
 func newFlowCreateCmd(app *App) *cobra.Command {
-	var destPath string
+	var destPath, scope, service string
 	cmd := &cobra.Command{
-		Use:   "create <file>",
-		Short: "Save a flow file into the workspace",
-		Long: `Validate the flow YAML in <file> and save it under the workspace's flows/
-directory as <id>.flow.yaml (or --path, relative to flows/). Prints a summary
-of what was saved, never the document.`,
+		Use:   "create <file> [--scope local|workspace|service] [--service <name>]",
+		Short: "Save a flow file into a tier (default: local, this machine only)",
+		Long: `Validate the flow YAML in <file> and save it as <id>.flow.yaml (or --path,
+relative to the chosen tier's flows directory) into one of three tiers:
+
+  local      <workspace>/local/flows: this machine only, never committed (default)
+  workspace  <workspace>/flows: the team's repo, shared with everyone who clones it
+  service    <service>/api/flows: the owning service's own repo; needs --service,
+             and that service bound to a local checkout here (sapien service bind)
+
+Start local. When the flow runs green and others would benefit from it, move
+it up with "sapien flow promote <id>". Prints a summary of what was saved,
+never the document.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			kind, owner, err := flowScopeFlags(scope, service)
+			if err != nil {
+				return err
+			}
+
 			eng, err := app.Engine()
 			if err != nil {
 				return err
@@ -204,15 +245,210 @@ of what was saved, never the document.`,
 				return errs.Wrap(errs.Invalid, err, "reading %s", path)
 			}
 
-			flow, err := eng.Flows().Create(cmd.Context(), string(data), destPath)
+			flow, err := eng.Flows().CreateIn(cmd.Context(), string(data), engine.CreateFlowOptions{
+				Path: destPath, OwnerKind: kind, OwnerID: owner,
+			})
 			if err != nil {
 				return err
 			}
-			return printFlowSaved(app, "saved", flow)
+			if err := printFlowSaved(app, "saved", flow); err != nil {
+				return err
+			}
+			if !app.Printer.IsJSON() && flow.OwnerKind == domain.FlowOwnerLocal {
+				app.Printer.Line("%s", app.Printer.Dim("local tier: this machine only; `sapien flow promote "+flow.ID+"` shares it with the team when it works"))
+			}
+			return nil
 		},
 	}
-	cmd.Flags().StringVar(&destPath, "path", "", "destination inside the workspace flows directory (default: <id>.flow.yaml)")
+	cmd.Flags().StringVar(&destPath, "path", "", "destination relative to the chosen tier's flows directory (default: <id>.flow.yaml)")
+	cmd.Flags().StringVar(&scope, "scope", domain.FlowOwnerLocal, "tier to save into: local (this machine), workspace (the team's repo), or service (needs --service)")
+	cmd.Flags().StringVar(&service, "service", "", "owning service for --scope service")
 	return cmd
+}
+
+// flowScopeFlags turns --scope/--service into the owner kind and id the
+// engine takes, refusing the combinations that would file a flow somewhere
+// the user did not mean: service scope without a service, or a service
+// named for a tier that ignores it.
+func flowScopeFlags(scope, service string) (kind, owner string, err error) {
+	switch scope {
+	case "", domain.FlowOwnerLocal:
+		kind = domain.FlowOwnerLocal
+	case domain.FlowOwnerWorkspace, "team":
+		kind = domain.FlowOwnerWorkspace
+	case domain.FlowOwnerService:
+		kind = domain.FlowOwnerService
+	default:
+		return "", "", errs.New(errs.Invalid, "unknown scope %q", scope).
+			WithHint("--scope is local (this machine), workspace (the team's repo), or service (the owning service; pass --service)")
+	}
+	if kind == domain.FlowOwnerService {
+		if service == "" {
+			return "", "", errs.New(errs.Invalid, "service scope requires --service").
+				WithHint("pass --service <name>: the service whose api/flows should own this flow; it must be bound to a local checkout here (see `sapien service bind`)")
+		}
+		return kind, service, nil
+	}
+	if service != "" {
+		return "", "", errs.New(errs.Invalid, "--service applies to --scope service only, not %s", kind).
+			WithHint("drop --service, or pass --scope service")
+	}
+	return kind, "", nil
+}
+
+// tierRank orders the ladder promote climbs: local < workspace < service.
+func tierRank(kind string) int {
+	switch kind {
+	case domain.FlowOwnerLocal:
+		return 0
+	case domain.FlowOwnerService:
+		return 2
+	default:
+		return 1
+	}
+}
+
+// newFlowPromoteCmd is `sapien flow promote <id> [--to workspace|service]
+// [--service <name>]`: move a flow one rung up the ladder (local ->
+// workspace -> service), or straight to --to. It refuses to move sideways
+// or down, so "promote" always means "more people can see this now";
+// `flow rescope` is the form with no such opinion.
+func newFlowPromoteCmd(app *App) *cobra.Command {
+	var to, service string
+	cmd := &cobra.Command{
+		Use:   "promote <id> [--to workspace|service] [--service <name>]",
+		Short: "Move a flow up a tier: local -> workspace -> service",
+		Long: `Move a flow up the tier ladder, keeping its file name:
+
+  local      this machine only (<workspace>/local/flows)
+  workspace  the team's repo (<workspace>/flows), shared with everyone who clones it
+  service    the owning service's repo (<service>/api/flows); needs --service, and
+             that service bound to a local checkout here, so the flow rides your branch
+
+Without --to the flow moves one rung up. Promote when the flow has run green
+and others would benefit; use "sapien flow rescope" to move a flow down.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			eng, err := app.Engine()
+			if err != nil {
+				return err
+			}
+			defer eng.Close()
+
+			flow, err := eng.Flows().Get(cmd.Context(), args[0])
+			if err != nil {
+				return err
+			}
+			current := flow.OwnerKind
+			if current == "" {
+				current = domain.FlowOwnerWorkspace
+			}
+
+			target := to
+			if target == "" {
+				switch current {
+				case domain.FlowOwnerLocal:
+					target = domain.FlowOwnerWorkspace
+				case domain.FlowOwnerWorkspace:
+					target = domain.FlowOwnerService
+				default:
+					return errs.New(errs.Invalid, "flow %s is already in the service tier (%s); there is nothing above it", flow.ID, flow.OwnerID)
+				}
+			}
+			kind, owner, err := flowScopeFlags(target, service)
+			if err != nil {
+				return err
+			}
+			if kind == domain.FlowOwnerLocal {
+				return errs.New(errs.Invalid, "promote moves a flow up; local is the bottom of the ladder").
+					WithHint("use `sapien flow rescope " + flow.ID + " --scope local` to move it down")
+			}
+			if tierRank(kind) <= tierRank(current) {
+				return errs.New(errs.Invalid, "flow %s is already in the %s tier; promote only moves up", flow.ID, flowTier(current, flow.OwnerID)).
+					WithHint("use `sapien flow rescope " + flow.ID + " --scope <tier>` to move it elsewhere")
+			}
+			return rescopeFlow(app, cmd.Context(), eng, flow, kind, owner)
+		},
+	}
+	cmd.Flags().StringVar(&to, "to", "", "target tier: workspace or service (default: the next tier up)")
+	cmd.Flags().StringVar(&service, "service", "", "owning service, required when the target is the service tier")
+	return cmd
+}
+
+// newFlowRescopeCmd is `sapien flow rescope <id> --scope <tier> [--service
+// <name>]`: the explicit form of promote, allowed to move a flow in any
+// direction.
+func newFlowRescopeCmd(app *App) *cobra.Command {
+	var scope, service string
+	cmd := &cobra.Command{
+		Use:   "rescope <id> --scope local|workspace|service [--service <name>]",
+		Short: "Move a flow to another tier without losing it",
+		Long: `Move a flow to another tier, keeping its file name: local is this machine
+only, workspace is the team's repo, service is the owning service's repo
+(needs --service and a bound local checkout). Unlike "flow promote" this
+moves in any direction, so a shared flow can come back to local for private
+experimentation.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if scope == "" {
+				return errs.New(errs.Invalid, "flow: rescope requires --scope").
+					WithHint("pass --scope local|workspace|service (with --service <name> for service)")
+			}
+			kind, owner, err := flowScopeFlags(scope, service)
+			if err != nil {
+				return err
+			}
+
+			eng, err := app.Engine()
+			if err != nil {
+				return err
+			}
+			defer eng.Close()
+
+			flow, err := eng.Flows().Get(cmd.Context(), args[0])
+			if err != nil {
+				return err
+			}
+			current := flow.OwnerKind
+			if current == "" {
+				current = domain.FlowOwnerWorkspace
+			}
+			if current == kind && (kind != domain.FlowOwnerService || flow.OwnerID == owner) {
+				return errs.New(errs.Invalid, "flow %s is already in the %s tier", flow.ID, flowTier(current, flow.OwnerID))
+			}
+			return rescopeFlow(app, cmd.Context(), eng, flow, kind, owner)
+		},
+	}
+	cmd.Flags().StringVar(&scope, "scope", "", "local|workspace|service (required)")
+	cmd.Flags().StringVar(&service, "service", "", "owning service for --scope service")
+	return cmd
+}
+
+// rescopeFlow is what promote and rescope share once the target is
+// settled: the engine move, then where the file went.
+func rescopeFlow(app *App, ctx context.Context, eng engine.Engine, flow *domain.Flow, kind, owner string) error {
+	oldPath := flow.Path
+	moved, err := eng.Flows().Rescope(ctx, flow.ID, kind, owner)
+	if err != nil {
+		return err
+	}
+	if app.Printer.IsJSON() {
+		return app.Printer.JSON(map[string]any{
+			"id":       moved.ID,
+			"tier":     moved.OwnerKind,
+			"service":  moved.OwnerID,
+			"old_path": oldPath,
+			"new_path": moved.Path,
+			"flow":     summarizeFlow(moved),
+		})
+	}
+	desc := flowTierDescription(moved.OwnerKind, moved.OwnerID)
+	if oldPath == "" && moved.Path == "" {
+		app.Printer.Line("moved flow %s to the %s", moved.ID, desc)
+		return nil
+	}
+	app.Printer.Line("%s -> %s (%s)", oldPath, moved.Path, desc)
+	return nil
 }
 
 func newFlowDeleteCmd(app *App) *cobra.Command {

@@ -28,6 +28,27 @@ const sampleFlows: FlowSummary[] = [
     hash: 'def',
     updated: '2026-01-02T00:00:00Z',
   },
+  {
+    id: 'scratch-allocate',
+    name: 'Scratch allocate',
+    path: 'local/flows/scratch-allocate.flow.yaml',
+    owner_kind: 'local',
+    step_count: 1,
+    operations: ['qcom.allocate'],
+    hash: 'ghi',
+    updated: '2026-01-03T00:00:00Z',
+  },
+  {
+    id: 'qcom-smoke',
+    name: 'QCOM smoke',
+    path: '/home/me/code/qcom/api/flows/qcom-smoke.flow.yaml',
+    owner_kind: 'service',
+    owner_id: 'qcom',
+    step_count: 1,
+    operations: ['qcom.ping'],
+    hash: 'jkl',
+    updated: '2026-01-04T00:00:00Z',
+  },
 ];
 
 vi.mock('../api/client', () => ({
@@ -67,5 +88,50 @@ describe('FlowsPage', () => {
 
     expect(screen.getByText('billing-refund')).toBeInTheDocument();
     expect(screen.queryByText('qcom-order')).not.toBeInTheDocument();
+  });
+
+  it('shows each flow\'s tier: local, team, or service:<owner>', async () => {
+    render(
+      <MemoryRouter>
+        <FlowsPage />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getByText('qcom-order')).toBeInTheDocument());
+
+    const rowOf = (id: string) => screen.getByRole('link', { name: id }).closest('tr')!;
+    expect(rowOf('qcom-order')).toHaveTextContent('team');
+    expect(rowOf('scratch-allocate')).toHaveTextContent('local');
+    expect(rowOf('qcom-smoke')).toHaveTextContent('service:qcom');
+  });
+
+  it('tier chips hide a tier and compose with the text filter', async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <FlowsPage />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getByText('qcom-order')).toBeInTheDocument());
+
+    // Every tier is on until one is toggled off.
+    const team = screen.getByRole('button', { name: 'Team' });
+    expect(team).toHaveAttribute('aria-pressed', 'true');
+    await user.click(team);
+    expect(team).toHaveAttribute('aria-pressed', 'false');
+
+    expect(screen.queryByText('qcom-order')).not.toBeInTheDocument();
+    expect(screen.queryByText('billing-refund')).not.toBeInTheDocument();
+    expect(screen.getByText('scratch-allocate')).toBeInTheDocument();
+    expect(screen.getByText('qcom-smoke')).toBeInTheDocument();
+
+    // The text filter narrows what the chips left.
+    await user.type(screen.getByPlaceholderText(/filter by id/i), 'smoke');
+    expect(screen.getByText('qcom-smoke')).toBeInTheDocument();
+    expect(screen.queryByText('scratch-allocate')).not.toBeInTheDocument();
+
+    // Toggling the tier back on brings its flows back, still under the text filter.
+    await user.click(team);
+    expect(screen.queryByText('qcom-order')).not.toBeInTheDocument();
+    expect(screen.getByText('qcom-smoke')).toBeInTheDocument();
   });
 });

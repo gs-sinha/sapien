@@ -14,7 +14,9 @@ import { currentWorkspace } from '../state/workspace';
 import type { WorkspaceInfo } from '../state/workspace';
 import type {
   AddServiceRequest,
+  BindingInfo,
   CallRequest,
+  CreateFlowRequest,
   ContextBundle,
   ContextRequest,
   DefaultEnvironmentResponse,
@@ -26,8 +28,11 @@ import type {
   ExampleQueryParams,
   Field,
   Flow,
+  FlowOwnerKind,
   FlowSummary,
   FlowYAMLRequest,
+  FrictionPreview,
+  FrictionReport,
   HealthResponse,
   Memory,
   MemoryQueryParams,
@@ -100,6 +105,8 @@ export const NULLABLE_ARRAY_KEYS = new Set([
   'added', 'removed', 'changed',
   // search.go / context bundle
   'matched_on', 'examples', 'flows', 'runs', 'memories', 'scopes',
+  // engine.go (BindingInfo)
+  'candidates',
   // diagnose (bypasses this client today, kept for when it doesn't)
   'hints',
 ]);
@@ -251,6 +258,13 @@ export const services = {
   sync: (id?: string): Promise<Service[]> =>
     orEmpty(id ? post(`/v1/services/${encodeURIComponent(id)}/sync`) : post('/v1/services/sync')),
   reindex: (): Promise<void> => post('/v1/services/reindex'),
+  // Which source this machine reads the service from, plus local checkouts
+  // of the same repository it could read from instead. bind/unbind switch
+  // between a local checkout and the committed team source (recorded in the
+  // gitignored sapien.workspace.local.yaml); both answer the updated Service.
+  binding: (id: string): Promise<BindingInfo> => get(`/v1/services/${encodeURIComponent(id)}/binding`),
+  bind: (id: string, path: string): Promise<Service> => put(`/v1/services/${encodeURIComponent(id)}/binding`, { path }),
+  unbind: (id: string): Promise<Service> => del(`/v1/services/${encodeURIComponent(id)}/binding`),
 };
 
 // ---- operations / schemas / docs ----
@@ -351,13 +365,17 @@ export function callOperation(req: CallRequest): Promise<Run> {
 export const flows = {
   list: (q?: string): Promise<FlowSummary[]> => orEmpty(get(`/v1/flows${buildQuery({ q })}`)),
   get: (id: string): Promise<Flow> => get(`/v1/flows/${encodeURIComponent(id)}`),
-  create: (req: FlowYAMLRequest): Promise<Flow> => post('/v1/flows', req),
+  create: (req: CreateFlowRequest): Promise<Flow> => post('/v1/flows', req),
   update: (id: string, req: FlowYAMLRequest): Promise<Flow> => put(`/v1/flows/${encodeURIComponent(id)}`, req),
   delete: (id: string): Promise<void> => del(`/v1/flows/${encodeURIComponent(id)}`),
   validate: (req: FlowYAMLRequest): Promise<ValidationResult> => post('/v1/flows/validate', req),
   parse: (req: FlowYAMLRequest): Promise<Flow> => post('/v1/flows/parse', req),
   reference: (topic?: string): Promise<string> => get(`/v1/flows/reference${buildQuery({ topic })}`),
   run: (id: string, opts: RunOptionsWire = {}): Promise<Run> => post(`/v1/flows/${encodeURIComponent(id)}/run`, opts),
+  // Move a flow between tiers (local -> workspace -> service); ownerId names
+  // the service for the service tier. Mirrors `sapien flow promote`.
+  rescope: (id: string, ownerKind: FlowOwnerKind, ownerId?: string): Promise<Flow> =>
+    post(`/v1/flows/${encodeURIComponent(id)}/rescope`, { owner_kind: ownerKind, ...(ownerId ? { owner_id: ownerId } : {}) }),
 };
 
 // ---- runs ----
@@ -400,6 +418,20 @@ export const examples = {
   forOperations: (operationIDs: string[], limit?: number): Promise<SavedExample[]> =>
     orEmpty(get(`/v1/examples/for-operations${buildQuery({ op: operationIDs, limit })}`)),
   reindex: (): Promise<void> => post('/v1/examples/reindex'),
+};
+
+// ---- friction reports ----
+
+// Friction reports are per machine, not per workspace (internal/server's
+// friction handlers read the store directly): an agent files one about
+// Sapien itself from whichever workspace it happens to be in, and a human
+// reviews the queue as a whole. `send` and `drop` return the updated/void
+// result; the caller (FrictionPage) reloads its own list afterwards.
+export const friction = {
+  list: (): Promise<FrictionReport[]> => orEmpty(get('/v1/friction')),
+  preview: (id: string): Promise<FrictionPreview> => get(`/v1/friction/${encodeURIComponent(id)}/preview`),
+  send: (id: string): Promise<FrictionReport> => post(`/v1/friction/${encodeURIComponent(id)}/send`),
+  drop: (id: string): Promise<void> => del(`/v1/friction/${encodeURIComponent(id)}`),
 };
 
 // ---- context ----

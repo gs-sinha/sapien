@@ -6,6 +6,41 @@ and phase numbers refer to PLAN.md §34's roadmap.
 
 ## [Unreleased]
 
+### Added
+- **Team workspaces: one committed composition, per-machine bindings.** The
+  committed `sapien.workspace.yaml` lists every service as a git source, the
+  team's view; a gitignored `sapien.workspace.local.yaml` binds a service to
+  a local checkout on this machine (`sapien service bind <name> <path>`,
+  `unbind`, the service page's Source panel, `PUT/DELETE
+  /v1/services/{name}/binding`). A bound service is read from the checkout,
+  watched on every save, and writable for service-scoped knowledge, so a
+  contribution rides the developer's own branch and pull request. Every
+  service now says what it is listening to (`local` with branch, commit and
+  uncommitted count, or `team` with the pinned ref) and what it could listen
+  to, with candidate checkouts found from other registered workspaces.
+- **Flow tiers.** A new flow lands in `local/flows` (this machine, ignored
+  by git) by default; `sapien flow promote`, the `rescope_flow` MCP tool and
+  the flow page move it to the team's `flows/` and, when the owning service
+  is bound, into that service's `api/flows`. `scope: flow` memories follow
+  their flow.
+- **`report_friction`: agents can file feedback about Sapien itself.** An
+  agent that hit a wrong tool shape, a missing capability or misleading
+  docs queues a report under `~/.sapien/friction`; nothing leaves the
+  machine. A human reviews it with `sapien friction list` / `show` and
+  posts it as a GitHub Discussion on the Sapien repo with `sapien friction
+  send` (through the `gh` CLI, which holds the auth; `friction.repo` and
+  `friction.category` in the user config choose where). Reports that look
+  like they carry a secret are refused at creation, since they go public.
+
+### Fixed
+- **Nothing is written into a managed git clone any more.** A service read
+  from its git source is read-only for service-scoped memories, examples and
+  flows: the daemon `reset --hard`s that clone every ten minutes, so a doc
+  promotion written into it was reverted and a new memory was stranded where
+  nothing pushes from. The write now fails with a hint to bind a checkout or
+  use workspace scope, and the sync refuses to reset a clone that carries
+  modified tracked files rather than discarding them.
+
 ## [1.2.0] - 2026-09-13
 
 ### Added

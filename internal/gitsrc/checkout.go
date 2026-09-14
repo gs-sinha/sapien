@@ -100,7 +100,9 @@ func (m *Manager) Ensure(ctx context.Context, src domain.Source) (*Checkout, err
 // ref (PLAN §18): a branch is reset hard to origin/<ref>; a tag or commit is
 // checked out directly. It clones first (via Ensure) if the managed clone
 // does not exist yet, which always reports changed=true. Otherwise changed
-// reports whether the resolved commit moved.
+// reports whether the resolved commit moved. A clone with modified tracked
+// files is never reset: Sync fails with errs.ServiceSource and leaves the
+// modifications in place (see the guard below).
 func (m *Manager) Sync(ctx context.Context, src domain.Source) (*Checkout, bool, error) {
 	subdir, err := validateGitSource(src)
 	if err != nil {
@@ -124,6 +126,25 @@ func (m *Manager) Sync(ctx context.Context, src domain.Source) (*Checkout, bool,
 
 	if _, err := m.run(ctx, dir, "fetch", "--prune", "origin"); err != nil {
 		return nil, false, withDetail(err, "url", src.URL)
+	}
+
+	// Nothing may be written into a managed clone: the locators refuse
+	// service-scoped writes for git sources, and a bound checkout is where
+	// edits belong (PLAN §7b). This guard is the insurance behind that
+	// rule. An editor opened on the cache path, or an agent built before
+	// the rule existed, can still put work here, and the reset below would
+	// erase it without a trace; refusing keeps the work and turns it into a
+	// visible sync error that says where it should have gone. Untracked
+	// files are not modifications (sapien.json lives here), and the check
+	// runs before sparse-checkout can touch the tree.
+	if dirty, err := m.run(ctx, dir, "status", "--porcelain", "--untracked-files=no"); err != nil {
+		return nil, false, withDetail(err, "url", src.URL)
+	} else if files := nonEmptyLines(dirty); len(files) > 0 {
+		return nil, false, errs.New(errs.ServiceSource, "managed clone at %s has local modifications; refusing to reset", dir).
+			WithDetail("url", src.URL).
+			WithDetail("dir", dir).
+			WithDetail("files", files).
+			WithHint("this clone is a cache that Sapien resets on every sync; move the edits to a checkout of your own and read the service from it with `sapien service bind <name> <path>`, or discard them with `git -C " + dir + " checkout -- .`")
 	}
 
 	// Keep sparse-checkout in sync in case Subdir changed since the clone.

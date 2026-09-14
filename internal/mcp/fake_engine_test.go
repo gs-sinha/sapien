@@ -1210,9 +1210,10 @@ func (a fakeFlows) CreateIn(ctx context.Context, yamlSrc string, opts engine.Cre
 	for i := range a.st.flows {
 		if a.st.flows[i].ID == created.ID {
 			a.st.flows[i].OwnerKind, a.st.flows[i].OwnerID = kind, opts.OwnerID
-			if kind == domain.FlowOwnerLocal {
-				a.st.flows[i].Path = filepath.Join(domain.LocalDir, domain.FlowsDir, filepath.Base(a.st.flows[i].Path))
-			}
+			// Create stored the caller's tier-relative path; file it the way
+			// the real engine reports it, so tests see the same shapes an
+			// agent will (local/flows/sub/dir/x.flow.yaml).
+			a.st.flows[i].Path = fakeTierPath(kind, opts.OwnerID, a.st.flows[i].Path)
 			c := a.st.flows[i]
 			return &c, nil
 		}
@@ -1220,15 +1221,31 @@ func (a fakeFlows) CreateIn(ctx context.Context, yamlSrc string, opts engine.Cre
 	return created, nil
 }
 
+// Rescope re-stamps the owner and re-homes the file name under the new
+// tier's flows directory, as the real engine does.
 func (a fakeFlows) Rescope(_ context.Context, id string, ownerKind, ownerID string) (*domain.Flow, error) {
 	a.st.mu.Lock()
 	defer a.st.mu.Unlock()
 	for i := range a.st.flows {
 		if a.st.flows[i].ID == id {
 			a.st.flows[i].OwnerKind, a.st.flows[i].OwnerID = ownerKind, ownerID
+			a.st.flows[i].Path = fakeTierPath(ownerKind, ownerID, filepath.Base(a.st.flows[i].Path))
 			c := a.st.flows[i]
 			return &c, nil
 		}
 	}
 	return nil, errs.New(errs.FlowNotFound, "flow %q not found", id)
+}
+
+// fakeTierPath is where a flow file lives for a tier, relative to the
+// workspace root (or the service package for the service tier).
+func fakeTierPath(kind, ownerID, rel string) string {
+	switch kind {
+	case domain.FlowOwnerLocal:
+		return filepath.ToSlash(filepath.Join(domain.LocalDir, domain.FlowsDir, rel))
+	case domain.FlowOwnerService:
+		return filepath.ToSlash(filepath.Join(ownerID, domain.ServicePackageDir, domain.FlowsDir, rel))
+	default:
+		return filepath.ToSlash(filepath.Join(domain.FlowsDir, rel))
+	}
 }

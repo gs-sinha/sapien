@@ -23,12 +23,12 @@ func (srv *server) registerTools(s *sdkmcp.Server) {
 
 	sdkmcp.AddTool(s, &sdkmcp.Tool{
 		Name:        "list_services",
-		Description: "List registered services with descriptions and operation counts.",
+		Description: "List registered services with descriptions, operation counts, and what each is read from on this machine (a local checkout, writable; or the team's git source, read-only).",
 	}, srv.listServices)
 
 	sdkmcp.AddTool(s, &sdkmcp.Tool{
 		Name:        "get_service",
-		Description: "Get one service's description, owners, concepts, environment base URLs, and doc list.",
+		Description: "Get one service's description, owners, concepts, environment base URLs, doc list, and binding: what this machine reads it from. A service read from the team's git source is read-only for service-scoped memories, examples and flows until a local checkout is bound.",
 	}, srv.getService)
 
 	sdkmcp.AddTool(s, &sdkmcp.Tool{
@@ -68,7 +68,7 @@ func (srv *server) registerTools(s *sdkmcp.Server) {
 
 	sdkmcp.AddTool(s, &sdkmcp.Tool{
 		Name:        "list_flows",
-		Description: "List flows, optionally filtered by name, tag, or operation substring.",
+		Description: "List flows, optionally filtered by name, tag, or operation substring. Each carries its tier: local (this machine only), workspace (the team's repo), or service (the owning service's api/flows).",
 	}, srv.listFlows)
 
 	sdkmcp.AddTool(s, &sdkmcp.Tool{
@@ -93,23 +93,33 @@ func (srv *server) registerTools(s *sdkmcp.Server) {
 
 	sdkmcp.AddTool(s, &sdkmcp.Tool{
 		Name:        "validate_flow",
-		Description: "Validate flow YAML against the catalog; returns diagnostics with line numbers and suggestions.",
+		Description: "Validate flow YAML against the catalog; returns diagnostics with line numbers and suggestions. Pass `flow_yaml` inline, or `path` to a file already on disk (relative to <workspace>/flows, or to the workspace root when inside flows/ or local/flows/).",
 	}, srv.validateFlow)
 
 	sdkmcp.AddTool(s, &sdkmcp.Tool{
 		Name:        "create_flow",
-		Description: "Validate and write a new flow file. `path` (default `<id>.flow.yaml`) is relative to the workspace's flows directory, not the workspace root; it must stay inside that directory and end in .flow.yaml. Returns a lean summary (id, path, step counts, operations, warnings, bytes), never the flow document -- use get_flow to read it back, or patch_flow for a small targeted edit instead of resending the whole document.",
+		Description: "Validate and write a new flow file into a tier: `scope` local (default: <workspace>/local/flows, this machine only, never committed), workspace (<workspace>/flows, the team's repo), or service (<service>/api/flows, needs `service` and a bound local checkout). Start local; promote with rescope_flow once it runs green. `path` (default `<id>.flow.yaml`) is relative to the chosen tier's flows directory, not the workspace root; it must stay inside that directory and end in .flow.yaml. Returns a lean summary (id, path, tier, step counts, operations, warnings, bytes), never the flow document -- use get_flow to read it back, or patch_flow for a small targeted edit instead of resending the whole document.",
 	}, srv.createFlow)
 
 	sdkmcp.AddTool(s, &sdkmcp.Tool{
 		Name:        "update_flow",
-		Description: "Validate and overwrite an existing flow's YAML, from `flow_yaml` sent inline or a `path` inside the flows directory this agent already edited on disk. Returns the same lean summary as create_flow. Prefer patch_flow for a small, targeted edit to a large flow.",
+		Description: "Validate and overwrite an existing flow's YAML, from `flow_yaml` sent inline or a `path` this agent already edited on disk: relative to <workspace>/flows, or relative to the workspace root when it lies inside flows/ or local/flows/. Returns the same lean summary as create_flow. Prefer patch_flow for a small, targeted edit to a large flow.",
 	}, srv.updateFlow)
 
 	sdkmcp.AddTool(s, &sdkmcp.Tool{
 		Name:        "patch_flow",
 		Description: "Apply targeted edits to one saved flow's steps, inputs, or metadata (set_step, merge_step, add_step, remove_step, set_inputs, set_meta) without resending the whole document; validates the result and returns the same lean summary as create_flow/update_flow. Cheaper than update_flow for a one-line change to a large flow.",
 	}, srv.patchFlow)
+
+	sdkmcp.AddTool(s, &sdkmcp.Tool{
+		Name:        "rescope_flow",
+		Description: "Move a flow to another tier without losing it, keeping its file name. The ladder: local is this machine only (<workspace>/local/flows, never committed); workspace is the team's git repo (<workspace>/flows, shared with everyone who clones the workspace); service is the owning service's own repo (<service>/api/flows) and needs that service bound to a local checkout here, so the flow rides your branch and PR. Promote a flow up the ladder once it has run green and others would benefit; move it down to keep experimenting privately. Returns the lean create_flow summary plus old_path and new_path.",
+	}, srv.rescopeFlow)
+
+	sdkmcp.AddTool(s, &sdkmcp.Tool{
+		Name:        "report_friction",
+		Description: reportFrictionDescription,
+	}, srv.reportFriction)
 
 	sdkmcp.AddTool(s, &sdkmcp.Tool{
 		Name:        "run_flow",
@@ -133,7 +143,7 @@ func (srv *server) registerTools(s *sdkmcp.Server) {
 
 	sdkmcp.AddTool(s, &sdkmcp.Tool{
 		Name:        "create_memory",
-		Description: "Record a new memory; source is attributed to this MCP client. Choose scope deliberately: scope decides storage and sharing, not subject. service = written to <service>/api/memories, committed and reviewable, reaches everyone who clones the repo; workspace = <workspace>/memories, local to this machine unless the workspace is a git repo; personal = this machine only. Ask: would this still be true in a fresh environment with empty databases? yes -> service, no -> workspace. A memory that mixes both must be split, not forced into one scope. A workspace memory may still carry a service subject. Memory is a staging area: once a fact stabilises, get_promotion_target says where it belongs in api/docs or the contract.",
+		Description: "Record a new memory; source is attributed to this MCP client. Choose scope deliberately: scope decides storage and sharing, not subject. service = written to <service>/api/memories, committed and reviewable, reaches everyone who clones the repo; workspace = <workspace>/memories, local to this machine unless the workspace is a git repo; personal = this machine only. Ask: would this still be true in a fresh environment with empty databases? yes -> service, no -> workspace. A memory that mixes both must be split, not forced into one scope. A workspace memory may still carry a service subject. Service scope needs the service bound to a local checkout on this machine (see get_service's binding); a service read from the team's git source is read-only and the call is refused with a hint to bind one. Memory is a staging area: once a fact stabilises, get_promotion_target says where it belongs in api/docs or the contract.",
 	}, srv.createMemory)
 
 	sdkmcp.AddTool(s, &sdkmcp.Tool{

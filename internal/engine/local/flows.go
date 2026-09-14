@@ -2,11 +2,14 @@ package local
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/gs-sinha/sapien/internal/catalog"
@@ -15,6 +18,7 @@ import (
 	"github.com/gs-sinha/sapien/internal/errs"
 	"github.com/gs-sinha/sapien/internal/expr"
 	"github.com/gs-sinha/sapien/internal/flow"
+	"github.com/gs-sinha/sapien/internal/workspace"
 )
 
 // flowAPI implements engine.FlowAPI over a Local (PLAN §8, §23.1).
@@ -151,20 +155,23 @@ func (f *flowAPI) Get(ctx context.Context, id string) (*domain.Flow, error) {
 }
 
 // resolveFlowPath resolves a FlowSummary's Path to an absolute path.
-// Workspace-owned flows already carry an absolute Path (reindexOwnerFlows
-// always writes one); service-owned flows carry a Path relative to the
-// service's API package directory (registry.scanFlows's convention), so it
-// is joined against the service's resolved PackageDir.
+// Workspace- and local-owned flows already carry an absolute Path
+// (reindexOwnerFlows always writes one); service-owned flows carry a Path
+// relative to the service's API package directory (registry.scanFlows's
+// convention), so it is joined against the service's resolved PackageDir.
 func (l *Local) resolveFlowPath(ctx context.Context, fs *domain.FlowSummary) (string, error) {
 	if filepath.IsAbs(fs.Path) {
 		return fs.Path, nil
 	}
-	if fs.OwnerKind == "service" {
+	switch fs.OwnerKind {
+	case domain.FlowOwnerService:
 		svc, err := l.cat.GetService(ctx, fs.OwnerID)
 		if err != nil {
 			return "", err
 		}
 		return filepath.Join(svc.PackageDir, fs.Path), nil
+	case domain.FlowOwnerLocal:
+		return filepath.Join(workspace.LocalDir(l.ws), fs.Path), nil
 	}
 	return filepath.Join(l.ws.Dir, fs.Path), nil
 }
@@ -183,12 +190,22 @@ func (f *flowAPI) Validate(ctx context.Context, yamlSrc string) (*domain.Validat
 	return result, nil
 }
 
-// Create validates yamlSrc, defaults path (flow.DefaultPath under the
-// workspace flows directory) when path == "", refuses to overwrite an
-// existing file, writes it, reindexes workspace flows, and emits
-// flow.changed.
+// Create is the workspace-tier shorthand for CreateIn: it exists so the
+// callers and tests written before flows had tiers keep meaning exactly
+// what they did (a file under <workspace>/flows), while every new caller
+// goes through CreateIn and gets the local tier by default.
+func (f *flowAPI) Create(ctx context.Context, yamlSrc string, path string) (*domain.Flow, error) {
+	return f.CreateIn(ctx, yamlSrc, engine.CreateFlowOptions{Path: path, OwnerKind: domain.FlowOwnerWorkspace})
+}
+
+// CreateIn validates yamlSrc, resolves the tier opts names (local when
+// empty: a flow is written and run on this machine first, and promoted
+// once it earns it), defaults the path (flow.DefaultPath under that tier's
+// flows directory) when opts.Path == "", refuses to overwrite an existing
+// file or to reuse an id another tier already holds, writes it, reindexes
+// that tier, and emits flow.changed.
 //
-// A non-empty path is always interpreted relative to the workspace's flows
+// A non-empty path is always interpreted relative to the tier's flows
 // directory (docs/flows.md's "Editing flows" section, PLAN §37, and
 // docs/feedback/2026-09-05-41-step-flow-session.md item 5: "path is
 // documented as relative to the flows directory; it's actually relative to
@@ -197,15 +214,26 @@ func (f *flowAPI) Validate(ctx context.Context, yamlSrc string) (*domain.Validat
 // resolve outside that directory is rejected with errs.Invalid naming the
 // directory, rather than silently writing somewhere list_flows will never
 // look.
-func (f *flowAPI) Create(ctx context.Context, yamlSrc string, path string) (*domain.Flow, error) {
+//
+// The tier is resolved before the source is validated: "you cannot write
+// here at all" (an unknown service, or one read from a managed clone) is
+// cheaper to learn than a list of diagnostics for a file that was never
+// going to be saved.
+func (f *flowAPI) CreateIn(ctx context.Context, yamlSrc string, opts engine.CreateFlowOptions) (*domain.Flow, error) {
 	l := f.l
+	ownerKind, ownerID := normalizeFlowOwner(opts.OwnerKind, opts.OwnerID)
+	flowsDir, err := l.flowTierDir(ctx, ownerKind, ownerID)
+	if err != nil {
+		return nil, err
+	}
+
 	v := flow.NewValidator(&flowCatalogAdapter{cat: l.cat}, flow.WithExampleResolver(newFlowExampleResolver(l.Examples())))
 	parsed, result := v.ValidateSource(ctx, yamlSrc)
 	if !result.Valid {
 		return nil, flowInvalidErr(result)
 	}
 
-	flowsDir := filepath.Join(l.ws.Dir, domain.FlowsDir)
+	path := opts.Path
 	id := parsed.ID
 	if path == "" {
 		if id == "" {
@@ -218,12 +246,24 @@ func (f *flowAPI) Create(ctx context.Context, yamlSrc string, path string) (*dom
 			return nil, verr
 		}
 		path = resolved
+		if id == "" {
+			id = flowIDFromPath(path)
+		}
 	}
 
 	if _, err := os.Stat(path); err == nil {
 		return nil, errs.New(errs.Conflict, "a flow already exists at %s", path)
 	} else if !os.IsNotExist(err) {
 		return nil, errs.Wrap(errs.Internal, err, "checking existing flow file %s", path)
+	}
+	// Ids are unique across tiers: the catalog keys flows by id alone, and
+	// get_flow/run_flow address a flow by nothing else. Refusing here, before
+	// the file exists, is what keeps the file and the index in step -- the
+	// reindex below would otherwise fail on the duplicate row and leave a
+	// file on disk that nothing lists.
+	if existing, gerr := l.cat.GetFlowSummary(ctx, id); gerr == nil && existing != nil {
+		return nil, errs.New(errs.Conflict, "flow %q already exists in the %s tier at %s", id, describeFlowOwner(existing.OwnerKind, existing.OwnerID), existing.Path).
+			WithHint("choose another id, or move the existing flow with Rescope (`sapien flow promote`) instead of creating a second one")
 	}
 
 	if err := flow.Save(path, yamlSrc); err != nil {
@@ -233,15 +273,218 @@ func (f *flowAPI) Create(ctx context.Context, yamlSrc string, path string) (*dom
 	if err != nil {
 		return nil, err
 	}
-	saved.OwnerKind = "workspace"
+	saved.OwnerKind, saved.OwnerID = ownerKind, ownerID
 
-	if err := l.reindexWorkspaceFlows(ctx); err != nil {
+	if err := l.reindexOwnerFlows(ctx, ownerKind, ownerID, flowsDir); err != nil {
 		return nil, err
 	}
 	l.emit(domain.EventFlowChanged, flow.Summary(saved))
 	materialized := materializeFlow(ctx, l, saved)
 	noteFlowOperationUse(ctx, l, materialized)
 	return materialized, nil
+}
+
+// Rescope moves flow id to another tier, keeping its path relative to the
+// tier's flows directory (a flow at flows/sub/x.flow.yaml lands at
+// local/flows/sub/x.flow.yaml), reindexes the tier it left and the one it
+// joined, re-homes its flow-scoped memories, and emits flow.changed. The
+// file is moved, not rewritten: the developer's own formatting and comments
+// survive promotion, and the flow's id does not change, so nothing that
+// referenced it has to.
+//
+// The memories move after both reindexes, and through the memory store's
+// own Update, because that is the one place the "a flow-scoped memory lives
+// with its flow" rule is implemented (memory.Locator.flowDir consults the
+// catalog for the flow's owner): the store sees an unchanged memory whose
+// resolved directory is now different, writes the file there, and removes
+// the old one. A memory that fails to move is logged and skipped rather
+// than failing the call: the flow has already moved, and a half-done
+// rescope that reports failure would be harder to recover from than a
+// memory that Reindex or the next edit re-homes.
+func (f *flowAPI) Rescope(ctx context.Context, id string, ownerKind, ownerID string) (*domain.Flow, error) {
+	l := f.l
+	existing, err := l.cat.GetFlowSummary(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if existing == nil {
+		return nil, errs.New(errs.FlowNotFound, "flow %q not found", id)
+	}
+	oldPath, err := l.resolveFlowPath(ctx, existing)
+	if err != nil {
+		return nil, err
+	}
+
+	ownerKind, ownerID = normalizeFlowOwner(ownerKind, ownerID)
+	targetDir, err := l.flowTierDir(ctx, ownerKind, ownerID)
+	if err != nil {
+		return nil, err
+	}
+	if existing.OwnerKind == ownerKind && existing.OwnerID == ownerID {
+		return f.Get(ctx, id)
+	}
+	if existing.OwnerKind == domain.FlowOwnerService && l.readOnlyServices[existing.OwnerID] {
+		// The old file cannot be removed from a managed clone; the next
+		// sync would resurrect it anyway (git reset --hard), leaving the
+		// same id in two tiers.
+		return nil, readOnlyFlowErr(existing.OwnerID)
+	}
+
+	oldDir := ownerFlowsDir(l, existing.OwnerKind, existing.OwnerID)
+	rel, relErr := filepath.Rel(oldDir, oldPath)
+	if relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		rel = filepath.Base(oldPath)
+	}
+	newPath := filepath.Join(targetDir, rel)
+	if _, err := os.Stat(newPath); err == nil {
+		return nil, errs.New(errs.Conflict, "a flow already exists at %s", newPath).
+			WithHint("remove or rename the file at the destination first; Rescope never overwrites")
+	} else if !os.IsNotExist(err) {
+		return nil, errs.Wrap(errs.Internal, err, "checking destination %s", newPath)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(newPath), 0o755); err != nil {
+		return nil, errs.Wrap(errs.Internal, err, "creating %s", filepath.Dir(newPath))
+	}
+	if err := moveFile(oldPath, newPath); err != nil {
+		return nil, err
+	}
+
+	if err := l.reindexOwnerFlows(ctx, existing.OwnerKind, existing.OwnerID, oldDir); err != nil {
+		return nil, err
+	}
+	if err := l.reindexOwnerFlows(ctx, ownerKind, ownerID, targetDir); err != nil {
+		return nil, err
+	}
+	l.rehomeFlowMemories(ctx, id)
+
+	moved, err := flow.ParseFile(newPath)
+	if err != nil {
+		return nil, err
+	}
+	moved.OwnerKind, moved.OwnerID = ownerKind, ownerID
+	l.emit(domain.EventFlowChanged, flow.Summary(moved))
+	return materializeFlow(ctx, l, moved), nil
+}
+
+// rehomeFlowMemories rewrites every flow-scoped memory of flowID through
+// the memory store so its file follows the flow's (new) owner; see Rescope.
+func (l *Local) rehomeFlowMemories(ctx context.Context, flowID string) {
+	mems, err := l.memStore.List(ctx, domain.MemoryQuery{Scope: domain.ScopeFlow, Flow: flowID, Limit: 10000})
+	if err != nil {
+		l.logger.Warn("listing flow memories to move with the flow failed", "flow", flowID, "error", err)
+		return
+	}
+	for _, m := range mems {
+		if m.Subject.Flow != flowID {
+			continue
+		}
+		updated, err := l.memStore.Update(ctx, m)
+		if err != nil {
+			l.logger.Warn("moving a flow memory with its flow failed", "flow", flowID, "memory", m.ID, "error", err)
+			continue
+		}
+		l.emit(domain.EventMemoryChanged, *updated)
+	}
+}
+
+// moveFile renames src to dst, falling back to copy-then-remove when the
+// two are on different filesystems (a service checkout on another volume
+// than the workspace), the one case rename cannot serve.
+func moveFile(src, dst string) error {
+	err := os.Rename(src, dst)
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, syscall.EXDEV) {
+		return errs.Wrap(errs.Internal, err, "moving %s to %s", src, dst)
+	}
+	in, err := os.Open(src)
+	if err != nil {
+		return errs.Wrap(errs.Internal, err, "reading %s", src)
+	}
+	defer in.Close()
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return errs.Wrap(errs.Internal, err, "creating %s", dst)
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		_ = os.Remove(dst)
+		return errs.Wrap(errs.Internal, err, "copying %s to %s", src, dst)
+	}
+	if err := out.Close(); err != nil {
+		_ = os.Remove(dst)
+		return errs.Wrap(errs.Internal, err, "closing %s", dst)
+	}
+	if err := os.Remove(src); err != nil {
+		return errs.Wrap(errs.Internal, err, "removing %s after copying it to %s", src, dst)
+	}
+	return nil
+}
+
+// normalizeFlowOwner applies the tier defaults: an empty kind is the local
+// tier, and only the service tier carries an owner id.
+func normalizeFlowOwner(ownerKind, ownerID string) (string, string) {
+	if ownerKind == "" {
+		ownerKind = domain.FlowOwnerLocal
+	}
+	if ownerKind != domain.FlowOwnerService {
+		ownerID = ""
+	}
+	return ownerKind, ownerID
+}
+
+// flowTierDir resolves the flows directory a flow may be written into for
+// (ownerKind, ownerID), refusing a tier that cannot take a write: an
+// unknown kind, the service tier without a service name or with one the
+// catalog does not know, or a service read from a managed git clone (its
+// package is reset on every sync, so a flow written there would be lost;
+// the hint says how to bind a checkout instead). The local tier is created,
+// self-ignoring, on first use.
+func (l *Local) flowTierDir(ctx context.Context, ownerKind, ownerID string) (string, error) {
+	switch ownerKind {
+	case domain.FlowOwnerLocal:
+		if err := workspace.EnsureLocalDir(l.ws); err != nil {
+			return "", err
+		}
+		return workspace.LocalFlowsDir(l.ws), nil
+	case domain.FlowOwnerWorkspace:
+		return filepath.Join(l.ws.Dir, domain.FlowsDir), nil
+	case domain.FlowOwnerService:
+		if ownerID == "" {
+			return "", errs.New(errs.Invalid, "the service tier needs owner_id: the service whose api/flows the flow belongs in").
+				WithHint("pass owner_id, or use the workspace tier")
+		}
+		svc, err := l.cat.GetService(ctx, ownerID)
+		if err != nil {
+			return "", err
+		}
+		if l.readOnlyServices[ownerID] {
+			return "", readOnlyFlowErr(ownerID)
+		}
+		return filepath.Join(svc.PackageDir, domain.FlowsDir), nil
+	default:
+		return "", errs.New(errs.Invalid, "unknown flow tier %q; want %s, %s, or %s", ownerKind, domain.FlowOwnerLocal, domain.FlowOwnerWorkspace, domain.FlowOwnerService)
+	}
+}
+
+// readOnlyFlowErr is the refusal for writing a flow into a service read
+// from a managed clone; it mirrors memory.Locator's wording so an agent
+// sees the same rule and the same way out for every kind of knowledge.
+func readOnlyFlowErr(service string) error {
+	return errs.New(errs.Invalid, "service %q is read from a managed git clone that Sapien resets on every sync, so a flow cannot be written into it", service).
+		WithDetail("service", service).
+		WithHint("bind a local checkout with `sapien service bind " + service + " <path>` so the flow rides your own branch, or use the workspace tier")
+}
+
+// describeFlowOwner names a tier for a message: "local", "workspace", or
+// "service order-service".
+func describeFlowOwner(ownerKind, ownerID string) string {
+	if ownerKind == domain.FlowOwnerService && ownerID != "" {
+		return ownerKind + " " + ownerID
+	}
+	return ownerKind
 }
 
 // Update requires id to already exist and yamlSrc's own id (or, if unset,
@@ -266,6 +509,9 @@ func (f *flowAPI) Update(ctx context.Context, id string, yamlSrc string) (*domai
 	newID := flowIDOf(yamlSrc, existingPath)
 	if newID != id {
 		return nil, errs.New(errs.Invalid, "flow id `%s` does not match `%s`; Update cannot rename a flow", newID, id)
+	}
+	if existing.OwnerKind == domain.FlowOwnerService && l.readOnlyServices[existing.OwnerID] {
+		return nil, readOnlyFlowErr(existing.OwnerID)
 	}
 
 	v := flow.NewValidator(&flowCatalogAdapter{cat: l.cat}, flow.WithExampleResolver(newFlowExampleResolver(l.Examples())))
@@ -312,9 +558,9 @@ func noteFlowOperationUse(ctx context.Context, l *Local, f *domain.Flow) {
 	}
 }
 
-// Delete removes a workspace-owned flow's file and reindexes; a
-// service-owned flow refuses with errs.Invalid (its canonical copy lives in
-// the service's repo).
+// Delete removes a local- or workspace-owned flow's file and reindexes
+// that tier; a service-owned flow refuses with errs.Invalid (its canonical
+// copy lives in the service's repo).
 func (f *flowAPI) Delete(ctx context.Context, id string) error {
 	l := f.l
 	existing, err := l.cat.GetFlowSummary(ctx, id)
@@ -324,7 +570,7 @@ func (f *flowAPI) Delete(ctx context.Context, id string) error {
 	if existing == nil {
 		return errs.New(errs.FlowNotFound, "flow %q not found", id)
 	}
-	if existing.OwnerKind != "workspace" {
+	if existing.OwnerKind == domain.FlowOwnerService {
 		return errs.New(errs.Invalid, "flow %q is owned by service %q; edit the service repo", id, existing.OwnerID)
 	}
 
@@ -335,7 +581,7 @@ func (f *flowAPI) Delete(ctx context.Context, id string) error {
 	if err := os.Remove(existingPath); err != nil && !os.IsNotExist(err) {
 		return errs.Wrap(errs.Internal, err, "removing flow file %s", existingPath)
 	}
-	if err := l.reindexWorkspaceFlows(ctx); err != nil {
+	if err := l.reindexOwnerFlows(ctx, existing.OwnerKind, existing.OwnerID, ownerFlowsDir(l, existing.OwnerKind, existing.OwnerID)); err != nil {
 		return err
 	}
 	l.emit(domain.EventFlowChanged, *existing)
@@ -392,23 +638,41 @@ func flowIDFromPath(path string) string {
 	return strings.TrimSuffix(base, filepath.Ext(base))
 }
 
-// ownerFlowsDir resolves the flows directory for a flow owner: the
-// workspace's flows dir for "workspace", or <service package dir>/flows for
-// "service". Falls back to the workspace flows dir if the service can't be
-// resolved (defensive; reindexOwnerFlows then simply finds nothing to index).
+// ownerFlowsDir resolves the flows directory for a flow owner: the local
+// tier's flows dir for "local", the workspace's for "workspace", or
+// <service package dir>/flows for "service". Falls back to the workspace
+// flows dir if the service can't be resolved (defensive; reindexOwnerFlows
+// then simply finds nothing to index).
 func ownerFlowsDir(l *Local, ownerKind, ownerID string) string {
-	if ownerKind == "service" {
+	switch ownerKind {
+	case domain.FlowOwnerService:
 		if svc, err := l.cat.GetService(context.Background(), ownerID); err == nil {
-			return filepath.Join(svc.PackageDir, "flows")
+			return filepath.Join(svc.PackageDir, domain.FlowsDir)
 		}
+	case domain.FlowOwnerLocal:
+		return workspace.LocalFlowsDir(l.ws)
 	}
 	return filepath.Join(l.ws.Dir, domain.FlowsDir)
 }
 
-// reindexWorkspaceFlows rebuilds the catalog's workspace-owned flow rows
-// from every *.flow.yaml file under <workspace>/flows.
+// reindexWorkspaceFlows rebuilds the catalog's flow rows for both tiers
+// the workspace directory holds -- workspace-owned, from <workspace>/flows,
+// and local-owned, from <workspace>/local/flows. The two go together
+// because the file watcher reports either directory as the one "flows"
+// area (registry.Watcher), and the open-time staleness check keys on the
+// same area; a caller that knows which tier changed uses reindexOwnerFlows
+// directly.
 func (l *Local) reindexWorkspaceFlows(ctx context.Context) error {
-	return l.reindexOwnerFlows(ctx, "workspace", "", filepath.Join(l.ws.Dir, domain.FlowsDir))
+	if err := l.reindexOwnerFlows(ctx, domain.FlowOwnerWorkspace, "", filepath.Join(l.ws.Dir, domain.FlowsDir)); err != nil {
+		return err
+	}
+	return l.reindexLocalFlows(ctx)
+}
+
+// reindexLocalFlows rebuilds the catalog's local-owned flow rows from
+// every *.flow.yaml file under <workspace>/local/flows.
+func (l *Local) reindexLocalFlows(ctx context.Context) error {
+	return l.reindexOwnerFlows(ctx, domain.FlowOwnerLocal, "", workspace.LocalFlowsDir(l.ws))
 }
 
 // reindexOwnerFlows rebuilds the catalog's flow rows owned by
@@ -525,7 +789,10 @@ const memoryReferenceText = `# Memory reference
 A memory is Markdown with YAML front matter: one file per memory, stored
 under ` + "`<workspace>/memories/<id>.md`" + ` (workspace scope) or
 ` + "`<service>/api/memories/<id>.md`" + ` (service scope), or nowhere on disk
-(personal scope: SQLite only).
+(personal scope: SQLite only). A flow-scoped memory lives with its flow's
+tier -- ` + "`<workspace>/local/memories`" + ` for a local flow, the workspace's
+or the service's memories directory otherwise -- and moves when the flow
+is promoted.
 
 ## File format
 
@@ -601,17 +868,3 @@ old one. The edit happens in the service's own repo, reviewed like any
 other change; nothing here writes it automatically. Once applied, mark
 the memory ` + "`status: promoted`" + `.
 `
-
-// CreateIn and Rescope implement flow tiers (PLAN §7b). Phase 0: CreateIn
-// honours the workspace tier by delegating to Create; the local and service
-// tiers, and Rescope, are filled in by the flow-tier work in this change.
-func (f *flowAPI) CreateIn(ctx context.Context, yamlSrc string, opts engine.CreateFlowOptions) (*domain.Flow, error) {
-	if opts.OwnerKind == domain.FlowOwnerWorkspace {
-		return f.Create(ctx, yamlSrc, opts.Path)
-	}
-	return nil, errs.New(errs.NotImplemented, "flow tier %q is not available yet", opts.OwnerKind)
-}
-
-func (f *flowAPI) Rescope(ctx context.Context, id string, ownerKind, ownerID string) (*domain.Flow, error) {
-	return nil, errs.New(errs.NotImplemented, "flow rescope is not available yet")
-}

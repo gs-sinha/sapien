@@ -236,7 +236,11 @@ func TestSync_ClonesWhenMissing(t *testing.T) {
 	assert.Equal(t, sha, co.Commit)
 }
 
-func TestSync_BranchDiscardsLocalModifications(t *testing.T) {
+// A managed clone is a cache the daemon resets on every sync, so an edit
+// made inside it has nowhere to go but the bin. Sync refuses to reset a
+// clone with modified tracked files rather than erase them, and says where
+// the work belongs; a clean clone syncs as before.
+func TestSync_RefusesToResetDirtyClone(t *testing.T) {
 	env := hermeticGitEnv(t)
 	bareDir, url := newBareRepo(t, env)
 	commitAndPush(t, bareDir, env, map[string]string{"api/openapi.yaml": "v1\n"}, "init")
@@ -245,20 +249,37 @@ func TestSync_BranchDiscardsLocalModifications(t *testing.T) {
 	co, err := m.Ensure(context.Background(), gitSource(url))
 	require.NoError(t, err)
 
-	// Simulate local drift in the working tree.
 	target := filepath.Join(co.PackageDir, "openapi.yaml")
 	require.NoError(t, os.WriteFile(target, []byte("locally modified\n"), 0o644))
-
 	secondSHA := commitAndPush(t, bareDir, env, map[string]string{"api/openapi.yaml": "v2\n"}, "second")
 
-	updated, changed, err := m.Sync(context.Background(), gitSource(url))
-	require.NoError(t, err)
-	assert.True(t, changed)
-	assert.Equal(t, secondSHA, updated.Commit)
+	_, _, err = m.Sync(context.Background(), gitSource(url))
+	require.Error(t, err)
+	assert.Equal(t, errs.ServiceSource, errs.CodeOf(err))
+	e := errs.As(err)
+	assert.Contains(t, e.Message, "local modifications")
+	assert.Contains(t, e.Hint, "sapien service bind")
+	files, _ := e.Details["files"].([]string)
+	require.Len(t, files, 1)
+	assert.Contains(t, files[0], "api/openapi.yaml")
 
 	data, err := os.ReadFile(target)
 	require.NoError(t, err)
-	assert.Equal(t, "v2\n", string(data), "reset --hard must discard local drift")
+	assert.Equal(t, "locally modified\n", string(data), "a refused sync must leave the modification in place")
+
+	// Untracked files are not modifications: sapien.json itself lives in
+	// the clone, and a stray untracked file must not wedge every sync.
+	require.NoError(t, os.WriteFile(target, []byte("v1\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(co.PackageDir, "scratch.txt"), []byte("untracked\n"), 0o644))
+
+	updated, changed, err := m.Sync(context.Background(), gitSource(url))
+	require.NoError(t, err, "a clean clone must still sync")
+	assert.True(t, changed)
+	assert.Equal(t, secondSHA, updated.Commit)
+
+	data, err = os.ReadFile(target)
+	require.NoError(t, err)
+	assert.Equal(t, "v2\n", string(data))
 }
 
 func TestSync_TagRef_UsesCheckoutNotReset(t *testing.T) {

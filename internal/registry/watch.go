@@ -14,6 +14,7 @@ import (
 
 	"github.com/gs-sinha/sapien/internal/domain"
 	"github.com/gs-sinha/sapien/internal/errs"
+	"github.com/gs-sinha/sapien/internal/workspace"
 )
 
 // defaultDebounce is used when NewWatcher is given a non-positive debounce.
@@ -86,8 +87,8 @@ type Watcher struct {
 
 // NewWatcher constructs a Watcher for ws's service packages (name -> Package,
 // as discovered by DiscoverPackage) plus its flows/, memories/,
-// environments/ directories and workspace file. debounce <= 0 uses a 200ms
-// default. Call Start to begin watching.
+// environments/ and local/{flows,memories} directories and workspace file.
+// debounce <= 0 uses a 200ms default. Call Start to begin watching.
 func NewWatcher(ws *domain.Workspace, packages map[string]*Package, debounce time.Duration, onChange func(Change)) (*Watcher, error) {
 	fsw, err := fsnotify.NewWatcher()
 	if err != nil {
@@ -108,12 +109,17 @@ func NewWatcher(ws *domain.Workspace, packages map[string]*Package, debounce tim
 
 // Start begins watching: every service package directory (recursively --
 // subdirectories created later are picked up automatically), ws's flows/,
-// memories/, environments/ directories (recursively), and ws's own directory
-// (to catch changes to the workspace file). It returns once the initial set
-// of watches is established; events are then delivered to onChange,
+// memories/, environments/ directories and the local tier's
+// local/{flows,memories} (recursively), and ws's own directory (to catch
+// changes to the workspace file). It returns once the initial set of
+// watches is established; events are then delivered to onChange,
 // debounced/coalesced per a 200ms (by default) window of quiet -- and, when
 // the writing never goes quiet, at least once per debounce*maxDelayFactor
 // -- until ctx is done or Close is called.
+//
+// The local tier reports as the same areas as the team tier ("flows",
+// "memories"): the engine reindexes both tiers of an area together, and
+// nothing downstream needs to know which one a file was in.
 func (w *Watcher) Start(ctx context.Context) error {
 	w.dirIndex = map[string]watchTarget{}
 	w.pendingServices = map[string]bool{}
@@ -128,10 +134,25 @@ func (w *Watcher) Start(ctx context.Context) error {
 		}
 	}
 
+	// The local tier is created lazily, on the first local write, so the
+	// daemon usually starts before local/ exists. A directory that is not
+	// there when the watch is set up is never watched (addTree skips it,
+	// and a directory created later directly under the workspace root
+	// inherits the root's "workspace" target, whose only job is the
+	// workspace file). Creating the tier here, self-ignoring, is the
+	// smallest thing that makes the first local flow's later edits
+	// observable: it is invisible to git, and Open already creates .sapien/
+	// on the same reasoning.
+	if err := workspace.EnsureLocalDir(w.ws); err != nil {
+		return err
+	}
+
 	for _, wsDir := range []struct{ dir, name string }{
 		{filepath.Join(w.ws.Dir, domain.FlowsDir), "flows"},
 		{filepath.Join(w.ws.Dir, domain.MemoriesDir), "memories"},
 		{filepath.Join(w.ws.Dir, domain.EnvironmentsDir), "environments"},
+		{workspace.LocalFlowsDir(w.ws), "flows"},
+		{workspace.LocalMemoriesDir(w.ws), "memories"},
 	} {
 		if isDir(wsDir.dir) {
 			if err := w.addTree(wsDir.dir, watchTarget{name: wsDir.name}); err != nil {

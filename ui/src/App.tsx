@@ -25,6 +25,7 @@ const ExamplesPage = lazy(() => import('./pages/ExamplesPage'));
 const ExampleDetailPage = lazy(() => import('./pages/ExampleDetailPage'));
 const MemoriesPage = lazy(() => import('./pages/MemoriesPage'));
 const MemoryDetailPage = lazy(() => import('./pages/MemoryDetailPage'));
+const FrictionPage = lazy(() => import('./pages/FrictionPage'));
 const EventsPage = lazy(() => import('./pages/EventsPage'));
 const TryIt = lazy(() => import('./pages/TryIt'));
 // Phase 7b (PLAN §34c): xterm.js and its fit addon (~75 KB gz) are only
@@ -75,6 +76,7 @@ export function App() {
                     <Route path="/ui/examples/:id" element={<ExampleDetailPage />} />
                     <Route path="/ui/memories" element={<MemoriesPage />} />
                     <Route path="/ui/memories/:id" element={<MemoryDetailPage />} />
+                    <Route path="/ui/friction" element={<FrictionPage />} />
                     <Route path="/ui/events" element={<EventsPage />} />
                     <Route path="/ui/try/:operationId" element={<TryIt />} />
                     <Route path="/ui/agent" element={<AgentPage />} />

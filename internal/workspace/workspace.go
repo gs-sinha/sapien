@@ -102,6 +102,14 @@ func Load(file string) (*domain.Workspace, error) {
 		seen[svc.Name] = true
 	}
 
+	// Per-machine overrides apply here, after the committed file has been
+	// validated on its own, so a broken override can never be mistaken for
+	// a broken committed file and every caller of Load sees the source this
+	// machine actually reads (see LoadLocal).
+	if err := LoadLocal(&ws); err != nil {
+		return nil, err
+	}
+
 	return &ws, nil
 }
 
@@ -120,9 +128,9 @@ func Save(ws *domain.Workspace) error {
 
 // Init creates a new workspace rooted at dir: sapien.workspace.yaml,
 // flows/, memories/, environments/local.yaml (a default, non-production
-// local environment), and .sapien/ (with a .gitignore that ignores
-// everything inside it). It returns errs.Conflict if a workspace already
-// exists at dir.
+// local environment), .sapien/ (with a .gitignore that ignores everything
+// inside it), and a root .gitignore carrying sapien.workspace.local.yaml.
+// It returns errs.Conflict if a workspace already exists at dir.
 func Init(dir, name string) (*domain.Workspace, error) {
 	absDir, err := filepath.Abs(dir)
 	if err != nil {
@@ -175,6 +183,13 @@ func Init(dir, name string) (*domain.Workspace, error) {
 	}
 
 	if err := Save(ws); err != nil {
+		return nil, err
+	}
+
+	// A new workspace starts ignoring the per-machine override file, so the
+	// first `sapien service bind` on any teammate's machine cannot land it
+	// in a commit by accident.
+	if err := EnsureLocalIgnored(ws); err != nil {
 		return nil, err
 	}
 

@@ -85,14 +85,26 @@ func (l *Local) staleCheck(ctx context.Context) error {
 }
 
 // reindexKnowledgeAreas fingerprints every directory the memory and example
-// stores read -- the workspace's memories/ and examples/ plus each
-// registered service's api/memories/ and api/examples/ -- and reindexes a
-// store once when any of its areas changed. It must run after
-// l.serviceDirs is populated: a memory or example committed in a service
+// stores read -- the workspace's memories/ and examples/, this machine's
+// local/memories/ (flow-scoped memories of local-tier flows, PLAN §7b),
+// and each registered service's api/memories/ and api/examples/ -- plus the
+// local flow tier, and reindexes a store once when any of its areas
+// changed. It must run after l.serviceDirs is populated: a memory or example committed in a service
 // repo is otherwise invisible to a one-shot CLI Open (which never runs the
 // daemon's file watcher) until an explicit reindex.
 func (l *Local) reindexKnowledgeAreas(ctx context.Context) {
-	memDirs := map[string]string{"workspace-memories": filepath.Join(l.ws.Dir, domain.MemoriesDir)}
+	// The local tier (PLAN §7b) is fingerprinted alongside the team tier:
+	// its flows are reindexed on their own when only local/flows changed
+	// (staleCheck's "workspace-flows" area covers <workspace>/flows and,
+	// through reindexWorkspaceFlows, both tiers -- but only fires for the
+	// team directory), and its memories join the one memory reindex, since
+	// memory.Locator.Files reads both directories.
+	l.checkWorkspaceArea(ctx, "local-flows", workspace.LocalFlowsDir(l.ws), l.reindexLocalFlows)
+
+	memDirs := map[string]string{
+		"workspace-memories": filepath.Join(l.ws.Dir, domain.MemoriesDir),
+		"local-memories":     workspace.LocalMemoriesDir(l.ws),
+	}
 	exDirs := map[string]string{"workspace-examples": filepath.Join(l.ws.Dir, example.ExamplesDir)}
 	for name, dir := range l.serviceDirs {
 		if dir == "" {

@@ -22,6 +22,9 @@ type ServiceListItem struct {
 	Name           string `json:"name"`
 	Description    string `json:"description,omitempty"`
 	OperationCount int    `json:"operation_count"`
+	// Binding says what this machine reads the service from and whether
+	// service-scoped knowledge can be written for it here.
+	Binding domain.ServiceBinding `json:"binding"`
 }
 
 // ListServicesOutput is list_services' structured output.
@@ -40,9 +43,10 @@ func (s *server) listServices(ctx context.Context, req *sdkmcp.CallToolRequest, 
 	out := ListServicesOutput{}
 	var b strings.Builder
 	b.WriteString("services:\n")
-	for _, svc := range services {
-		out.Services = append(out.Services, ServiceListItem{Name: svc.Name, Description: svc.Description, OperationCount: svc.OperationCount})
-		fmt.Fprintf(&b, "- %s (%d ops): %s\n", svc.Name, svc.OperationCount, svc.Description)
+	for i := range services {
+		svc := &services[i]
+		out.Services = append(out.Services, ServiceListItem{Name: svc.Name, Description: svc.Description, OperationCount: svc.OperationCount, Binding: bindingOf(svc)})
+		fmt.Fprintf(&b, "- %s (%d ops): %s\n  %s", svc.Name, svc.OperationCount, svc.Description, renderServiceReads(svc))
 	}
 	return result(b.String(), out), nil, nil
 }
@@ -71,6 +75,10 @@ type GetServiceOutput struct {
 	Coverage         *domain.DocCoverage          `json:"coverage,omitempty"`
 	Warnings         []domain.LintWarning         `json:"warnings,omitempty"`
 	AcceptedWarnings []domain.AcceptedLintWarning `json:"accepted_warnings,omitempty"`
+	// Binding says what this machine reads the service from (a local
+	// checkout, or the team's git source) and whether service-scoped
+	// memories, examples and flows can be written for it here.
+	Binding domain.ServiceBinding `json:"binding"`
 }
 
 func (s *server) getService(ctx context.Context, req *sdkmcp.CallToolRequest, in GetServiceInput) (*sdkmcp.CallToolResult, any, error) {
@@ -89,6 +97,7 @@ func (s *server) getService(ctx context.Context, req *sdkmcp.CallToolRequest, in
 		Name: svc.Name, Description: svc.Description, Owners: svc.Owners,
 		Concepts: svc.Concepts, Tasks: svc.Tasks, Environments: svc.Environments, OperationCount: svc.OperationCount,
 		Coverage: svc.Coverage, Warnings: svc.Warnings, AcceptedWarnings: svc.AcceptedWarnings,
+		Binding: bindingOf(svc),
 	}
 	for _, d := range docs {
 		out.Docs = append(out.Docs, d.Path)
@@ -97,6 +106,7 @@ func (s *server) getService(ctx context.Context, req *sdkmcp.CallToolRequest, in
 	fmt.Fprintf(&b, "# %s\n%s\n\nowners: %s\nconcepts: %s\noperations: %d\ndocs: %s\n",
 		svc.Name, svc.Description, strings.Join(svc.Owners, ", "), strings.Join(svc.Concepts, ", "),
 		svc.OperationCount, strings.Join(out.Docs, ", "))
+	b.WriteString(renderServiceReads(svc))
 	b.WriteString(renderCoverage(svc.Coverage))
 	for _, w := range svc.Warnings {
 		b.WriteString(formatWarningLine(w))

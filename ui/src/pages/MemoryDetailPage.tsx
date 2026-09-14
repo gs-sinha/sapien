@@ -121,9 +121,9 @@ export default function MemoryDetailPage() {
               onChange={(e) => setScopeDraft(e.target.value as MemoryScope)}
               className="rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900"
             >
-              <option value="personal">personal</option>
-              <option value="workspace">workspace</option>
-              <option value="service">service</option>
+              <option value="personal">personal (this machine)</option>
+              <option value="workspace">workspace (team repo)</option>
+              <option value="service">service (owning repo)</option>
               <option value="flow">flow</option>
             </select>
             <button

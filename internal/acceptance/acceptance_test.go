@@ -458,7 +458,9 @@ func TestAcceptance_PRDSuccessScenario(t *testing.T) {
 	validOut := decodeStructured[domain.ValidationResult](t, res.StructuredContent)
 	assert.True(t, validOut.Valid, "diagnostics: %+v", validOut.Diagnostics)
 
-	// 10. create_flow -> file exists under <ws>/flows.
+	// 10. create_flow -> file exists under <ws>/local/flows: a new flow
+	// starts in this machine's tier and is promoted once it works (PLAN
+	// §7b), so the team repo only ever receives flows that ran green.
 	res = callTool(t, cs, "create_flow", map[string]any{"flow_yaml": successFlowYAML})
 	require.False(t, res.IsError, firstText(res))
 	createFlowOut := decodeStructured[sapienmcp.FlowSaveResult](t, res.StructuredContent)
@@ -470,7 +472,8 @@ func TestAcceptance_PRDSuccessScenario(t *testing.T) {
 		flowPath = filepath.Join(ws.Dir, flowPath)
 	}
 	assert.FileExists(t, flowPath)
-	assert.Contains(t, flowPath, filepath.Join(ws.Dir, domain.FlowsDir))
+	assert.Equal(t, domain.FlowOwnerLocal, createFlowOut.Tier)
+	assert.Contains(t, flowPath, filepath.Join(ws.Dir, domain.LocalDir, domain.FlowsDir))
 
 	// 11. run_flow(id, local) -> passed with 3 steps.
 	res = callTool(t, cs, "run_flow", map[string]any{"id": flowID, "env": "local"})
@@ -479,6 +482,21 @@ func TestAcceptance_PRDSuccessScenario(t *testing.T) {
 	assert.Equal(t, "passed", runOut.Status, firstText(res))
 	require.Len(t, runOut.Steps, 3)
 	runID := runOut.ID
+
+	// 11b. rescope_flow(id, workspace): the flow ran green, so it is promoted
+	// into the team's tier; the file moves, the id does not.
+	res = callTool(t, cs, "rescope_flow", map[string]any{"id": flowID, "scope": "workspace"})
+	require.False(t, res.IsError, firstText(res))
+	rescopeOut := decodeStructured[sapienmcp.RescopeFlowOutput](t, res.StructuredContent)
+	assert.Equal(t, domain.FlowOwnerWorkspace, rescopeOut.Tier)
+	assert.NoFileExists(t, flowPath)
+	promotedPath := rescopeOut.NewPath
+	if !filepath.IsAbs(promotedPath) {
+		promotedPath = filepath.Join(ws.Dir, promotedPath)
+	}
+	assert.FileExists(t, promotedPath)
+	assert.Contains(t, promotedPath, filepath.Join(ws.Dir, domain.FlowsDir))
+	assert.NotContains(t, promotedPath, filepath.Join(ws.Dir, domain.LocalDir))
 
 	// 12. get_run(id) -> assertions all passed; request records carry no
 	// Authorization header value in clear (no auth is configured for this

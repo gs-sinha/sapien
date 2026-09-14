@@ -67,7 +67,35 @@ export interface Service {
   task_coverage?: TaskCoverage;
   last_indexed?: string;
   commit?: string;
+  /** Which source this machine reads the service from (PLAN §7b). */
+  binding?: ServiceBinding;
   operation_count: number;
+}
+
+/** Where this machine reads a service from: a local checkout or the team's committed git source. */
+export type BindingMode = 'local' | 'team';
+
+/** A local git checkout of a service and what git says about it (read-only queries). */
+export interface LocalCheckout {
+  path: string;
+  branch?: string;
+  commit?: string;
+  remote?: string;
+  /** Modified and untracked files under the package dir: work that exists here and nowhere else yet. */
+  dirty?: number;
+}
+
+/**
+ * ServiceBinding says which source a service is read from on this machine
+ * ("listening to") and what it could be read from instead ("can listen
+ * to"). `team` is the committed git source in both modes; `local` is set in
+ * local mode. `writable` is false for the managed clone of a git source.
+ */
+export interface ServiceBinding {
+  mode: BindingMode;
+  team?: Source;
+  local?: LocalCheckout;
+  writable: boolean;
 }
 
 export interface TaskTarget {
@@ -305,6 +333,15 @@ export interface Step {
   line?: number;
 }
 
+/**
+ * The flow tier ladder (domain.FlowOwnerLocal/Workspace/Service): local is
+ * this machine only (<workspace>/local/flows), workspace is the team's git
+ * repo (<workspace>/flows), service is the owning repo's api/flows (owner_id
+ * names the service). Kept as a plain string on Flow/FlowSummary because the
+ * daemon also emits "" for pre-tier files; see pages/flows/tier.tsx.
+ */
+export type FlowOwnerKind = 'local' | 'workspace' | 'service';
+
 export interface Flow {
   version: number;
   id: string;
@@ -316,6 +353,7 @@ export interface Flow {
   inputs?: Record<string, InputSpec>;
   steps: Step[];
   path?: string;
+  /** A FlowOwnerKind; "" or absent for flows written before tiers existed. */
   owner_kind?: string;
   owner_id?: string;
 }
@@ -324,6 +362,7 @@ export interface FlowSummary {
   id: string;
   name?: string;
   path: string;
+  /** A FlowOwnerKind; "" for flows written before tiers existed. */
   owner_kind: string;
   owner_id?: string;
   tags?: string[];
@@ -795,6 +834,8 @@ export interface ContextBundle {
 export interface ServiceRef {
   name: string;
   source: Source;
+  /** The committed source when a per-machine override replaced `source`. */
+  team?: Source;
 }
 
 export interface Workspace {
@@ -836,6 +877,31 @@ export interface FlowYAMLRequest {
   path?: string;
 }
 
+/** POST /v1/flows: FlowYAMLRequest plus the tier to create the file in (omitted keeps the daemon's default). */
+export interface CreateFlowRequest extends FlowYAMLRequest {
+  owner_kind?: FlowOwnerKind;
+  owner_id?: string;
+}
+
+/** POST /v1/flows/{id}/rescope: move a flow between tiers; owner_id names the service for `service`. */
+export interface RescopeFlowRequest {
+  owner_kind: FlowOwnerKind;
+  owner_id?: string;
+}
+
+/** GET /v1/services/{name}/binding (engine.BindingInfo). */
+export interface BindingInfo {
+  service: string;
+  binding: ServiceBinding;
+  /** Local checkouts of the same repository found on this machine: one-click bind targets. */
+  candidates?: LocalCheckout[];
+}
+
+/** PUT /v1/services/{name}/binding. */
+export interface BindServiceRequest {
+  path: string;
+}
+
 export interface RunFlowSourceRequest {
   yaml: string;
   opts: RunOptionsWire;
@@ -864,6 +930,45 @@ export interface DefaultEnvironmentResponse {
 
 export interface PurgeRunsResponse {
   removed: number;
+}
+
+// ---- friction.go (internal/friction) ----
+
+// The friction-report loop (PLAN.md): an MCP client files a report with
+// report_friction, it is queued on disk under ~/.sapien/friction, and a
+// human reviews the queue here (or with `sapien friction list/show`)
+// before `send` posts it as a GitHub Discussion through the `gh` CLI.
+// Nothing is ever sent automatically.
+export type FrictionCategory = 'bug' | 'idea' | 'docs' | 'missing';
+
+export interface FrictionReport {
+  id: string; // "fr_..."
+  title: string;
+  category: FrictionCategory;
+  tool?: string; // the Sapien tool or command involved
+  tried?: string; // what the agent was trying to do
+  happened: string; // what happened instead
+  would_help?: string; // what would have helped
+  workspace?: string; // workspace name
+  client?: string; // MCP client name, or "cli"
+  version?: string; // Sapien version at report time
+  created: string; // RFC3339
+  status: 'pending' | 'sent';
+  sent_url?: string;
+  sent_at?: string;
+  path?: string; // file on disk
+}
+
+/**
+ * GET /v1/friction/{id}/preview's answer: the exact Discussion title and
+ * Markdown body that `send` would post, and which repo/category it would
+ * post to -- what the human reviews before anything goes public.
+ */
+export interface FrictionPreview {
+  title: string;
+  body: string;
+  repo: string;
+  category: string;
 }
 
 // ---- errors (internal/errs) ----
