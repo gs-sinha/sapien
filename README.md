@@ -61,8 +61,15 @@ call, and onboard your services.
 3. Install the MCP entry everywhere:
 
    ```sh
-   sapien mcp config --client claude-code --write
+   sapien mcp config --client claude-code --write --allow-mutations
    ```
+
+   `--allow-mutations` lets agents make POST, PUT, PATCH and DELETE calls on
+   non-production environments, which running a flow that creates data
+   needs; without it they can only read. It sets `execute_mutation` in the
+   workspace's gitignored `.sapien/mcp.yaml`, so it is per machine, and
+   production stays blocked. `sapien mcp config --allow-mutations` on its own
+   grants it later without touching the host entry.
 
    Run this inside the workspace, or add `--workspace /abs/path/to/sapien-workspace`
    from anywhere. It defaults to `--scope user`, so the `sapien` MCP

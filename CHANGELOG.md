@@ -7,6 +7,16 @@ and phase numbers refer to PLAN.md §34's roadmap.
 ## [Unreleased]
 
 ### Added
+- **`sapien mcp config --allow-mutations`: one command to let agents run
+  the flows they write.** Agents were denied every POST, PUT, PATCH and
+  DELETE by default and the only way to allow them was hand-editing
+  `.sapien/mcp.yaml`, so a new user's first "write a flow and run it" failed.
+  The flag sets `default.execute_mutation: true` in the workspace's
+  gitignored `.sapien/mcp.yaml` (creating it, or editing it with its other
+  keys and comments kept), for non-production environments only, and warns
+  when `~/.sapien/config.yaml` or a client entry still denies it. It works
+  with `--client` alongside the host entry or on its own, and the
+  `execute_mutation` denial now names it. The default is unchanged.
 - **Team workspaces: one committed composition, per-machine bindings.** The
   committed `sapien.workspace.yaml` lists every service as a git source, the
   team's view; a gitignored `sapien.workspace.local.yaml` binds a service to

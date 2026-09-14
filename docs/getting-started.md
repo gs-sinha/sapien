@@ -87,8 +87,17 @@ an agent host so it can talk to this workspace. The command needs to
 find a workspace: run it inside one, or pass `--workspace <dir>`.
 
 ```sh
-sapien mcp config --client claude-code --write
+sapien mcp config --client claude-code --write --allow-mutations
 ```
+
+Out of the box an agent can read everything and make GET calls, but not
+POST, PUT, PATCH or DELETE, so it cannot run a flow that creates data.
+`--allow-mutations` grants that for every agent using this workspace on
+this machine, on non-production environments only: it sets
+`default.execute_mutation: true` in `.sapien/mcp.yaml`, which git ignores.
+Production stays blocked. Run `sapien mcp config --allow-mutations` without
+`--client` to grant it later; a connected agent picks it up on its next call.
+See [`mcp.md`](mcp.md#permissions) for the full permission model.
 
 It defaults to `--scope user`, so the `sapien` MCP server becomes
 available in every session that client runs on the machine, in any

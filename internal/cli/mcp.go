@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -168,9 +169,12 @@ func newMCPCmd(app *App) *cobra.Command {
 // is baked into the entry, the Claude Code entry defaults to the user
 // scope, which makes Sapien available to an agent in every repo on the
 // machine -- the onboarding journey in README "Make it operational".
+// --allow-mutations also grants execute_mutation in the workspace's
+// .sapien/mcp.yaml, so an agent can run the flows it writes; without --client
+// it only does that.
 func newMCPConfigCmd(app *App) *cobra.Command {
 	var client, scope string
-	var write bool
+	var write, allowMutations bool
 
 	cmd := &cobra.Command{
 		Use:   "config",
@@ -182,12 +186,26 @@ Clients: claude-code (runs "claude mcp add"), codex (~/.codex/config.toml),
 cursor (~/.cursor/mcp.json), cowork (Claude Desktop's claude_desktop_config.json),
 and generic (an mcpServers JSON block to paste). --scope applies to claude-code only: user (default; every Claude
 Code session on this machine), local (sessions started in this directory),
-or project (a .mcp.json in this directory for the team).`,
+or project (a .mcp.json in this directory for the team).
+
+Agents may not make POST, PUT, PATCH or DELETE calls until you allow it, so
+out of the box they cannot run a flow that creates data. --allow-mutations
+grants that for every agent using this workspace on this machine, on
+non-production environments only, by setting default.execute_mutation in
+<workspace>/.sapien/mcp.yaml (gitignored). Production stays blocked. Pass it
+without --client to grant it without touching any host entry.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if client == "" && !allowMutations {
+				return errs.New(errs.Invalid, `required flag "client" not set`).
+					WithHint("pass --client claude-code|codex|cursor|cowork|generic, or --allow-mutations on its own")
+			}
 			ws, err := app.Workspace()
 			if err != nil {
 				return err
+			}
+			if client == "" {
+				return grantMutations(app, ws)
 			}
 
 			exePath, err := os.Executable()
@@ -204,13 +222,19 @@ or project (a .mcp.json in this directory for the team).`,
 			}
 
 			if write {
-				return writeMCPHostConfig(app, client, exePath, ws, scope, text)
+				if err := writeMCPHostConfig(app, client, exePath, ws, scope, text); err != nil {
+					return err
+				}
+			} else if app.Printer.IsJSON() {
+				if err := app.Printer.JSON(map[string]string{"client": client, "config": text}); err != nil {
+					return err
+				}
+			} else {
+				app.Printer.Line("%s", text)
 			}
-
-			if app.Printer.IsJSON() {
-				return app.Printer.JSON(map[string]string{"client": client, "config": text})
+			if allowMutations {
+				return grantMutations(app, ws)
 			}
-			app.Printer.Line("%s", text)
 			return nil
 		},
 	}
@@ -218,8 +242,52 @@ or project (a .mcp.json in this directory for the team).`,
 	cmd.Flags().StringVar(&client, "client", "", "claude-code|codex|cursor|cowork|generic")
 	cmd.Flags().StringVar(&scope, "scope", mcp.DefaultClaudeScope, "claude-code only: user|local|project")
 	cmd.Flags().BoolVar(&write, "write", false, "install the entry instead of printing it")
-	_ = cmd.MarkFlagRequired("client")
+	cmd.Flags().BoolVar(&allowMutations, "allow-mutations", false, "let agents make POST/PUT/PATCH/DELETE calls on non-production environments (writes .sapien/mcp.yaml)")
 	return cmd
+}
+
+// grantMutations implements `mcp config --allow-mutations`: it sets
+// default.execute_mutation in ws's .sapien/mcp.yaml, then reloads the merged
+// permissions the MCP server will use and says so when a later file (the
+// user's ~/.sapien/config.yaml wins over the workspace file) or a client's own
+// entry still denies it. The server rereads these files on every tool call,
+// so a connected agent picks the grant up without a restart. Under --json its
+// lines go to stderr, leaving stdout to the host entry's JSON.
+func grantMutations(app *App, ws *domain.Workspace) error {
+	paths := mcpConfigPaths(ws)
+	changed, err := mcp.AllowMutations(paths[0])
+	if err != nil {
+		return errs.Wrap(errs.Internal, err, "granting execute_mutation")
+	}
+	say := app.Printer.Line
+	if app.Printer.IsJSON() {
+		say = app.Printer.Errorf
+	}
+	if changed {
+		say("allowed agents to make POST, PUT, PATCH and DELETE calls on non-production environments (%s); production stays blocked", paths[0])
+	} else {
+		say("agents may already make POST, PUT, PATCH and DELETE calls on non-production environments (%s)", paths[0])
+	}
+
+	cfg, err := loadMCPConfig(ws)
+	if err != nil {
+		app.Printer.Errorf("warning: could not check the merged MCP permissions: %v", err)
+		return nil
+	}
+	if !cfg.Default.ExecuteMutation && len(paths) > 1 {
+		app.Printer.Errorf("warning: %s sets mcp.default.execute_mutation: false, which overrides the workspace file; remove it there", paths[1])
+	}
+	names := make([]string, 0, len(cfg.Clients))
+	for name, p := range cfg.Clients {
+		if !p.ExecuteMutation {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		app.Printer.Errorf("warning: clients.%s sets execute_mutation: false, so that client is still denied", name)
+	}
+	return nil
 }
 
 // writeMCPHostConfig implements `mcp config --write` per host (PLAN

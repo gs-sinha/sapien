@@ -92,9 +92,18 @@ clients:
     write_flows: false      # a read-only research agent
 ```
 
+`sapien mcp config --allow-mutations` (with or without `--client`) is the
+one-command grant for the common case: it sets `default.execute_mutation:
+true` in `<workspace>/.sapien/mcp.yaml`, creating the file or editing it in
+place with its other keys and comments kept, and warns when a later setting
+still denies it (the user file overrides the workspace file, and a client's
+own `execute_mutation: false` overrides the default). It leaves
+`environments` and `allow_production` alone.
+
 A denied call returns `E_PERMISSION_DENIED` naming the missing class and
 the config key to change, so the agent can relay it to whoever is
-driving it rather than failing silently.
+driving it rather than failing silently. A denied `execute_mutation` also
+names `sapien mcp config --allow-mutations`.
 
 Both files are re-checked on every tool call: editing `mcp.yaml` (or the
 global `config.yaml`) to grant or revoke a class takes effect on the very

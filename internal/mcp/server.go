@@ -132,10 +132,12 @@ func (s *server) permissionsFor(session *sdkmcp.ServerSession) (string, Permissi
 // deniedResult builds the E_PERMISSION_DENIED tool result described in the
 // task: IsError text plus the structured errs.Error.
 func (s *server) deniedResult(client string, class permClass) *sdkmcp.CallToolResult {
-	msg := fmt.Sprintf("%s: %s not granted to client %q; grant it in %s/.sapien/mcp.yaml under clients.%s.%s: true",
-		errs.PermissionDenied, class, client, s.workspaceDir(), client, class)
-	e := errs.New(errs.PermissionDenied, "%s not granted to client %q", class, client).
-		WithHint(fmt.Sprintf("grant it in %s/.sapien/mcp.yaml under clients.%s.%s: true", s.workspaceDir(), client, class))
+	hint := fmt.Sprintf("grant it in %s/.sapien/mcp.yaml under clients.%s.%s: true", s.workspaceDir(), client, class)
+	if class == classExecuteMutation {
+		hint += fmt.Sprintf(", or ask the user to run `sapien --workspace %s mcp config --allow-mutations` (non-production environments only)", s.workspaceDir())
+	}
+	msg := fmt.Sprintf("%s: %s not granted to client %q; %s", errs.PermissionDenied, class, client, hint)
+	e := errs.New(errs.PermissionDenied, "%s not granted to client %q", class, client).WithHint(hint)
 	return &sdkmcp.CallToolResult{
 		IsError:           true,
 		Content:           []sdkmcp.Content{&sdkmcp.TextContent{Text: msg}},
