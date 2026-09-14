@@ -355,3 +355,12 @@ func slugFirstWords(text string, n int) string {
 	}
 	return slug
 }
+
+// Move and Commit: Phase 0 stubs, filled in by the tier work.
+func (m *memoryAPI) Move(ctx context.Context, id, tier string) (*domain.Memory, error) {
+	return nil, errs.New(errs.NotImplemented, "moving a memory between tiers is not available yet")
+}
+
+func (m *memoryAPI) Commit(ctx context.Context, id, message string) (*domain.Memory, error) {
+	return nil, errs.New(errs.NotImplemented, "committing a memory is not available yet")
+}

@@ -96,7 +96,13 @@ type Memory struct {
 	Resolved *ResolvedSubject `yaml:"resolved,omitempty" json:"resolved,omitempty"`
 	Text     string           `yaml:"-" json:"text"`                // Markdown body
 	FilePath string           `yaml:"-" json:"file_path,omitempty"` // empty for personal scope
-	Hash     string           `yaml:"-" json:"hash,omitempty"`
+	// Tier is where FilePath sits: TierLocal, TierWorkspace or TierService;
+	// "" for personal scope. Derived from the path when the file is read.
+	Tier string `yaml:"-" json:"tier,omitempty"`
+	// Shipped is the workspace-tier file's state in the workspace repository
+	// (the Ship* constants); "" for other tiers.
+	Shipped string `yaml:"-" json:"shipped,omitempty"`
+	Hash    string `yaml:"-" json:"hash,omitempty"`
 }
 
 // MemoryQuery selects memories.

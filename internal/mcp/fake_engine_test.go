@@ -1395,3 +1395,83 @@ func (a fakeRepo) Sync(context.Context) (*domain.RepoStatus, error) {
 	c := s
 	return &c, nil
 }
+
+func (a fakeMemories) Move(_ context.Context, id, tier string) (*domain.Memory, error) {
+	a.st.mu.Lock()
+	defer a.st.mu.Unlock()
+	for i := range a.st.memories {
+		if a.st.memories[i].ID == id {
+			if a.st.memories[i].Scope != domain.ScopeWorkspace {
+				return nil, errs.New(errs.Invalid, "only a workspace-scope memory moves between tiers")
+			}
+			a.st.memories[i].Tier = tier
+			if tier == domain.TierWorkspace {
+				a.st.memories[i].Shipped = domain.ShipUntracked
+			} else {
+				a.st.memories[i].Shipped = ""
+			}
+			c := a.st.memories[i]
+			return &c, nil
+		}
+	}
+	return nil, errs.New(errs.MemoryNotFound, "memory %q not found", id)
+}
+
+func (a fakeMemories) Commit(_ context.Context, id, message string) (*domain.Memory, error) {
+	a.st.mu.Lock()
+	defer a.st.mu.Unlock()
+	for i := range a.st.memories {
+		if a.st.memories[i].ID == id {
+			a.st.memories[i].Shipped = domain.ShipUnpushed
+			c := a.st.memories[i]
+			return &c, nil
+		}
+	}
+	return nil, errs.New(errs.MemoryNotFound, "memory %q not found", id)
+}
+
+func (a fakeExamples) Move(_ context.Context, id, tier string) (*domain.SavedExample, error) {
+	a.st.mu.Lock()
+	defer a.st.mu.Unlock()
+	for i := range a.st.examples {
+		if a.st.examples[i].ID == id {
+			a.st.examples[i].Tier = tier
+			if tier == domain.TierWorkspace {
+				a.st.examples[i].Shipped = domain.ShipUntracked
+			} else {
+				a.st.examples[i].Shipped = ""
+			}
+			c := a.st.examples[i]
+			return &c, nil
+		}
+	}
+	return nil, errs.New(errs.ExampleNotFound, "example %q not found", id)
+}
+
+func (a fakeExamples) Commit(_ context.Context, id, message string) (*domain.SavedExample, error) {
+	a.st.mu.Lock()
+	defer a.st.mu.Unlock()
+	for i := range a.st.examples {
+		if a.st.examples[i].ID == id {
+			a.st.examples[i].Shipped = domain.ShipUnpushed
+			c := a.st.examples[i]
+			return &c, nil
+		}
+	}
+	return nil, errs.New(errs.ExampleNotFound, "example %q not found", id)
+}
+
+func (a fakeRepo) Push(context.Context) (*domain.RepoStatus, error) {
+	a.st.mu.Lock()
+	defer a.st.mu.Unlock()
+	s := a.st.repo
+	if s.Behind > 0 {
+		return nil, errs.New(errs.Conflict, "branch is behind its upstream by %d commits; pull first", s.Behind)
+	}
+	if s.Ahead > 0 {
+		s.Pushed, s.PushedCount, s.Ahead = true, s.Ahead, 0
+	}
+	a.st.repo = s
+	c := s
+	return &c, nil
+}

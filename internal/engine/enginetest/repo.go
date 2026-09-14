@@ -89,3 +89,24 @@ func (r *repoAPI) pullLocked(strict bool) (*domain.RepoStatus, error) {
 	cp := s
 	return &cp, nil
 }
+
+// Push moves the seeded status's Ahead into PushedCount; refused when
+// behind, as the real thing is.
+func (r *repoAPI) Push(ctx context.Context) (*domain.RepoStatus, error) {
+	f := r.f()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.recordLocked("Repo.Push", nil)
+	s := f.repo
+	switch {
+	case !s.InGit:
+		return nil, errs.New(errs.Invalid, "workspace is not inside a git repository")
+	case s.Behind > 0:
+		return nil, errs.New(errs.Conflict, "branch is behind its upstream by %d commits; pull first", s.Behind)
+	case s.Ahead > 0:
+		s.Pushed, s.PushedCount, s.Ahead = true, s.Ahead, 0
+	}
+	f.repo = s
+	cp := s
+	return &cp, nil
+}

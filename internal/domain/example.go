@@ -37,6 +37,12 @@ type SavedExample struct {
 	Created time.Time `yaml:"created,omitempty" json:"created"`
 	Updated time.Time `yaml:"updated,omitempty" json:"updated"`
 	Path    string    `yaml:"-" json:"path,omitempty"` // file on disk
+	// Tier is where Path sits: TierLocal, TierWorkspace or TierService,
+	// derived from the path when the file is read.
+	Tier string `yaml:"-" json:"tier,omitempty"`
+	// Shipped is the workspace-tier file's state in the workspace repository
+	// (the Ship* constants); "" for other tiers.
+	Shipped string `yaml:"-" json:"shipped,omitempty"`
 }
 
 // ExampleExpect is the response the example produced when it was saved:

@@ -269,3 +269,46 @@ func (m *memoryAPI) Reindex(ctx context.Context) error {
 }
 
 var _ engine.MemoryAPI = (*memoryAPI)(nil)
+
+// Move re-stamps the stored memory's Tier; the fake has no files.
+func (m *memoryAPI) Move(ctx context.Context, id, tier string) (*domain.Memory, error) {
+	f := m.f()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.recordLocked("Memories.Move", map[string]string{"id": id, "tier": tier})
+	stored, ok := f.memories[id]
+	if !ok {
+		return nil, errs.New(errs.MemoryNotFound, "memory %q not found", id).WithDetail("id", id)
+	}
+	if stored.Scope != domain.ScopeWorkspace {
+		return nil, errs.New(errs.Invalid, "only a workspace-scope memory moves between tiers; %q is %s", id, stored.Scope)
+	}
+	stored.Tier = tier
+	if tier == domain.TierWorkspace {
+		stored.Shipped = domain.ShipUntracked
+	} else {
+		stored.Shipped = ""
+	}
+	f.memories[id] = stored
+	cp := stored
+	return &cp, nil
+}
+
+// Commit marks the stored memory as committed but not pushed.
+func (m *memoryAPI) Commit(ctx context.Context, id, message string) (*domain.Memory, error) {
+	f := m.f()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.recordLocked("Memories.Commit", map[string]string{"id": id, "message": message})
+	stored, ok := f.memories[id]
+	if !ok {
+		return nil, errs.New(errs.MemoryNotFound, "memory %q not found", id).WithDetail("id", id)
+	}
+	if stored.Tier != "" && stored.Tier != domain.TierWorkspace {
+		return nil, errs.New(errs.Invalid, "only a workspace-tier memory can be committed; %q is %s", id, stored.Tier)
+	}
+	stored.Shipped = domain.ShipUnpushed
+	f.memories[id] = stored
+	cp := stored
+	return &cp, nil
+}

@@ -204,6 +204,16 @@ type MemoryAPI interface {
 	// PromotionTarget locates where a memory should be promoted (PLAN §26).
 	PromotionTarget(ctx context.Context, id string) (*PromotionTarget, error)
 	Reindex(ctx context.Context) error
+	// Move places a workspace-scope memory's file in another tier
+	// (domain.TierLocal or TierWorkspace), keeping its id and scope: the
+	// local tier is this machine's, the workspace tier is the team's repo.
+	// Refused for personal and service scope, whose home is their scope.
+	Move(ctx context.Context, id, tier string) (*domain.Memory, error)
+	// Commit records a workspace-tier memory's file in the workspace
+	// repository with one commit of that file (message "" picks a default),
+	// never a push; refused for other tiers, a workspace outside git, or a
+	// file with nothing to commit. The returned memory carries Shipped.
+	Commit(ctx context.Context, id, message string) (*domain.Memory, error)
 }
 
 // PromotionTarget is where a memory's knowledge belongs canonically.
@@ -239,6 +249,14 @@ type ExampleAPI interface {
 	// first, for the context builder and get_api.
 	ForOperations(ctx context.Context, operationIDs []string, limit int) ([]domain.SavedExample, error)
 	Reindex(ctx context.Context) error
+	// Move places a workspace-scope example's file in another tier
+	// (domain.TierLocal or TierWorkspace), keeping its id and scope.
+	// Refused for service scope.
+	Move(ctx context.Context, id, tier string) (*domain.SavedExample, error)
+	// Commit records a workspace-tier example's file in the workspace
+	// repository with one commit of that file, never a push; refused for
+	// other tiers, a workspace outside git, or nothing to commit.
+	Commit(ctx context.Context, id, message string) (*domain.SavedExample, error)
 }
 
 // ExampleFromRun names the run step to save and how to file it.
@@ -366,4 +384,11 @@ type RepoAPI interface {
 	// whose Skipped says why nothing moved. It never fails because a pull
 	// was not possible; only a fetch or git failure is an error.
 	Sync(ctx context.Context) (*domain.RepoStatus, error)
+	// Push sends the branch's unpushed commits to its upstream (setting the
+	// upstream to origin/<branch> when the branch has none). Only on
+	// request, only the workspace repository, never a force push, never a
+	// service repository; refused (errs.Conflict) when the branch is behind,
+	// since a pull must come first, and a no-op success when nothing is
+	// ahead. The returned status carries Pushed and PushedCount.
+	Push(ctx context.Context) (*domain.RepoStatus, error)
 }

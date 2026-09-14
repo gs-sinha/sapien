@@ -53,3 +53,12 @@ func (r *repoAPI) Sync(ctx context.Context) (*domain.RepoStatus, error) {
 	}
 	return &out, nil
 }
+
+// Push maps to POST /v1/workspace/repo/push.
+func (r *repoAPI) Push(ctx context.Context) (*domain.RepoStatus, error) {
+	var out domain.RepoStatus
+	if err := r.r().do(ctx, http.MethodPost, "/v1/workspace/repo/push", nil, nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}

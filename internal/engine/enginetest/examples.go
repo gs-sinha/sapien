@@ -240,3 +240,46 @@ func containsString(list []string, s string) bool {
 	}
 	return false
 }
+
+// Move re-stamps the stored example's Tier; the fake has no files.
+func (x *exampleAPI) Move(ctx context.Context, id, tier string) (*domain.SavedExample, error) {
+	f := x.f()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.recordLocked("Examples.Move", map[string]string{"id": id, "tier": tier})
+	stored, ok := f.examples[id]
+	if !ok {
+		return nil, errs.New(errs.ExampleNotFound, "example %q not found", id).WithDetail("id", id)
+	}
+	if stored.Scope == domain.ExampleScopeService {
+		return nil, errs.New(errs.Invalid, "a service-scope example lives in its service; rescope it first")
+	}
+	stored.Tier = tier
+	if tier == domain.TierWorkspace {
+		stored.Shipped = domain.ShipUntracked
+	} else {
+		stored.Shipped = ""
+	}
+	f.examples[id] = stored
+	cp := stored
+	return &cp, nil
+}
+
+// Commit marks the stored example as committed but not pushed.
+func (x *exampleAPI) Commit(ctx context.Context, id, message string) (*domain.SavedExample, error) {
+	f := x.f()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.recordLocked("Examples.Commit", map[string]string{"id": id, "message": message})
+	stored, ok := f.examples[id]
+	if !ok {
+		return nil, errs.New(errs.ExampleNotFound, "example %q not found", id).WithDetail("id", id)
+	}
+	if stored.Tier != "" && stored.Tier != domain.TierWorkspace {
+		return nil, errs.New(errs.Invalid, "only a workspace-tier example can be committed; %q is %s", id, stored.Tier)
+	}
+	stored.Shipped = domain.ShipUnpushed
+	f.examples[id] = stored
+	cp := stored
+	return &cp, nil
+}

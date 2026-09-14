@@ -242,3 +242,8 @@ func (l *Local) setRepoFetchError(err error) {
 	}
 	l.repoFetchErr = ""
 }
+
+// Push: Phase 0 stub, filled in by the repository work.
+func (r *repoAPI) Push(ctx context.Context) (*domain.RepoStatus, error) {
+	return nil, errs.New(errs.NotImplemented, "pushing the workspace repository is not available yet")
+}

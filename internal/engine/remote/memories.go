@@ -122,3 +122,29 @@ func (m *memoryAPI) Reindex(ctx context.Context) error {
 }
 
 var _ engine.MemoryAPI = (*memoryAPI)(nil)
+
+type moveTierRequest struct {
+	Tier string `json:"tier"`
+}
+
+type commitMessageRequest struct {
+	Message string `json:"message,omitempty"`
+}
+
+// Move maps to POST /v1/memories/{id}/move.
+func (m *memoryAPI) Move(ctx context.Context, id, tier string) (*domain.Memory, error) {
+	var out domain.Memory
+	if err := m.r().do(ctx, http.MethodPost, "/v1/memories/"+id+"/move", nil, moveTierRequest{Tier: tier}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// Commit maps to POST /v1/memories/{id}/commit.
+func (m *memoryAPI) Commit(ctx context.Context, id, message string) (*domain.Memory, error) {
+	var out domain.Memory
+	if err := m.r().do(ctx, http.MethodPost, "/v1/memories/"+id+"/commit", nil, commitMessageRequest{Message: message}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}

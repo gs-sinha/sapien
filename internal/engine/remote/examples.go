@@ -103,3 +103,21 @@ func (e *exampleAPI) ForOperations(ctx context.Context, operationIDs []string, l
 func (e *exampleAPI) Reindex(ctx context.Context) error {
 	return e.r().do(ctx, http.MethodPost, "/v1/examples/reindex", nil, nil, nil)
 }
+
+// Move maps to POST /v1/examples/{id}/move.
+func (e *exampleAPI) Move(ctx context.Context, id, tier string) (*domain.SavedExample, error) {
+	var out domain.SavedExample
+	if err := e.r().do(ctx, http.MethodPost, "/v1/examples/"+id+"/move", nil, moveTierRequest{Tier: tier}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// Commit maps to POST /v1/examples/{id}/commit.
+func (e *exampleAPI) Commit(ctx context.Context, id, message string) (*domain.SavedExample, error) {
+	var out domain.SavedExample
+	if err := e.r().do(ctx, http.MethodPost, "/v1/examples/"+id+"/commit", nil, commitMessageRequest{Message: message}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}

@@ -577,3 +577,12 @@ func splitURLPath(p string) []string {
 	}
 	return strings.Split(p, "/")
 }
+
+// Move and Commit: Phase 0 stubs, filled in by the tier work.
+func (e *exampleAPI) Move(ctx context.Context, id, tier string) (*domain.SavedExample, error) {
+	return nil, errs.New(errs.NotImplemented, "moving an example between tiers is not available yet")
+}
+
+func (e *exampleAPI) Commit(ctx context.Context, id, message string) (*domain.SavedExample, error) {
+	return nil, errs.New(errs.NotImplemented, "committing an example is not available yet")
+}

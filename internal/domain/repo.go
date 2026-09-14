@@ -34,4 +34,8 @@ type RepoStatus struct {
 	// Skipped says why a sync did not pull: dirty files, no upstream, a
 	// diverged branch. Empty when nothing was skipped.
 	Skipped string `json:"skipped,omitempty"`
+	// Pushed reports that the operation that produced this status pushed
+	// the branch, with how many commits went up.
+	Pushed      bool `json:"pushed,omitempty"`
+	PushedCount int  `json:"pushed_count,omitempty"`
 }
