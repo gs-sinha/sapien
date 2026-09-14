@@ -9,6 +9,8 @@ import { useAsync } from '../../lib/useAsync';
 import type { Operation, SearchResult } from '../../api/types';
 import { timed } from './timing';
 
+const MAX_VISIBLE_TASK_MATCHES = 10;
+
 function operationOf(item: SearchResult | Operation): Operation {
   return 'operation' in item ? item.operation : item;
 }
@@ -70,20 +72,21 @@ export function KeywordSearch({ query, service, method }: { query: string; servi
   if (loading) return <div className="text-sm text-slate-400">Loading…</div>;
   if (error) return <div className="text-sm text-red-600">{error.message}</div>;
   if (!data) return null;
-  const { items } = data.data;
+  const { items, kind } = data.data;
   const taskMatches = items.flatMap((item) => {
     if (!('operation' in item) || !item.tasks) return [];
     return item.tasks.map((task) => ({ ...task, operation: item.operation }));
   });
+  const visibleTaskMatches = taskMatches.slice(0, MAX_VISIBLE_TASK_MATCHES);
 
   return (
-    <div className="flex flex-1 flex-col overflow-hidden">
+    <div className="min-h-0 flex-1 overflow-y-auto" role="region" aria-label="Operation search results">
       <p className="mb-2 text-xs text-slate-400">
         {items.length} result{items.length === 1 ? '' : 's'} &middot; {data.latencyMs} ms
       </p>
       {taskMatches.length > 0 && (
         <div className="mb-3 grid gap-2 sm:grid-cols-2">
-          {taskMatches.map((task) => (
+          {visibleTaskMatches.map((task) => (
             <Link
               key={`${task.id}:${task.operation.id}`}
               to={`/ui/operations/${encodeURIComponent(task.operation.id)}`}
@@ -99,13 +102,17 @@ export function KeywordSearch({ query, service, method }: { query: string; servi
       {items.length === 0 ? (
         <EmptyState title="No operations found" />
       ) : (
-        <div className="flex flex-1 flex-col overflow-hidden rounded border border-slate-200 dark:border-slate-800">
-          <VirtualList
-            items={items}
-            itemHeight={40}
-            height={Math.min(640, Math.max(200, items.length * 40))}
-            renderItem={(item) => <OperationRow item={item} />}
-          />
+        <div className="rounded border border-slate-200 dark:border-slate-800">
+          {kind === 'search' ? (
+            items.map((item) => <OperationRow key={operationOf(item).id} item={item} />)
+          ) : (
+            <VirtualList
+              items={items}
+              itemHeight={40}
+              height={Math.min(640, Math.max(200, items.length * 40))}
+              renderItem={(item) => <OperationRow item={item} />}
+            />
+          )}
         </div>
       )}
     </div>

@@ -103,6 +103,32 @@ describe('OperationsPage', () => {
     expect(screen.getByText('task: allocate-rider')).toBeInTheDocument();
     expect(screen.getByText('allocate a rider')).toBeInTheDocument();
     expect(screen.getByText('When: the order is ready for dispatch')).toBeInTheDocument();
+    const results = screen.getByRole('region', { name: 'Operation search results' });
+    expect(results).toHaveClass('overflow-y-auto');
+    expect(results).toContainElement(screen.getByText('allocate a rider'));
+    expect(results).toContainElement(screen.getByText('Create an order'));
+  });
+
+  it('shows only the top 10 task matches', async () => {
+    searchOperations.mockResolvedValueOnce([
+      {
+        ...searchHit,
+        tasks: Array.from({ length: 12 }, (_, index) => ({
+          id: `task-${index + 1}`,
+          phrase: `Task phrase ${index + 1}`,
+        })),
+      },
+    ]);
+
+    render(
+      <MemoryRouter initialEntries={['/ui/operations?q=dispatch']}>
+        <OperationsPage />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(screen.getByText('Task phrase 10')).toBeInTheDocument());
+    expect(screen.queryByText('Task phrase 11')).not.toBeInTheDocument();
+    expect(screen.queryByText('Task phrase 12')).not.toBeInTheDocument();
   });
 
   it('builds the broader context bundle only after the explicit action', async () => {
