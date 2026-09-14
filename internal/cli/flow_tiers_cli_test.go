@@ -197,6 +197,93 @@ func TestFlowList_ShowsTierColumn(t *testing.T) {
 	assert.Contains(t, lines["svc-flow"], "service:order-service")
 }
 
+// TestFlowList_ShowsShippedColumn: the new SHIPPED column always renders
+// (header present); its cells are empty against the fake, which never
+// simulates a workspace's git state -- internal/engine/local's own tests
+// (flows_ship_test.go) cover the real not-committed/modified/not-pushed/
+// shipped values against a real repository.
+func TestFlowList_ShowsShippedColumn(t *testing.T) {
+	dir, _ := setupFakeEngine(t)
+	stdout, stderr, code := run(t, "--workspace", dir, "flow", "list")
+	require.Equal(t, 0, code, "stderr: %s", stderr)
+	assert.Contains(t, stdout, "SHIPPED")
+}
+
+// TestFlowPromote_WithoutCommitPrintsHint: promoting to the team tier
+// without --commit tells the user the file still needs a human commit.
+func TestFlowPromote_WithoutCommitPrintsHint(t *testing.T) {
+	dir, fake := setupFakeEngine(t)
+	file := writeTemp(t, "auth-demo.flow.yaml", authoringFlow)
+	_, stderr, code := run(t, "--workspace", dir, "flow", "create", file)
+	require.Equal(t, 0, code, "stderr: %s", stderr)
+
+	stdout, stderr, code := run(t, "--workspace", dir, "flow", "promote", "auth-demo")
+	require.Equal(t, 0, code, "stderr: %s", stderr)
+	assert.Contains(t, stdout, "not committed yet: git add")
+	assert.Contains(t, stdout, "--commit")
+
+	args := lastCall(fake, "Flows.RescopeWith").Args.(map[string]any)
+	assert.Equal(t, false, args["commit"])
+	assert.Equal(t, "", args["message"])
+}
+
+// TestFlowPromote_CommitFlagForwardsToEngine: --commit and -m reach the
+// engine as RescopeOptions, and the "not committed yet" hint disappears
+// once a commit was requested.
+func TestFlowPromote_CommitFlagForwardsToEngine(t *testing.T) {
+	dir, fake := setupFakeEngine(t)
+	file := writeTemp(t, "auth-demo.flow.yaml", authoringFlow)
+	_, stderr, code := run(t, "--workspace", dir, "flow", "create", file)
+	require.Equal(t, 0, code, "stderr: %s", stderr)
+
+	stdout, stderr, code := run(t, "--workspace", dir, "flow", "promote", "auth-demo", "--commit", "-m", "Ship it")
+	require.Equal(t, 0, code, "stderr: %s", stderr)
+	assert.NotContains(t, stdout, "not committed yet")
+
+	args := lastCall(fake, "Flows.RescopeWith").Args.(map[string]any)
+	assert.Equal(t, "auth-demo", args["id"])
+	assert.Equal(t, "workspace", args["owner_kind"])
+	assert.Equal(t, true, args["commit"])
+	assert.Equal(t, "Ship it", args["message"])
+}
+
+// TestFlowRescope_CommitFlagForwardsToEngine mirrors the promote test for
+// the explicit `flow rescope --commit` form.
+func TestFlowRescope_CommitFlagForwardsToEngine(t *testing.T) {
+	dir, fake := setupFakeEngine(t)
+	file := writeTemp(t, "auth-demo.flow.yaml", authoringFlow)
+	_, stderr, code := run(t, "--workspace", dir, "flow", "create", file)
+	require.Equal(t, 0, code, "stderr: %s", stderr)
+
+	stdout, stderr, code := run(t, "--workspace", dir, "flow", "rescope", "auth-demo", "--scope", "workspace", "--commit", "-m", "Ship auth-demo")
+	require.Equal(t, 0, code, "stderr: %s", stderr)
+	assert.NotContains(t, stdout, "not committed yet")
+
+	args := lastCall(fake, "Flows.RescopeWith").Args.(map[string]any)
+	assert.Equal(t, "auth-demo", args["id"])
+	assert.Equal(t, "workspace", args["owner_kind"])
+	assert.Equal(t, true, args["commit"])
+	assert.Equal(t, "Ship auth-demo", args["message"])
+}
+
+// TestFlowRescope_HintOnlyAppliesToWorkspaceTarget: the "not committed yet"
+// hint is specific to a move into the workspace tier (the only target
+// --commit applies to); moving to service never prints it.
+func TestFlowRescope_HintOnlyAppliesToWorkspaceTarget(t *testing.T) {
+	dir, _ := setupFakeEngine(t)
+	file := writeTemp(t, "auth-demo.flow.yaml", authoringFlow)
+	_, stderr, code := run(t, "--workspace", dir, "flow", "create", file)
+	require.Equal(t, 0, code, "stderr: %s", stderr)
+
+	stdout, stderr, code := run(t, "--workspace", dir, "flow", "rescope", "auth-demo", "--scope", "workspace")
+	require.Equal(t, 0, code, "stderr: %s", stderr)
+	assert.Contains(t, stdout, "not committed yet")
+
+	stdout2, stderr2, code2 := run(t, "--workspace", dir, "flow", "rescope", "auth-demo", "--scope", "service", "--service", "order-service")
+	require.Equal(t, 0, code2, "stderr: %s", stderr2)
+	assert.NotContains(t, stdout2, "not committed yet")
+}
+
 func TestFlowShow_PrintsTierAsYAMLComment(t *testing.T) {
 	dir, _ := setupFakeEngine(t)
 	stdout, stderr, code := run(t, "--workspace", dir, "flow", "show", "create-order-flow")

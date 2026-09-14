@@ -287,10 +287,16 @@ func (b *Builder) Build(ctx context.Context, ref domain.ServiceRef) (*Snapshot, 
 // source as the thing to fall back to); a git source never is, because its
 // clone is reset on every sync.
 //
-// git is optional. With one, a local checkout is described by git
-// (branch, commit, origin, dirty count); a failure there degrades to the
-// path alone rather than failing the build, since what the checkout is on
-// is information about the service, not a condition of indexing it.
+// git is optional. With one, a local checkout is described against the
+// team ref (ref.Team.Ref when the committed source is git; left at "" --
+// so Ahead/Behind stay zero -- rather than guessing at HEAD's upstream,
+// which would make the binding disagree with what `service bind` itself
+// reports for the same checkout), which fills in branch, commit, origin,
+// dirty count, CommittedAt, Ahead/Behind and Worktree; a failure there
+// degrades to the path alone rather than failing the build, since what the
+// checkout is on is information about the service, not a condition of
+// indexing it. Package is filled in either way, from the same
+// DiscoverPackage a build already runs on root.
 func BindingFor(ctx context.Context, git *gitsrc.Manager, ref domain.ServiceRef, root string) *domain.ServiceBinding {
 	if ref.Source.Kind == domain.SourceGit {
 		team := ref.Source
@@ -309,9 +315,16 @@ func BindingFor(ctx context.Context, git *gitsrc.Manager, ref domain.ServiceRef,
 	}
 	b.Local = &domain.LocalCheckout{Path: root}
 	if git != nil {
-		if described, err := git.Describe(ctx, root); err == nil && described != nil {
+		teamRef := ""
+		if b.Team != nil && b.Team.Kind == domain.SourceGit {
+			teamRef = b.Team.Ref
+		}
+		if described, err := git.DescribeAgainst(ctx, root, teamRef); err == nil && described != nil {
 			b.Local = described
 		}
+	}
+	if pkg, err := DiscoverPackage(root, ref.Source.Contract); err == nil {
+		b.Local.Package = pkg.Dir
 	}
 	return b
 }

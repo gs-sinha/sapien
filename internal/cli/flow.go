@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -64,9 +65,9 @@ func newFlowListCmd(app *App) *cobra.Command {
 			}
 			rows := make([][]string, 0, len(flows))
 			for _, f := range flows {
-				rows = append(rows, []string{f.ID, f.Name, flowTier(f.OwnerKind, f.OwnerID), strconv.Itoa(f.StepCount), strings.Join(f.Operations, ",")})
+				rows = append(rows, []string{f.ID, f.Name, flowTier(f.OwnerKind, f.OwnerID), shipStateColumn(f.Shipped), strconv.Itoa(f.StepCount), strings.Join(f.Operations, ",")})
 			}
-			app.Printer.Table([]string{"ID", "NAME", "TIER", "STEPS", "OPERATIONS"}, rows)
+			app.Printer.Table([]string{"ID", "NAME", "TIER", "SHIPPED", "STEPS", "OPERATIONS"}, rows)
 			return nil
 		},
 	}
@@ -88,6 +89,27 @@ func flowTier(kind, ownerID string) string {
 		return "service"
 	default:
 		return "team"
+	}
+}
+
+// shipStateColumn renders a workspace-tier flow's domain.Ship* state (PLAN
+// §7b) for `flow list`'s SHIPPED column: "not committed" (in flows/ but
+// never added to git), "modified" (tracked, with uncommitted changes),
+// "not pushed" (committed here, not yet on the upstream), or "shipped".
+// Empty -- the local and service tiers, and a workspace not in git --
+// renders an empty cell.
+func shipStateColumn(state string) string {
+	switch state {
+	case domain.ShipUntracked:
+		return "not committed"
+	case domain.ShipModified:
+		return "modified"
+	case domain.ShipUnpushed:
+		return "not pushed"
+	case domain.ShipShipped:
+		return "shipped"
+	default:
+		return ""
 	}
 }
 
@@ -314,9 +336,10 @@ func tierRank(kind string) int {
 // or down, so "promote" always means "more people can see this now";
 // `flow rescope` is the form with no such opinion.
 func newFlowPromoteCmd(app *App) *cobra.Command {
-	var to, service string
+	var to, service, message string
+	var commit bool
 	cmd := &cobra.Command{
-		Use:   "promote <id> [--to workspace|service] [--service <name>]",
+		Use:   "promote <id> [--to workspace|service] [--service <name>] [--commit] [-m <message>]",
 		Short: "Move a flow up a tier: local -> workspace -> service",
 		Long: `Move a flow up the tier ladder, keeping its file name:
 
@@ -326,7 +349,12 @@ func newFlowPromoteCmd(app *App) *cobra.Command {
              that service bound to a local checkout here, so the flow rides your branch
 
 Without --to the flow moves one rung up. Promote when the flow has run green
-and others would benefit; use "sapien flow rescope" to move a flow down.`,
+and others would benefit; use "sapien flow rescope" to move a flow down.
+
+--commit additionally records the moved file in the workspace repository
+with one commit, only for a promotion to the workspace tier; it never
+pushes. Without --commit the file just sits in flows/ until you (or a
+rerun with --commit) commit it by hand.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			eng, err := app.Engine()
@@ -367,11 +395,13 @@ and others would benefit; use "sapien flow rescope" to move a flow down.`,
 				return errs.New(errs.Invalid, "flow %s is already in the %s tier; promote only moves up", flow.ID, flowTier(current, flow.OwnerID)).
 					WithHint("use `sapien flow rescope " + flow.ID + " --scope <tier>` to move it elsewhere")
 			}
-			return rescopeFlow(app, cmd.Context(), eng, flow, kind, owner)
+			return rescopeFlow(app, cmd.Context(), eng, flow, kind, owner, engine.RescopeOptions{Commit: commit, Message: message})
 		},
 	}
 	cmd.Flags().StringVar(&to, "to", "", "target tier: workspace or service (default: the next tier up)")
 	cmd.Flags().StringVar(&service, "service", "", "owning service, required when the target is the service tier")
+	cmd.Flags().BoolVar(&commit, "commit", false, "also commit the moved file in the workspace repository (workspace tier only); never pushes")
+	cmd.Flags().StringVarP(&message, "message", "m", "", "commit message (with --commit); default: \"Promote flow <id> to the team workspace\"")
 	return cmd
 }
 
@@ -379,15 +409,19 @@ and others would benefit; use "sapien flow rescope" to move a flow down.`,
 // <name>]`: the explicit form of promote, allowed to move a flow in any
 // direction.
 func newFlowRescopeCmd(app *App) *cobra.Command {
-	var scope, service string
+	var scope, service, message string
+	var commit bool
 	cmd := &cobra.Command{
-		Use:   "rescope <id> --scope local|workspace|service [--service <name>]",
+		Use:   "rescope <id> --scope local|workspace|service [--service <name>] [--commit] [-m <message>]",
 		Short: "Move a flow to another tier without losing it",
 		Long: `Move a flow to another tier, keeping its file name: local is this machine
 only, workspace is the team's repo, service is the owning service's repo
 (needs --service and a bound local checkout). Unlike "flow promote" this
 moves in any direction, so a shared flow can come back to local for private
-experimentation.`,
+experimentation.
+
+--commit additionally records the moved file in the workspace repository
+with one commit, only for a move to the workspace tier; it never pushes.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if scope == "" {
@@ -416,38 +450,47 @@ experimentation.`,
 			if current == kind && (kind != domain.FlowOwnerService || flow.OwnerID == owner) {
 				return errs.New(errs.Invalid, "flow %s is already in the %s tier", flow.ID, flowTier(current, flow.OwnerID))
 			}
-			return rescopeFlow(app, cmd.Context(), eng, flow, kind, owner)
+			return rescopeFlow(app, cmd.Context(), eng, flow, kind, owner, engine.RescopeOptions{Commit: commit, Message: message})
 		},
 	}
 	cmd.Flags().StringVar(&scope, "scope", "", "local|workspace|service (required)")
 	cmd.Flags().StringVar(&service, "service", "", "owning service for --scope service")
+	cmd.Flags().BoolVar(&commit, "commit", false, "also commit the moved file in the workspace repository (workspace tier only); never pushes")
+	cmd.Flags().StringVarP(&message, "message", "m", "", "commit message (with --commit); default: \"Promote flow <id> to the team workspace\"")
 	return cmd
 }
 
 // rescopeFlow is what promote and rescope share once the target is
-// settled: the engine move, then where the file went.
-func rescopeFlow(app *App, ctx context.Context, eng engine.Engine, flow *domain.Flow, kind, owner string) error {
+// settled: the engine move (through RescopeWith, so opts.Commit reaches
+// it), then where the file went, and -- only for a move to the workspace
+// tier -- whether it was committed.
+func rescopeFlow(app *App, ctx context.Context, eng engine.Engine, flow *domain.Flow, kind, owner string, opts engine.RescopeOptions) error {
 	oldPath := flow.Path
-	moved, err := eng.Flows().Rescope(ctx, flow.ID, kind, owner)
+	moved, err := eng.Flows().RescopeWith(ctx, flow.ID, kind, owner, opts)
 	if err != nil {
 		return err
 	}
 	if app.Printer.IsJSON() {
 		return app.Printer.JSON(map[string]any{
-			"id":       moved.ID,
-			"tier":     moved.OwnerKind,
-			"service":  moved.OwnerID,
-			"old_path": oldPath,
-			"new_path": moved.Path,
-			"flow":     summarizeFlow(moved),
+			"id":        moved.ID,
+			"tier":      moved.OwnerKind,
+			"service":   moved.OwnerID,
+			"old_path":  oldPath,
+			"new_path":  moved.Path,
+			"committed": opts.Commit,
+			"flow":      summarizeFlow(moved),
 		})
 	}
 	desc := flowTierDescription(moved.OwnerKind, moved.OwnerID)
 	if oldPath == "" && moved.Path == "" {
 		app.Printer.Line("moved flow %s to the %s", moved.ID, desc)
-		return nil
+	} else {
+		app.Printer.Line("%s -> %s (%s)", oldPath, moved.Path, desc)
 	}
-	app.Printer.Line("%s -> %s (%s)", oldPath, moved.Path, desc)
+	if moved.OwnerKind == domain.FlowOwnerWorkspace && !opts.Commit {
+		app.Printer.Line("%s", app.Printer.Dim(fmt.Sprintf(
+			"not committed yet: git add %s && git commit, or rerun with --commit", moved.Path)))
+	}
 	return nil
 }
 

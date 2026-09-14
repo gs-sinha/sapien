@@ -9,7 +9,10 @@ const units: [Intl.RelativeTimeFormatUnit, number][] = [
 
 const rtf = new Intl.RelativeTimeFormat('en', { numeric: 'auto' });
 
-function relative(date: Date): string {
+// Exported so other components (e.g. checkout drift labels in
+// pages/services/BindingPanel.tsx) can render the same relative phrasing
+// without a full <Timestamp> element.
+export function relative(date: Date): string {
   const diffSec = Math.round((date.getTime() - Date.now()) / 1000);
   for (const [unit, secs] of units) {
     if (Math.abs(diffSec) >= secs) return rtf.format(Math.round(diffSec / secs), unit);

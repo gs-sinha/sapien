@@ -256,6 +256,122 @@ func TestServerInstructions_MentionAgentsFile(t *testing.T) {
 	assert.Contains(t, instructions, "CLAUDE.md/AGENTS.md")
 }
 
+// --- add_service: local path in a shared (team) workspace (PLAN §7b) -----
+
+// withSharedWorkspace swaps isSharedWorkspace to report shared for the
+// duration of the test, restoring it on cleanup, since
+// internal/workspace.IsShared (which it will eventually call) is landing
+// in a concurrent change and isn't available to drive a real one yet.
+func withSharedWorkspace(t *testing.T, shared bool) {
+	t.Helper()
+	prev := isSharedWorkspace
+	isSharedWorkspace = func(*domain.Workspace) bool { return shared }
+	t.Cleanup(func() { isSharedWorkspace = prev })
+}
+
+func TestTool_AddService_SharedWorkspaceCommitsTeamSource(t *testing.T) {
+	withSharedWorkspace(t, true)
+	cs := newTestSession(t, Config{Default: DefaultPermissions()}, "claude-code")
+	res := callTool(t, cs, "add_service", map[string]any{"path": "/home/dev/code/new-repo", "ref": "main"})
+	require.False(t, res.IsError, firstText(res))
+
+	out := decodeStructured[AddServiceOutput](t, res.StructuredContent)
+	assert.Equal(t, "new-repo", out.Service.Name)
+	require.NotNil(t, out.Service.Binding)
+	assert.Equal(t, domain.BindingLocal, out.Service.Binding.Mode)
+	require.NotNil(t, out.Service.Binding.Local)
+	assert.Equal(t, "/home/dev/code/new-repo", out.Service.Binding.Local.Path)
+	require.NotNil(t, out.Service.Binding.Team)
+	assert.Equal(t, domain.SourceGit, out.Service.Binding.Team.Kind)
+
+	text := firstText(res)
+	assert.Contains(t, text, "committed new-repo to the team workspace as a git source")
+	assert.Contains(t, text, "reads: local /home/dev/code/new-repo")
+}
+
+func TestTool_AddService_NotSharedWorkspaceRegistersPlainLocalSource(t *testing.T) {
+	withSharedWorkspace(t, false)
+	cs := newTestSession(t, Config{Default: DefaultPermissions()}, "claude-code")
+	res := callTool(t, cs, "add_service", map[string]any{"path": "/home/dev/code/new-repo"})
+	require.False(t, res.IsError, firstText(res))
+
+	out := decodeStructured[AddServiceOutput](t, res.StructuredContent)
+	assert.Equal(t, "new-repo", out.Service.Name)
+	assert.Equal(t, domain.SourceLocal, out.Service.Source.Kind)
+	assert.Contains(t, firstText(res), "registered service new-repo")
+}
+
+func TestTool_AddService_LocalTrueSkipsCheckoutEvenWhenShared(t *testing.T) {
+	withSharedWorkspace(t, true)
+	cs := newTestSession(t, Config{Default: DefaultPermissions()}, "claude-code")
+	res := callTool(t, cs, "add_service", map[string]any{"path": "/home/dev/code/new-repo", "local": true})
+	require.False(t, res.IsError, firstText(res))
+
+	out := decodeStructured[AddServiceOutput](t, res.StructuredContent)
+	assert.Equal(t, domain.SourceLocal, out.Service.Source.Kind)
+	assert.Contains(t, firstText(res), "registered service new-repo")
+}
+
+// TestTool_AddService_NotACheckoutFallsBackToLocal drives the fake's
+// AddFromCheckout sentinel ("not-a-checkout" in the path) that refuses
+// with Details["local_add"] == true, and checks add_service falls back to
+// a plain local Add and explains why in the text.
+func TestTool_AddService_NotACheckoutFallsBackToLocal(t *testing.T) {
+	withSharedWorkspace(t, true)
+	cs := newTestSession(t, Config{Default: DefaultPermissions()}, "claude-code")
+	res := callTool(t, cs, "add_service", map[string]any{"path": "/home/dev/code/not-a-checkout"})
+	require.False(t, res.IsError, firstText(res))
+
+	out := decodeStructured[AddServiceOutput](t, res.StructuredContent)
+	assert.Equal(t, domain.SourceLocal, out.Service.Source.Kind)
+	assert.Equal(t, "/home/dev/code/not-a-checkout", out.Service.Source.Path)
+
+	text := firstText(res)
+	assert.Contains(t, text, "not a git checkout with an origin")
+	assert.Contains(t, text, "registered as a local-only source")
+	assert.Contains(t, text, "team: true")
+}
+
+// TestTool_AddService_MonorepoSubdirFallsBackToLocal exercises the other
+// local_add refusal: a checkout that is a subdirectory of its repository,
+// without team: true to accept it.
+func TestTool_AddService_MonorepoSubdirFallsBackToLocal(t *testing.T) {
+	withSharedWorkspace(t, true)
+	cs := newTestSession(t, Config{Default: DefaultPermissions()}, "claude-code")
+	res := callTool(t, cs, "add_service", map[string]any{"path": "/home/dev/code/monorepo-subdir/svc"})
+	require.False(t, res.IsError, firstText(res))
+
+	out := decodeStructured[AddServiceOutput](t, res.StructuredContent)
+	assert.Equal(t, domain.SourceLocal, out.Service.Source.Kind)
+	assert.Contains(t, firstText(res), "registered as a local-only source")
+}
+
+// TestTool_AddService_TeamTrueAcceptsMonorepoSubdir proves team: true is
+// forwarded as AllowSubdir, letting the checkout flow succeed instead of
+// falling back.
+func TestTool_AddService_TeamTrueAcceptsMonorepoSubdir(t *testing.T) {
+	withSharedWorkspace(t, true)
+	cs := newTestSession(t, Config{Default: DefaultPermissions()}, "claude-code")
+	res := callTool(t, cs, "add_service", map[string]any{"path": "/home/dev/code/monorepo-subdir/svc", "team": true})
+	require.False(t, res.IsError, firstText(res))
+
+	out := decodeStructured[AddServiceOutput](t, res.StructuredContent)
+	require.NotNil(t, out.Service.Binding)
+	assert.Equal(t, domain.BindingLocal, out.Service.Binding.Mode)
+	assert.Contains(t, firstText(res), "committed svc to the team workspace")
+}
+
+// TestTool_AddService_TeamTrueSurfacesOtherErrors proves team: true does
+// not fall back on a local_add refusal: the "not a git checkout" case is
+// surfaced as an error even though it would otherwise fall back.
+func TestTool_AddService_TeamTrueSurfacesOtherErrors(t *testing.T) {
+	withSharedWorkspace(t, true)
+	cs := newTestSession(t, Config{Default: DefaultPermissions()}, "claude-code")
+	res := callTool(t, cs, "add_service", map[string]any{"path": "/home/dev/code/not-a-checkout", "team": true})
+	require.True(t, res.IsError, firstText(res))
+	assert.Contains(t, firstText(res), "not a git checkout with an origin")
+}
+
 func TestTool_SyncService_NamesMissingEnvironments(t *testing.T) {
 	// The fixture engine's rider-service declares a "staging" environment
 	// and its workspace dir (/workspace) has no environment files at all.

@@ -9,7 +9,7 @@ import { FlowDescription } from './flows/FlowDescription';
 import { FlowStepCard } from './flows/FlowStepCard';
 import { RecentRuns } from './flows/RecentRuns';
 import { RunPanel } from './flows/RunPanel';
-import { isFlowOwnerKind, TierBadge } from './flows/tier';
+import { isFlowOwnerKind, ShippedBadge, TierBadge, tierOf } from './flows/tier';
 import { TierControl } from './flows/TierControl';
 import { ValidatePanel } from './flows/ValidatePanel';
 import { YamlSourcePanel } from './flows/YamlSourcePanel';
@@ -18,7 +18,26 @@ import type { FlowStepEdits, StepEdit } from './flows/stepEdits';
 import { useAsync } from '../lib/useAsync';
 import { subscribe } from '../state/events';
 import { pushToast } from '../state/toast';
-import type { Operation, Run } from '../api/types';
+import type { Operation, Run, ShipStatus } from '../api/types';
+
+// GET /v1/flows/{id} answers a domain.Flow, which carries no `shipped` (only
+// FlowSummary does): the workspace-tier ship badge shown in this page's
+// header is filled in from a second, best-effort lookup of that flow's own
+// summary. A failure there just means the badge doesn't show, not a page
+// error.
+type FlowDetail = FlowWithSource & { shipped?: ShipStatus };
+
+async function loadFlow(id: string): Promise<FlowDetail> {
+  const flow = await flows.get(id);
+  let shipped: ShipStatus | undefined;
+  try {
+    const summaries = await flows.list(id);
+    shipped = summaries.find((s) => s.id === id)?.shipped;
+  } catch {
+    // best effort; see comment above.
+  }
+  return { ...flow, shipped };
+}
 
 // Shown once per browser tab session, the first time "Save to flow" is
 // used: js-yaml's dumper round-trips the data but not the file's comments
@@ -44,7 +63,7 @@ function markSaveWarningShown(): void {
 
 export default function FlowDetailPage() {
   const { id = '' } = useParams();
-  const { data: flow, error, loading, reload } = useAsync<FlowWithSource>(() => flows.get(id), [id]);
+  const { data: flow, error, loading, reload } = useAsync<FlowDetail>(() => loadFlow(id), [id]);
 
   const [edits, setEdits] = useState<FlowStepEdits>({});
   const [savingToFlow, setSavingToFlow] = useState(false);
@@ -183,6 +202,7 @@ export default function FlowDetailPage() {
         <div className="mb-1 flex flex-wrap items-center gap-2">
           <h1 className="text-lg font-semibold">{flow.name || flow.id}</h1>
           {hasTier && <TierBadge ownerKind={flow.owner_kind} ownerId={flow.owner_id} />}
+          {hasTier && tierOf(flow.owner_kind) === 'workspace' && <ShippedBadge shipped={flow.shipped} />}
         </div>
         <FlowDescription text={flow.description} />
         <div className="max-w-2xl">

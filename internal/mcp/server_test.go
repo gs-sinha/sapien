@@ -17,6 +17,7 @@ var wantToolNames = []string{
 	"add_service", "sync_service", "rescope_memory",
 	"list_examples", "get_example", "create_example", "rescope_example", "delete_example",
 	"report_friction",
+	"bind_service", "unbind_service", "find_checkouts",
 }
 
 func TestServer_ListTools(t *testing.T) {

@@ -7,6 +7,7 @@ import { Table } from '../components/Table';
 import { Timestamp } from '../components/Timestamp';
 import { useAsync } from '../lib/useAsync';
 import { AddServiceForm } from './services/AddServiceForm';
+import { driftSuffix } from './services/BindingPanel';
 import { subscribe } from '../state/events';
 import { pushToast } from '../state/toast';
 import type { Service } from '../api/types';
@@ -21,7 +22,11 @@ function sourceLabel(s: Service): string {
 // source kind for a daemon that does not report bindings yet.
 export function readsFromLabel(s: Service): string {
   const b = s.binding;
-  if (b?.mode === 'local') return b.local?.branch ? `local · ${b.local.branch}` : 'local';
+  if (b?.mode === 'local') {
+    const base = b.local?.branch ? `local · ${b.local.branch}` : 'local';
+    const drift = b.local ? driftSuffix(b.local) : '';
+    return drift ? `${base} · ${drift}` : base;
+  }
   if (b?.mode === 'team') return b.team?.ref ? `team · ${b.team.ref}` : 'team';
   return s.source.type === 'git' ? 'team' : 'local';
 }

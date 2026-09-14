@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/gs-sinha/sapien/internal/diagnose"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -40,7 +41,11 @@ func (s *server) listFlows(ctx context.Context, req *sdkmcp.CallToolRequest, in 
 	out := ListFlowsOutput{Flows: flows}
 	var b strings.Builder
 	for _, f := range flows {
-		fmt.Fprintf(&b, "- %s (%d steps, %s): %s [%s]\n", f.ID, f.StepCount, flowTierLabel(f.OwnerKind, f.OwnerID), f.Name, strings.Join(f.Tags, ","))
+		tier := flowTierLabel(f.OwnerKind, f.OwnerID)
+		if shipText := shipStateText(f.Shipped); shipText != "" {
+			tier += ", " + shipText
+		}
+		fmt.Fprintf(&b, "- %s (%d steps, %s): %s [%s]\n", f.ID, f.StepCount, tier, f.Name, strings.Join(f.Tags, ","))
 	}
 	if len(flows) == 0 {
 		b.WriteString("no flows\n")
@@ -209,6 +214,12 @@ type FlowSaveResult struct {
 	// instead), so anything reaching here passed validation.
 	Diagnostics []domain.Diagnostic `json:"diagnostics,omitempty"`
 	Bytes       int                 `json:"bytes"`
+	// Shipped is the workspace tier's ship state (FlowSummary.Shipped, PLAN
+	// §7b): empty for local and service, and for a workspace not in git.
+	// Filled in by the caller (shippedStateFor), not by
+	// buildFlowSaveResult, since it needs a List call the *domain.Flow
+	// buildFlowSaveResult is given does not carry.
+	Shipped string `json:"shipped,omitempty"`
 }
 
 // buildFlowSaveResult reduces a saved flow (plus the ValidationResult from
@@ -369,6 +380,7 @@ func (s *server) createFlow(ctx context.Context, req *sdkmcp.CallToolRequest, in
 		return errResult(err), nil, nil
 	}
 	out := buildFlowSaveResult(flow, s.workspaceDir(), valResult)
+	out.Shipped = shippedStateFor(ctx, s.engine().Flows(), flow.ID)
 	text := fmt.Sprintf("created flow %s at %s (%s), %d steps\n", out.ID, out.Path, flowTierNote(out.Tier, out.Service), out.Steps)
 	return result(text, out), nil, nil
 }
@@ -417,6 +429,59 @@ func flowTierLabel(kind, ownerID string) string {
 	return kind
 }
 
+// shipStateText renders a workspace-tier flow's domain.Ship* state
+// (FlowSummary.Shipped, PLAN §7b) for list_flows' one-line-per-flow text:
+// "not committed" (in flows/ but never added to git), "modified" (tracked,
+// with uncommitted changes), "committed, not pushed", or "shipped". Empty
+// -- the local and service tiers, and a workspace not in git -- renders
+// nothing, so the tier label stands alone as it always has.
+func shipStateText(state string) string {
+	switch state {
+	case domain.ShipUntracked:
+		return "not committed"
+	case domain.ShipModified:
+		return "modified"
+	case domain.ShipUnpushed:
+		return "committed, not pushed"
+	case domain.ShipShipped:
+		return "shipped"
+	default:
+		return ""
+	}
+}
+
+// shippedStateFor looks up flow id's current ship state
+// (FlowSummary.Shipped) for FlowSaveResult, through one List call filtered
+// to id. Best effort: any error, or no exact match, leaves it empty rather
+// than failing a save that has already succeeded.
+func shippedStateFor(ctx context.Context, flows engine.FlowAPI, id string) string {
+	list, err := flows.List(ctx, id)
+	if err != nil {
+		return ""
+	}
+	for _, f := range list {
+		if f.ID == id {
+			return f.Shipped
+		}
+	}
+	return ""
+}
+
+// commitShortSHA best-effort reads wsDir's current HEAD short sha, for
+// rescope_flow's confirmation text after it commits a promotion. Never
+// fails the call: git not being installed, wsDir not being a repository,
+// or a raced concurrent commit all just mean the text omits the sha.
+func commitShortSHA(ctx context.Context, wsDir string) string {
+	if wsDir == "" {
+		return ""
+	}
+	out, err := exec.CommandContext(ctx, "git", "-C", wsDir, "rev-parse", "--short", "HEAD").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
 // flowTierNote is the parenthetical create_flow and rescope_flow print
 // after the path: where the flow now lives in terms of who can see it, and
 // for the local tier the one thing to do next.
@@ -438,6 +503,10 @@ type RescopeFlowInput struct {
 	ID      string `json:"id" jsonschema:"flow id"`
 	Scope   string `json:"scope" jsonschema:"tier to move the flow to: local (this machine only), workspace (the team's repo), or service (the owning service's api/flows; needs service and a bound local checkout)"`
 	Service string `json:"service,omitempty" jsonschema:"owning service name; required for scope service"`
+	// Commit and Message mirror engine.RescopeOptions (PLAN §7b): opt-in,
+	// only meaningful for scope workspace, and never a push.
+	Commit  bool   `json:"commit,omitempty" jsonschema:"also commit the moved file in the workspace repository; only for scope workspace; never pushes; do this only when the user asked for it"`
+	Message string `json:"message,omitempty" jsonschema:"commit message; only used with commit; default: \"Promote flow <id> to the team workspace\""`
 }
 
 // RescopeFlowOutput is rescope_flow's structured output: the same lean
@@ -465,7 +534,7 @@ func (s *server) rescopeFlow(ctx context.Context, req *sdkmcp.CallToolRequest, i
 	if err != nil {
 		return errResult(err), nil, nil
 	}
-	moved, err := s.engine().Flows().Rescope(ctx, in.ID, kind, service)
+	moved, err := s.engine().Flows().RescopeWith(ctx, in.ID, kind, service, engine.RescopeOptions{Commit: in.Commit, Message: in.Message})
 	if err != nil {
 		return errResult(err), nil, nil
 	}
@@ -475,7 +544,26 @@ func (s *server) rescopeFlow(ctx context.Context, req *sdkmcp.CallToolRequest, i
 		OldPath:        displayFlowPath(wsDir, existing.Path),
 		NewPath:        displayFlowPath(wsDir, moved.Path),
 	}
-	text := fmt.Sprintf("rescoped flow %s to %s (%s -> %s)\n", out.ID, flowTierNote(out.Tier, out.Service), out.OldPath, out.NewPath)
+	out.Shipped = shippedStateFor(ctx, s.engine().Flows(), moved.ID)
+
+	text := fmt.Sprintf("rescoped flow %s to %s (%s -> %s)", out.ID, flowTierNote(out.Tier, out.Service), out.OldPath, out.NewPath)
+	// The commit note only makes sense for a promotion to the workspace
+	// tier -- Commit is refused by the engine for any other target -- so it
+	// is appended only there; a move to local or service keeps the text as
+	// it always was.
+	if out.Tier == domain.FlowOwnerWorkspace {
+		switch {
+		case !in.Commit:
+			text += "; not committed"
+		default:
+			if sha := commitShortSHA(ctx, wsDir); sha != "" {
+				text += "; committed " + sha
+			} else {
+				text += "; committed"
+			}
+		}
+	}
+	text += "\n"
 	return result(text, out), nil, nil
 }
 
@@ -510,6 +598,7 @@ func (s *server) updateFlow(ctx context.Context, req *sdkmcp.CallToolRequest, in
 		return errResult(err), nil, nil
 	}
 	out := buildFlowSaveResult(flow, s.workspaceDir(), valResult)
+	out.Shipped = shippedStateFor(ctx, s.engine().Flows(), flow.ID)
 	text := fmt.Sprintf("updated flow %s at %s, %d steps\n", out.ID, out.Path, out.Steps)
 	return result(text, out), nil, nil
 }
@@ -567,6 +656,7 @@ func (s *server) patchFlow(ctx context.Context, req *sdkmcp.CallToolRequest, in 
 		return errResult(err), nil, nil
 	}
 	out := buildFlowSaveResult(flow, s.workspaceDir(), valResult)
+	out.Shipped = shippedStateFor(ctx, s.engine().Flows(), flow.ID)
 	text := fmt.Sprintf("patched flow %s at %s, %d steps\n", out.ID, out.Path, out.Steps)
 	return result(text, out), nil, nil
 }

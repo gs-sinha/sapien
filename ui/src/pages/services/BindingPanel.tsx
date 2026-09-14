@@ -13,7 +13,9 @@ import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { services } from '../../api/client';
 import { KeyValue } from '../../components/KeyValue';
+import { relative } from '../../components/Timestamp';
 import { pushToast } from '../../state/toast';
+import { CheckoutPicker } from './CheckoutPicker';
 import type { BindingInfo, LocalCheckout, Service, ServiceBinding, Source } from '../../api/types';
 
 export function shortCommit(commit?: string): string {
@@ -27,14 +29,53 @@ export function teamLabel(src?: Source): string {
   return `team · ${where}${src.ref ? ` @ ${src.ref}` : ''}`;
 }
 
-// "local · <path> · branch <b> · <commit7> · N uncommitted here": what this
-// machine reads when bound to a checkout. Dirty only shows when > 0.
+// "+A/-B", or "" when the checkout isn't known to be ahead or behind the
+// team ref at all (both zero or unknown).
+export function driftSuffix(c: LocalCheckout): string {
+  const ahead = c.ahead || 0;
+  const behind = c.behind || 0;
+  if (ahead === 0 && behind === 0) return '';
+  return `+${ahead}/-${behind}`;
+}
+
+// "branch <b> · last commit <relative> · +A/-B vs team · N uncommitted · worktree",
+// omitting any part git/the daemon didn't report. Shared by the candidate
+// annotation line here and the checkout picker's rows.
+export function annotationLabel(c: LocalCheckout): string {
+  const parts: string[] = [];
+  if (c.branch) parts.push(`branch ${c.branch}`);
+  if (c.committed_at) parts.push(`last commit ${relative(new Date(c.committed_at))}`);
+  const drift = driftSuffix(c);
+  if (drift) parts.push(`${drift} vs team`);
+  if (c.dirty && c.dirty > 0) parts.push(`${c.dirty} uncommitted`);
+  if (c.worktree) parts.push('worktree');
+  return parts.join(' · ');
+}
+
+// "local · <path> · branch <b> · <commit7> · N uncommitted here · last commit
+// <relative> · +A/-B vs team · worktree": what this machine reads when bound
+// to a checkout, including drift against the team ref. Every part but the
+// path is omitted when unknown.
 export function checkoutLabel(c: LocalCheckout): string {
   const parts = [`local · ${c.path}`];
   if (c.branch) parts.push(`branch ${c.branch}`);
   if (c.commit) parts.push(shortCommit(c.commit));
   if (c.dirty && c.dirty > 0) parts.push(`${c.dirty} uncommitted here`);
+  if (c.committed_at) parts.push(`last commit ${relative(new Date(c.committed_at))}`);
+  const drift = driftSuffix(c);
+  if (drift) parts.push(`${drift} vs team`);
+  if (c.worktree) parts.push('worktree');
   return parts.join(' · ');
+}
+
+// Candidates sorted most-recently-committed first, so the one clone most
+// likely to be someone's active work leads the list.
+function sortByCommittedAt(candidates: LocalCheckout[]): LocalCheckout[] {
+  return [...candidates].sort((a, b) => {
+    const ta = a.committed_at ? new Date(a.committed_at).getTime() : 0;
+    const tb = b.committed_at ? new Date(b.committed_at).getTime() : 0;
+    return tb - ta;
+  });
 }
 
 // What an unbound daemon (no `binding` on the Service, no /binding route)
@@ -44,7 +85,7 @@ function fallbackBinding(service: Service): ServiceBinding {
   return { mode: 'local', local: { path: service.source.path || '' }, writable: true };
 }
 
-const buttonCls = 'rounded border border-slate-300 px-2 py-1 text-xs disabled:opacity-50 dark:border-slate-700';
+export const buttonCls = 'rounded border border-slate-300 px-2 py-1 text-xs disabled:opacity-50 dark:border-slate-700';
 
 export function BindingPanel({ service, onChanged }: { service: Service; onChanged: () => void }) {
   const name = service.name;
@@ -52,6 +93,7 @@ export function BindingPanel({ service, onChanged }: { service: Service; onChang
   const [loadError, setLoadError] = useState<string | null>(null);
   const [path, setPath] = useState('');
   const [busy, setBusy] = useState(false);
+  const [showPicker, setShowPicker] = useState(false);
   // Bumped after a bind/unbind so the candidates and the binding refresh
   // even if the page around this panel did not remount.
   const [tick, setTick] = useState(0);
@@ -76,7 +118,7 @@ export function BindingPanel({ service, onChanged }: { service: Service; onChang
 
   const hasBinding = !!(info?.binding || service.binding);
   const binding: ServiceBinding = info?.binding || service.binding || fallbackBinding(service);
-  const candidates = info?.candidates ?? [];
+  const candidates = sortByCommittedAt(info?.candidates ?? []);
   const team = binding.team || (service.source.type === 'git' ? service.source : undefined);
 
   const bind = async (target: string) => {
@@ -118,6 +160,12 @@ export function BindingPanel({ service, onChanged }: { service: Service; onChang
     canListen = hasBinding ? (
       <div className="space-y-2">
         <div>a local checkout</div>
+        {candidates.length > 1 && (
+          <p className="text-xs text-slate-500">
+            {candidates.length} clones of this repository on this machine; the most recently committed is{' '}
+            <span className="font-mono">{candidates[0].path}</span>.
+          </p>
+        )}
         {candidates.length > 0 && (
           <div className="flex flex-wrap gap-2">
             {candidates.map((c) => (
@@ -150,6 +198,9 @@ export function BindingPanel({ service, onChanged }: { service: Service; onChang
           />
           <button type="submit" disabled={busy || !path.trim()} className={buttonCls}>
             {busy ? 'Switching…' : 'Read from checkout'}
+          </button>
+          <button type="button" disabled={busy} onClick={() => setShowPicker(true)} className={buttonCls}>
+            Browse…
           </button>
         </form>
       </div>
@@ -188,6 +239,18 @@ export function BindingPanel({ service, onChanged }: { service: Service; onChang
         </p>
       )}
       {loadError && <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">Could not load checkout candidates: {loadError}</p>}
+      {showPicker && (
+        <CheckoutPicker
+          service={name}
+          onBound={() => {
+            setShowPicker(false);
+            setPath('');
+            setTick((t) => t + 1);
+            onChanged();
+          }}
+          onClose={() => setShowPicker(false)}
+        />
+      )}
     </section>
   );
 }

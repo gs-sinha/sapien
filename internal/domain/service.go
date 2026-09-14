@@ -169,7 +169,7 @@ type LocalCheckout struct {
 	// CommittedAt is HEAD's commit time: how recently this clone was
 	// worked in, which is what separates the checkout someone develops in
 	// from an old backup clone of the same repository.
-	CommittedAt time.Time `json:"committed_at,omitempty"`
+	CommittedAt time.Time `json:"committed_at,omitzero"`
 	// Ahead and Behind count commits between HEAD and the team's ref as this
 	// clone last fetched it (origin/<ref>); zero when the ref is unknown here.
 	Ahead  int `json:"ahead,omitempty"`

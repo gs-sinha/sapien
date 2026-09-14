@@ -114,6 +114,10 @@ never seen the code, so the docs must carry the business logic, not
 restate the contract. Read `get_dsl_reference("service")` before starting:
 it has the layout, the documentation requirements, the questions to ask
 the service's owners, and what the coverage warnings mean.
+In a shared workspace `add_service` with a checkout path commits the
+checkout's origin as the team's git source and binds the checkout on this
+machine, so the service indexes at once and teammates receive it when the
+`api/` package is pushed; pass `local` for a path-only source.
 
 ## Where memories fit
 
@@ -132,8 +136,12 @@ it refreshes from GitHub, and that clone is read-only -- nothing you
 write into a service read this way can survive, so service scope is
 refused there. `list_services` and `get_service` say what each service is
 read from: `team` (the git source, read-only) or `local` (a checkout on
-this machine, writable, with its branch). A developer binds a service to
-their checkout with `sapien service bind <name> <path>`; from then on
+this machine, writable, with its branch). When the user asks you to read a
+service from their checkout, call `bind_service` with the absolute path
+(the service is inferred from the checkout's origin; the origin must be
+that service's repository); `find_checkouts` lists the clones this machine
+knows with their branch, last commit and drift so you can ask which one
+they mean, and `unbind_service` returns to the team source. From then on
 service-scoped memories, examples and flows land in that checkout's
 `api/` and ship in their pull request. If you need to record something
 about a read-only service, use workspace scope with a service subject; a

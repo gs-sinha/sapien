@@ -18,6 +18,28 @@ and phase numbers refer to PLAN.md §34's roadmap.
   service now says what it is listening to (`local` with branch, commit and
   uncommitted count, or `team` with the pinned ref) and what it could listen
   to, with candidate checkouts found from other registered workspaces.
+- **Binding is validated and browsable.** A bind refuses a checkout whose
+  origin is another repository, or which has no API package yet, unless
+  forced; every checkout shows its last commit time, ahead/behind the team
+  ref and whether it is a worktree, so a stale backup clone is obviously
+  stale. The service page gained a daemon-side directory picker (`GET
+  /v1/services/{name}/checkouts`) that annotates each repository with
+  whether it is this service's. `sapien service bind <path>` alone infers
+  the service from the checkout's origin. Agents get `bind_service`,
+  `unbind_service` and `find_checkouts` over MCP.
+- **`service add <path>` is team-aware.** In a shared workspace (one inside
+  a git repository with a remote) it commits the checkout's origin as a
+  git source and binds the checkout on this machine, so a new hire onboards
+  a service before pushing it and the shared file never learns an absolute
+  local path. `--local` keeps the old behaviour; `add_service` follows the
+  same rule unless `local` is set.
+- **Promoted flows show whether they shipped.** A workspace-tier flow
+  carries `shipped`: not committed, modified, committed but not pushed, or
+  shipped, from a read-only git status of the workspace repository, on the
+  flows page, in `flow list` and in `list_flows`. `sapien flow promote
+  --commit` (and the "and commit" checkbox, and `rescope_flow` with
+  `commit`) also commits the moved file in the workspace repository;
+  opt-in, never a push, never a service repository.
 - **Flow tiers.** A new flow lands in `local/flows` (this machine, ignored
   by git) by default; `sapien flow promote`, the `rescope_flow` MCP tool and
   the flow page move it to the team's `flows/` and, when the owning service

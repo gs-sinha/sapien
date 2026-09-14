@@ -61,10 +61,17 @@ func (s *Server) handleFlowCreate(w http.ResponseWriter, r *http.Request) {
 }
 
 // rescopeFlowRequest is POST /v1/flows/{id}/rescope's body: the tier to
-// move the flow to, and the service when that tier is service.
+// move the flow to, and the service when that tier is service. Commit and
+// Message mirror engine.RescopeOptions (internal/engine/remote/flows.go's
+// rescopeFlowRequest is the client-side twin of this same wire shape):
+// Commit records the moved file in the workspace repository with one
+// commit, only for a promotion to the workspace tier, and never pushes;
+// Message overrides the default commit message.
 type rescopeFlowRequest struct {
 	OwnerKind string `json:"owner_kind"`
 	OwnerID   string `json:"owner_id,omitempty"`
+	Commit    bool   `json:"commit,omitempty"`
+	Message   string `json:"message,omitempty"`
 }
 
 func (s *Server) handleFlowRescope(w http.ResponseWriter, r *http.Request) {
@@ -79,7 +86,9 @@ func (s *Server) handleFlowRescope(w http.ResponseWriter, r *http.Request) {
 			WithHint("pass owner_kind local, workspace, or service (with owner_id naming the service)"))
 		return
 	}
-	out, err := engineFrom(r.Context()).Flows().Rescope(r.Context(), id, req.OwnerKind, req.OwnerID)
+	out, err := engineFrom(r.Context()).Flows().RescopeWith(r.Context(), id, req.OwnerKind, req.OwnerID, engine.RescopeOptions{
+		Commit: req.Commit, Message: req.Message,
+	})
 	if err != nil {
 		writeError(w, err)
 		return

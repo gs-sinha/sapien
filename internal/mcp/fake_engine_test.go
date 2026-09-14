@@ -1281,7 +1281,19 @@ func (a fakeServices) BrowseCheckouts(_ context.Context, name, dir string) (*eng
 	return nil, errs.New(errs.ServiceNotFound, "service %q not found", name)
 }
 
+// AddFromCheckout mirrors what the real engine does with the checkout's
+// origin, with two sentinel paths a test can use to drive the refusal
+// add_service's fallback logic reacts to (Details["local_add"] == true):
+// a path containing "not-a-checkout" has no git origin at all, and one
+// containing "monorepo-subdir" is a subdirectory of its repository,
+// refused unless AllowSubdir (add_service's team: true).
 func (a fakeServices) AddFromCheckout(ctx context.Context, name, path string, opts engine.AddFromCheckoutOptions) (*domain.Service, error) {
+	if strings.Contains(path, "not-a-checkout") {
+		return nil, errs.New(errs.Invalid, "%s is not a git checkout with an origin", path).WithDetail("local_add", true)
+	}
+	if strings.Contains(path, "monorepo-subdir") && !opts.AllowSubdir {
+		return nil, errs.New(errs.Invalid, "%s is a subdirectory of its repository; pass allow_subdir or team to accept it", path).WithDetail("local_add", true)
+	}
 	if name == "" {
 		name = path[strings.LastIndex(path, "/")+1:]
 	}
@@ -1300,7 +1312,8 @@ func (a fakeFlows) RescopeWith(ctx context.Context, id string, ownerKind, ownerI
 		a.st.mu.Lock()
 		for i := range a.st.flows {
 			if a.st.flows[i].ID == id {
-				a.st.flows[i].Path = a.st.flows[i].Path // committed state is not modelled beyond the recorded call
+				// committed state is not modelled beyond the recorded call
+				break
 			}
 		}
 		a.st.mu.Unlock()

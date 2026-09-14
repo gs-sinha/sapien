@@ -13,6 +13,7 @@ import { setSessionStale } from '../state/daemon';
 import { currentWorkspace } from '../state/workspace';
 import type { WorkspaceInfo } from '../state/workspace';
 import type {
+  AddFromCheckoutRequest,
   AddServiceRequest,
   BindingInfo,
   CallRequest,
@@ -20,6 +21,7 @@ import type {
   ContextBundle,
   ContextRequest,
   DefaultEnvironmentResponse,
+  DirListing,
   Doc,
   DocSearchResult,
   Environment,
@@ -105,8 +107,8 @@ export const NULLABLE_ARRAY_KEYS = new Set([
   'added', 'removed', 'changed',
   // search.go / context bundle
   'matched_on', 'examples', 'flows', 'runs', 'memories', 'scopes',
-  // engine.go (BindingInfo)
-  'candidates',
+  // engine.go (BindingInfo, DirListing)
+  'candidates', 'entries',
   // diagnose (bypasses this client today, kept for when it doesn't)
   'hints',
 ]);
@@ -263,8 +265,19 @@ export const services = {
   // between a local checkout and the committed team source (recorded in the
   // gitignored sapien.workspace.local.yaml); both answer the updated Service.
   binding: (id: string): Promise<BindingInfo> => get(`/v1/services/${encodeURIComponent(id)}/binding`),
-  bind: (id: string, path: string): Promise<Service> => put(`/v1/services/${encodeURIComponent(id)}/binding`, { path }),
+  // force bypasses the daemon's refusal of a checkout whose origin names
+  // another repository, or which has no API package.
+  bind: (id: string, path: string, force?: boolean): Promise<Service> =>
+    put(`/v1/services/${encodeURIComponent(id)}/binding`, { path, force }),
   unbind: (id: string): Promise<Service> => del(`/v1/services/${encodeURIComponent(id)}/binding`),
+  // One directory level for the checkout picker (path omitted = home),
+  // annotated with which entries are git repositories and whether each is
+  // this service's own team repository.
+  browseCheckouts: (id: string, path?: string): Promise<DirListing> =>
+    get(`/v1/services/${encodeURIComponent(id)}/checkouts${buildQuery({ path })}`),
+  // Registers the checkout's origin as the team's git source and binds the
+  // checkout here in one step (no service registered yet).
+  addFromCheckout: (req: AddFromCheckoutRequest): Promise<Service> => post('/v1/services/from-checkout', req),
 };
 
 // ---- operations / schemas / docs ----
@@ -373,9 +386,16 @@ export const flows = {
   reference: (topic?: string): Promise<string> => get(`/v1/flows/reference${buildQuery({ topic })}`),
   run: (id: string, opts: RunOptionsWire = {}): Promise<Run> => post(`/v1/flows/${encodeURIComponent(id)}/run`, opts),
   // Move a flow between tiers (local -> workspace -> service); ownerId names
-  // the service for the service tier. Mirrors `sapien flow promote`.
-  rescope: (id: string, ownerKind: FlowOwnerKind, ownerId?: string): Promise<Flow> =>
-    post(`/v1/flows/${encodeURIComponent(id)}/rescope`, { owner_kind: ownerKind, ...(ownerId ? { owner_id: ownerId } : {}) }),
+  // the service for the service tier. Mirrors `sapien flow promote`. opts.commit
+  // additionally `git add` + `git commit`s the moved file in the workspace
+  // repo (never a push); the daemon refuses it for any target but workspace.
+  rescope: (id: string, ownerKind: FlowOwnerKind, ownerId?: string, opts?: { commit?: boolean; message?: string }): Promise<Flow> =>
+    post(`/v1/flows/${encodeURIComponent(id)}/rescope`, {
+      owner_kind: ownerKind,
+      ...(ownerId ? { owner_id: ownerId } : {}),
+      ...(opts?.commit ? { commit: true } : {}),
+      ...(opts?.message ? { message: opts.message } : {}),
+    }),
 };
 
 // ---- runs ----

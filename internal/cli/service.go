@@ -7,9 +7,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gs-sinha/sapien/internal/engine"
 	"github.com/gs-sinha/sapien/internal/env"
 	"github.com/gs-sinha/sapien/internal/errs"
 	"github.com/gs-sinha/sapien/internal/gitsrc"
+	"github.com/gs-sinha/sapien/internal/workspace"
 
 	"github.com/spf13/cobra"
 
@@ -43,14 +45,57 @@ func looksLikeGitURL(loc string) bool {
 
 func newServiceAddCmd(app *App) *cobra.Command {
 	var name, ref, subdir, contract string
-	var showAccepted bool
+	var showAccepted, localOnly, team, force bool
 
 	cmd := &cobra.Command{
 		Use:   "add <path|git-url>",
 		Short: "Register a service from a local path or a git URL",
-		Args:  cobra.ExactArgs(1),
+		Long: `Add registers a service.
+
+A git URL is always committed as a git source, exactly as before.
+
+For a local path, in a workspace whose sapien.workspace.yaml is itself
+committed to a git repository with a remote (workspace.IsShared), Add
+defaults to committing the checkout's own origin as a git source and
+binding the checkout here (PLAN §7b's add-from-checkout), so every clone
+of the team repo gets a usable source at once instead of one machine's
+absolute path. --local forces the old behaviour: the path itself is
+committed, verbatim, local-only. --team additionally allows a path that is
+a subdirectory of its repository (a monorepo service) to be committed
+with that subdirectory recorded, instead of falling back to --local
+automatically (with an explanatory line) the way an unqualified add does
+for such a path.`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			loc := args[0]
+
+			eng, err := app.Engine()
+			if err != nil {
+				return err
+			}
+			defer eng.Close()
+
+			if !looksLikeGitURL(loc) && !localOnly {
+				if svc, addErr, handled := tryAddFromCheckout(cmd, app, eng, loc, name, ref, force, team); handled {
+					if app.Printer.IsJSON() {
+						if svc != nil {
+							if jerr := app.Printer.JSON(svc); jerr != nil {
+								return jerr
+							}
+						}
+						return addErr
+					}
+					if svc != nil {
+						app.Printer.Line("%s", addFromCheckoutLine(svc))
+						if showAccepted {
+							printAcceptedWarnings(app.Printer, svc)
+						}
+						printMissingEnvHint(app, svc)
+					}
+					return addErr
+				}
+			}
+
 			src := domain.Source{Contract: contract}
 			if looksLikeGitURL(loc) {
 				src.Kind = domain.SourceGit
@@ -61,12 +106,6 @@ func newServiceAddCmd(app *App) *cobra.Command {
 				src.Kind = domain.SourceLocal
 				src.Path = absolutizeAgainstCwd(loc)
 			}
-
-			eng, err := app.Engine()
-			if err != nil {
-				return err
-			}
-			defer eng.Close()
 
 			svc, addErr := eng.Services().Add(cmd.Context(), name, src)
 			addErr = addConflictHint(addErr, name)
@@ -96,7 +135,71 @@ func newServiceAddCmd(app *App) *cobra.Command {
 	cmd.Flags().StringVar(&subdir, "subdir", "", "package directory inside the repo, default \"api\" (git sources only)")
 	cmd.Flags().StringVar(&contract, "contract", "", "explicit contract file, overriding discovery")
 	cmd.Flags().BoolVar(&showAccepted, "show-accepted", false, "also print each accepted warning and the reason it was accepted")
+	cmd.Flags().BoolVar(&localOnly, "local", false, "commit the local path itself, even in a shared workspace")
+	cmd.Flags().BoolVar(&team, "team", false, "allow committing a repository subdirectory as the source, with this path recorded as its subdir")
+	cmd.Flags().BoolVar(&force, "force", false, "register even when no API package is found yet under the checkout")
 	return cmd
+}
+
+// tryAddFromCheckout is service add's team-aware default for a local path
+// (PLAN §7b): in a shared workspace, commit the checkout's own origin as a
+// git source and bind the checkout here, instead of committing loc itself
+// -- an absolute path only this machine has. handled is false when the
+// caller must fall back to the plain Add below: either this workspace
+// isn't shared, or AddFromCheckout refused loc (no git origin, or a
+// repository subdirectory without --team) and the developer did not
+// insist with --team -- in which case the fallback reason is printed here
+// before returning.
+func tryAddFromCheckout(cmd *cobra.Command, app *App, eng engine.Engine, loc, name, ref string, force, team bool) (svc *domain.Service, addErr error, handled bool) {
+	ws, err := app.Workspace()
+	if err != nil || !workspace.IsShared(ws) {
+		return nil, nil, false
+	}
+
+	path := absolutizeAgainstCwd(loc)
+	svc, addErr = eng.Services().AddFromCheckout(cmd.Context(), name, path, engine.AddFromCheckoutOptions{
+		Ref: ref, Force: force, AllowSubdir: team,
+	})
+	if addErr == nil {
+		return svc, nil, true
+	}
+	if team {
+		return svc, addErr, true
+	}
+
+	e := errs.As(addErr)
+	if localAdd, _ := e.Details["local_add"].(bool); localAdd {
+		if !app.Printer.IsJSON() {
+			app.Printer.Line("%s", app.Printer.Dim(fmt.Sprintf(
+				"committing as a local path instead: %s; pass --team to commit the repository instead", e.Message)))
+		}
+		return nil, nil, false
+	}
+	return svc, addErr, true
+}
+
+// addFromCheckoutLine renders what AddFromCheckout committed (the team git
+// source) and bound (the checkout this machine reads), e.g. "committed
+// order-service as git@github.com:org/order-service.git @ default; this
+// machine reads /path (branch main)".
+func addFromCheckoutLine(svc *domain.Service) string {
+	team := svc.Source
+	where := svc.PackageDir
+	branch := ""
+	if svc.Binding != nil {
+		if svc.Binding.Team != nil {
+			team = *svc.Binding.Team
+		}
+		if svc.Binding.Local != nil {
+			where = svc.Binding.Local.Path
+			branch = svc.Binding.Local.Branch
+		}
+	}
+	line := fmt.Sprintf("committed %s as %s @ %s; this machine reads %s", svc.Name, sourceString(team), teamRef(&team), where)
+	if branch != "" {
+		line += fmt.Sprintf(" (branch %s)", branch)
+	}
+	return line
 }
 
 // addConflictHint adds "already registered; run `sapien service sync
@@ -234,7 +337,7 @@ func readsCell(svc domain.Service) string {
 		switch b.Mode {
 		case domain.BindingLocal:
 			if b.Local != nil && b.Local.Branch != "" {
-				return "local " + b.Local.Branch
+				return "local " + b.Local.Branch + driftSuffix(b.Local)
 			}
 			return "local"
 		case domain.BindingTeam:
@@ -245,6 +348,24 @@ func readsCell(svc domain.Service) string {
 		return "team " + teamRef(&svc.Source)
 	}
 	return "local"
+}
+
+// driftSuffix renders how a bound checkout compares to the team ref, e.g.
+// " +2/-3" (2 ahead, 3 behind), " -3" (behind only), or "" when both are
+// zero -- either exactly current, or the team ref is unknown to this
+// clone (never fetched), which reads the same to a developer either way.
+func driftSuffix(co *domain.LocalCheckout) string {
+	if co.Ahead == 0 && co.Behind == 0 {
+		return ""
+	}
+	var parts []string
+	if co.Ahead > 0 {
+		parts = append(parts, fmt.Sprintf("+%d", co.Ahead))
+	}
+	if co.Behind > 0 {
+		parts = append(parts, fmt.Sprintf("-%d", co.Behind))
+	}
+	return " " + strings.Join(parts, "/")
 }
 
 // teamRef names the ref a team source tracks, "default" when the
@@ -348,8 +469,10 @@ func newServiceSyncCmd(app *App) *cobra.Command {
 }
 
 func newServiceBindCmd(app *App) *cobra.Command {
-	return &cobra.Command{
-		Use:   "bind <name> <path>",
+	var force bool
+
+	cmd := &cobra.Command{
+		Use:   "bind [name] <path>",
 		Short: "Read a service from a local checkout on this machine instead of its committed source",
 		Long: `Bind makes this machine read <name> from the checkout at <path> instead of
 the git source committed in sapien.workspace.yaml. The override is recorded
@@ -357,8 +480,16 @@ in sapien.workspace.local.yaml (gitignored, per machine), never in the
 committed file, so teammates keep reading the team source. A bound service
 is reindexed on every save, and its service-scoped memories, examples and
 flows become writable: they land in the checkout and ride your own branch
-and pull request. Sapien never commits, pushes or checks out there.`,
-		Args: cobra.ExactArgs(2),
+and pull request. Sapien never commits, pushes or checks out there.
+
+With one argument, <name> is inferred from the checkout's own git origin:
+exactly one registered service must be cloned from it, or bind errors out
+naming the name to pass (or the ambiguity, when more than one matches).
+
+Unless --force, the checkout is validated first: its origin must match the
+service's committed git source (or it must have none registered to check
+against), and it must have a discoverable API package.`,
+		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			eng, err := app.Engine()
 			if err != nil {
@@ -366,10 +497,18 @@ and pull request. Sapien never commits, pushes or checks out there.`,
 			}
 			defer eng.Close()
 
-			svc, bindErr := eng.Services().Bind(cmd.Context(), args[0], absolutizeAgainstCwd(args[1]))
+			name, path := "", args[0]
+			if len(args) == 2 {
+				name, path = args[0], args[1]
+			}
+
+			svc, bindErr := eng.Services().BindWith(cmd.Context(), name, absolutizeAgainstCwd(path), engine.BindOptions{Force: force})
 			return printBindingResult(app, svc, bindErr)
 		},
 	}
+
+	cmd.Flags().BoolVar(&force, "force", false, "bind even when the checkout's origin does not match the team source, or it has no API package yet")
+	return cmd
 }
 
 func newServiceUnbindCmd(app *App) *cobra.Command {

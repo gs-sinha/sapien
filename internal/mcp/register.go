@@ -43,13 +43,28 @@ func (srv *server) registerTools(s *sdkmcp.Server) {
 
 	sdkmcp.AddTool(s, &sdkmcp.Tool{
 		Name:        "add_service",
-		Description: "Register a service from an absolute local path or a git URL and index it. Read get_dsl_reference(\"service\") first for the api/ package layout Sapien expects; fix the warnings this returns.",
+		Description: "Register a service from an absolute local path or a git URL and index it. Read get_dsl_reference(\"service\") first for the api/ package layout Sapien expects; fix the warnings this returns. A local path in a shared team workspace commits the checkout's repository to the team file as a git source and binds the checkout here in one step (so every other clone gets a source to read while this machine reads and writes the working copy), unless local: true registers path as a local-only source outright; a checkout with no git origin (or, for a monorepo subdirectory, without team: true) falls back to a local-only source automatically, and the response text says which happened and why.",
 	}, srv.addService)
 
 	sdkmcp.AddTool(s, &sdkmcp.Tool{
 		Name:        "sync_service",
 		Description: "Re-read a registered service's api/ package and reindex it (every service if name is omitted); returns status and warnings. Use after editing openapi.yaml, service.yaml, or docs, or when add_service reports the service is already registered.",
 	}, srv.syncService)
+
+	sdkmcp.AddTool(s, &sdkmcp.Tool{
+		Name:        "bind_service",
+		Description: "Bind a service to a local checkout on this machine so it is read from there and service-scoped memories, examples and flows can be written there; the checkout's origin must be the service's team repository unless force. Use when the user says to read a service from their checkout, or points you at a repo directory on disk. path is required and must be absolute (the MCP server does not share the calling agent's working directory); service is optional and, when omitted, is inferred from the checkout's origin.",
+	}, srv.bindService)
+
+	sdkmcp.AddTool(s, &sdkmcp.Tool{
+		Name:        "unbind_service",
+		Description: "Undo bind_service: the service goes back to being read from its committed team source (read-only for service-scoped memories, examples and flows until bound again).",
+	}, srv.unbindService)
+
+	sdkmcp.AddTool(s, &sdkmcp.Tool{
+		Name:        "find_checkouts",
+		Description: "Find local checkouts of a service's repository already known on this machine, and what the service currently reads from, so an agent can offer the user a choice of checkout to bind_service with and flag one that looks stale (an old commit, or far behind the team ref).",
+	}, srv.findCheckouts)
 
 	sdkmcp.AddTool(s, &sdkmcp.Tool{
 		Name:        "get_dsl_reference",
@@ -113,7 +128,7 @@ func (srv *server) registerTools(s *sdkmcp.Server) {
 
 	sdkmcp.AddTool(s, &sdkmcp.Tool{
 		Name:        "rescope_flow",
-		Description: "Move a flow to another tier without losing it, keeping its file name. The ladder: local is this machine only (<workspace>/local/flows, never committed); workspace is the team's git repo (<workspace>/flows, shared with everyone who clones the workspace); service is the owning service's own repo (<service>/api/flows) and needs that service bound to a local checkout here, so the flow rides your branch and PR. Promote a flow up the ladder once it has run green and others would benefit; move it down to keep experimenting privately. Returns the lean create_flow summary plus old_path and new_path.",
+		Description: "Move a flow to another tier without losing it, keeping its file name. The ladder: local is this machine only (<workspace>/local/flows, never committed); workspace is the team's git repo (<workspace>/flows, shared with everyone who clones the workspace); service is the owning service's own repo (<service>/api/flows) and needs that service bound to a local checkout here, so the flow rides your branch and PR. Promote a flow up the ladder once it has run green and others would benefit; move it down to keep experimenting privately. Returns the lean create_flow summary plus old_path and new_path. A promotion to workspace only moves the file; the result says whether it is committed. With `commit: true` (only when the user asked for it) the moved file is also committed in the workspace repository: one commit of that file, never a push, never a service repository.",
 	}, srv.rescopeFlow)
 
 	sdkmcp.AddTool(s, &sdkmcp.Tool{

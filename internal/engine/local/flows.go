@@ -107,11 +107,14 @@ func materializeFlow(ctx context.Context, l *Local, f *domain.Flow) *domain.Flow
 
 // List returns every flow (catalog.ListFlows("", "")), filtered by a
 // case-insensitive substring match on id/name/tags when query != "".
+// Workspace-tier summaries carry Shipped (PLAN §7b), from one read-only
+// look at the workspace's git repository; local and service tiers never do.
 func (f *flowAPI) List(ctx context.Context, query string) ([]domain.FlowSummary, error) {
 	all, err := f.l.cat.ListFlows(ctx, "", "")
 	if err != nil {
 		return nil, err
 	}
+	f.l.fillShipped(ctx, all)
 	if query == "" {
 		return all, nil
 	}
@@ -130,6 +133,50 @@ func (f *flowAPI) List(ctx context.Context, query string) ([]domain.FlowSummary,
 		}
 	}
 	return out, nil
+}
+
+// fillShipped fills Shipped on every workspace-tier summary in summaries,
+// in place, from one read-only look at the workspace's git repository
+// (PLAN §7b): a promotion moves a file into flows/ and stops there, so
+// Shipped says whether a human has since committed and pushed it -- the
+// silent failure the tiers exist to remove. Local- and service-tier
+// summaries are left alone. Any git failure -- the workspace is not a git
+// repository, git itself is unavailable, a transient error -- leaves every
+// Shipped empty and is logged at Debug: listing flows must never fail
+// because git did.
+func (l *Local) fillShipped(ctx context.Context, summaries []domain.FlowSummary) {
+	var idx []int
+	var paths []string
+	for i := range summaries {
+		if summaries[i].OwnerKind != domain.FlowOwnerWorkspace {
+			continue
+		}
+		idx = append(idx, i)
+		paths = append(paths, summaries[i].Path)
+	}
+	if len(idx) == 0 {
+		return
+	}
+	// l.ws.Dir itself, not RepoRoot's resolved value, is passed on to
+	// FileStates: it is a directory inside the repository (or the
+	// repository root outright) either way, git resolves the actual root
+	// on its own, and every summary Path was built from this same
+	// unresolved l.ws.Dir -- matching RepoRoot's resolved (symlink-free)
+	// string against them could disagree over a symlinked temp directory
+	// (see internal/gitsrc/describe_test.go's TestManager_Toplevel) for two
+	// spellings of the identical file. RepoRoot is only consulted for its
+	// bool: is l.ws.Dir inside a git repository at all.
+	if _, ok := l.gitMgr.RepoRoot(ctx, l.ws.Dir); !ok {
+		return
+	}
+	states, err := l.gitMgr.FileStates(ctx, l.ws.Dir, paths)
+	if err != nil {
+		l.logger.Debug("computing flow ship states failed; leaving them empty", "error", err)
+		return
+	}
+	for _, i := range idx {
+		summaries[i].Shipped = states[summaries[i].Path]
+	}
 }
 
 // Get finds id's summary in the catalog, then parses its file from disk.
@@ -284,13 +331,28 @@ func (f *flowAPI) CreateIn(ctx context.Context, yamlSrc string, opts engine.Crea
 	return materialized, nil
 }
 
-// Rescope moves flow id to another tier, keeping its path relative to the
-// tier's flows directory (a flow at flows/sub/x.flow.yaml lands at
+// Rescope moves flow id to another tier with no commit option; it is
+// RescopeWith with a zero engine.RescopeOptions.
+func (f *flowAPI) Rescope(ctx context.Context, id string, ownerKind, ownerID string) (*domain.Flow, error) {
+	return f.RescopeWith(ctx, id, ownerKind, ownerID, engine.RescopeOptions{})
+}
+
+// RescopeWith moves flow id to another tier, keeping its path relative to
+// the tier's flows directory (a flow at flows/sub/x.flow.yaml lands at
 // local/flows/sub/x.flow.yaml), reindexes the tier it left and the one it
 // joined, re-homes its flow-scoped memories, and emits flow.changed. The
 // file is moved, not rewritten: the developer's own formatting and comments
 // survive promotion, and the flow's id does not change, so nothing that
 // referenced it has to.
+//
+// opts.Commit additionally records the moved file in the workspace
+// repository with one commit (PLAN §7b): refused with errs.Invalid, before
+// anything moves, when the target tier is not workspace (a service
+// repository is the developer's own) or the workspace is not inside a git
+// repository. When the move itself succeeds but the commit fails, the
+// error is returned but the move is left in place -- the file is where it
+// should be, and the hint says to commit it by hand -- rather than
+// reverting a rescope that otherwise worked. Sapien never pushes.
 //
 // The memories move after both reindexes, and through the memory store's
 // own Update, because that is the one place the "a flow-scoped memory lives
@@ -301,7 +363,7 @@ func (f *flowAPI) CreateIn(ctx context.Context, yamlSrc string, opts engine.Crea
 // than failing the call: the flow has already moved, and a half-done
 // rescope that reports failure would be harder to recover from than a
 // memory that Reindex or the next edit re-homes.
-func (f *flowAPI) Rescope(ctx context.Context, id string, ownerKind, ownerID string) (*domain.Flow, error) {
+func (f *flowAPI) RescopeWith(ctx context.Context, id string, ownerKind, ownerID string, opts engine.RescopeOptions) (*domain.Flow, error) {
 	l := f.l
 	existing, err := l.cat.GetFlowSummary(ctx, id)
 	if err != nil {
@@ -316,6 +378,18 @@ func (f *flowAPI) Rescope(ctx context.Context, id string, ownerKind, ownerID str
 	}
 
 	ownerKind, ownerID = normalizeFlowOwner(ownerKind, ownerID)
+
+	if opts.Commit {
+		if ownerKind != domain.FlowOwnerWorkspace {
+			return nil, errs.New(errs.Invalid, "only a promotion to the workspace tier can be committed; service repositories are the developer's").
+				WithHint("drop --commit, or rescope to workspace")
+		}
+		if _, ok := l.gitMgr.RepoRoot(ctx, l.ws.Dir); !ok {
+			return nil, errs.New(errs.Invalid, "workspace %s is not in a git repository", l.ws.Dir).
+				WithHint("drop --commit; git init the workspace first if you want Sapien to commit promotions")
+		}
+	}
+
 	targetDir, err := l.flowTierDir(ctx, ownerKind, ownerID)
 	if err != nil {
 		return nil, err
@@ -364,7 +438,30 @@ func (f *flowAPI) Rescope(ctx context.Context, id string, ownerKind, ownerID str
 	}
 	moved.OwnerKind, moved.OwnerID = ownerKind, ownerID
 	l.emit(domain.EventFlowChanged, flow.Summary(moved))
-	return materializeFlow(ctx, l, moved), nil
+	materialized := materializeFlow(ctx, l, moved)
+
+	if !opts.Commit {
+		return materialized, nil
+	}
+	// Re-checked rather than reusing the pre-move check: the two calls
+	// bracket the whole move, so a repository that vanished from under us
+	// (removed, or its .git corrupted) in between is caught here too, with
+	// the same "commit it by hand" hint a failed commit gets below. l.ws.Dir
+	// itself, not RepoRoot's resolved value, is what gets passed to
+	// CommitPaths -- see the comment in fillShipped above.
+	if _, ok := l.gitMgr.RepoRoot(ctx, l.ws.Dir); !ok {
+		return nil, errs.New(errs.Internal, "workspace %s is no longer in a git repository", l.ws.Dir).
+			WithHint(fmt.Sprintf("the flow is already moved to %s; commit it by hand", newPath))
+	}
+	message := opts.Message
+	if message == "" {
+		message = fmt.Sprintf("Promote flow %s to the team workspace", id)
+	}
+	if _, cerr := l.gitMgr.CommitPaths(ctx, l.ws.Dir, []string{newPath}, message); cerr != nil {
+		return nil, errs.Wrap(errs.Internal, cerr, "committing %s", newPath).
+			WithHint(fmt.Sprintf("the flow is already moved to %s; commit it by hand (git add %s && git commit)", newPath, newPath))
+	}
+	return materialized, nil
 }
 
 // rehomeFlowMemories rewrites every flow-scoped memory of flowID through
@@ -868,12 +965,3 @@ old one. The edit happens in the service's own repo, reviewed like any
 other change; nothing here writes it automatically. Once applied, mark
 the memory ` + "`status: promoted`" + `.
 `
-
-// RescopeWith: Phase 0 stub; the shipping work in this change fills in the
-// commit path.
-func (f *flowAPI) RescopeWith(ctx context.Context, id string, ownerKind, ownerID string, opts engine.RescopeOptions) (*domain.Flow, error) {
-	if opts.Commit {
-		return nil, errs.New(errs.NotImplemented, "committing a promoted flow is not available yet")
-	}
-	return f.Rescope(ctx, id, ownerKind, ownerID)
-}

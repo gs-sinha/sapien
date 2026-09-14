@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 import FlowsPage from '../pages/FlowsPage';
+import { flows } from '../api/client';
 import type { FlowSummary } from '../api/types';
 
 const sampleFlows: FlowSummary[] = [
@@ -133,5 +134,34 @@ describe('FlowsPage', () => {
     await user.click(team);
     expect(screen.queryByText('qcom-order')).not.toBeInTheDocument();
     expect(screen.getByText('qcom-smoke')).toBeInTheDocument();
+  });
+
+  it('shows a Shipped badge for each workspace-tier ship state, and none for local/service tiers or an absent field', async () => {
+    vi.mocked(flows.list).mockResolvedValueOnce([
+      { ...sampleFlows[0], id: 'flow-a', shipped: 'untracked' },
+      { ...sampleFlows[0], id: 'flow-b', shipped: 'modified' },
+      { ...sampleFlows[0], id: 'flow-c', shipped: 'unpushed' },
+      { ...sampleFlows[0], id: 'flow-d', shipped: 'shipped' },
+      sampleFlows[2], // local tier, no `shipped` at all
+      sampleFlows[3], // service tier, no `shipped` at all
+    ]);
+    render(
+      <MemoryRouter>
+        <FlowsPage />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getByText('flow-a')).toBeInTheDocument());
+
+    const rowOf = (id: string) => screen.getByRole('link', { name: id }).closest('tr')!;
+    expect(rowOf('flow-a')).toHaveTextContent('not committed');
+    expect(rowOf('flow-b')).toHaveTextContent('modified');
+    expect(rowOf('flow-c')).toHaveTextContent('committed, not pushed');
+    expect(rowOf('flow-d')).toHaveTextContent('shipped');
+
+    // Local and service tiers never carry `shipped`, so no badge text at all.
+    for (const text of ['not committed', 'modified', 'committed, not pushed', 'shipped']) {
+      expect(rowOf('scratch-allocate')).not.toHaveTextContent(text);
+      expect(rowOf('qcom-smoke')).not.toHaveTextContent(text);
+    }
   });
 });

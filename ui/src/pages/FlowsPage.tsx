@@ -6,7 +6,7 @@ import { Table } from '../components/Table';
 import { Timestamp } from '../components/Timestamp';
 import { useAsync } from '../lib/useAsync';
 import { subscribe } from '../state/events';
-import { FLOW_TIERS, TIER_NAMES, tierLabel, tierOf } from './flows/tier';
+import { FLOW_TIERS, ShippedBadge, TIER_NAMES, tierLabel, tierOf } from './flows/tier';
 import type { FlowOwnerKind, FlowSummary } from '../api/types';
 
 function matches(flow: FlowSummary, needle: string): boolean {
@@ -101,7 +101,16 @@ export default function FlowsPage() {
               ),
             },
             { key: 'name', header: 'Name', render: (f) => f.name || '-' },
-            { key: 'tier', header: 'Tier', render: (f) => <span className="font-mono text-xs">{tierLabel(f.owner_kind, f.owner_id)}</span> },
+            {
+              key: 'tier',
+              header: 'Tier',
+              render: (f) => (
+                <span className="flex items-center gap-1.5">
+                  <span className="font-mono text-xs">{tierLabel(f.owner_kind, f.owner_id)}</span>
+                  {tierOf(f.owner_kind) === 'workspace' && <ShippedBadge shipped={f.shipped} />}
+                </span>
+              ),
+            },
             { key: 'steps', header: 'Steps', render: (f) => f.step_count },
             { key: 'operations', header: 'Operations', render: (f) => <OperationsCell operations={f.operations} /> },
             { key: 'tags', header: 'Tags', render: (f) => (f.tags || []).join(', ') || '-' },

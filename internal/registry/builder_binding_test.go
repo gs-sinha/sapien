@@ -2,6 +2,7 @@ package registry_test
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -45,9 +46,14 @@ func TestBuilder_Build_Binding_LocalCheckout(t *testing.T) {
 	assert.Equal(t, sha, binding.Local.Commit)
 	assert.Equal(t, bareDir, binding.Local.Remote)
 	assert.Equal(t, 0, binding.Local.Dirty)
+	assert.False(t, binding.Local.CommittedAt.IsZero(), "HEAD's commit time should be reported")
+	assert.Equal(t, filepath.Join(clone, "api"), binding.Local.Package, "the discovered API package dir")
+	assert.False(t, binding.Local.Worktree)
 
 	// A per-machine override of a git source carries the committed source
-	// through as Team.
+	// through as Team, and describes the checkout against Team's ref so
+	// Ahead/Behind agree with what `service bind` itself would report for
+	// the same checkout.
 	team := domain.Source{Kind: domain.SourceGit, URL: url, Ref: "main"}
 	snap, err = b.Build(context.Background(), domain.ServiceRef{
 		Name:   "order-service",
@@ -60,6 +66,26 @@ func TestBuilder_Build_Binding_LocalCheckout(t *testing.T) {
 	require.NotNil(t, snap.Service.Binding.Team)
 	assert.Equal(t, team, *snap.Service.Binding.Team)
 	assert.Equal(t, "feature/orders", snap.Service.Binding.Local.Branch)
+	assert.Equal(t, filepath.Join(clone, "api"), snap.Service.Binding.Local.Package)
+	// Freshly branched from origin/main with nothing new on either side.
+	assert.Equal(t, 0, snap.Service.Binding.Local.Ahead)
+	assert.Equal(t, 0, snap.Service.Binding.Local.Behind)
+
+	// A local commit, never pushed, moves the checkout ahead of the team
+	// ref -- exactly the drift `service list`'s READS column and the
+	// checkout picker need to show.
+	require.NoError(t, os.WriteFile(filepath.Join(clone, "api", "ahead.txt"), []byte("x"), 0o644))
+	runGit(t, clone, env, "add", "-A")
+	runGit(t, clone, env, "-c", "user.name=Sapien Test", "-c", "user.email=test@sapien.dev", "commit", "-m", "local change")
+
+	snap, err = b.Build(context.Background(), domain.ServiceRef{
+		Name:   "order-service",
+		Source: domain.Source{Kind: domain.SourceLocal, Path: clone},
+		Team:   &team,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 1, snap.Service.Binding.Local.Ahead)
+	assert.Equal(t, 0, snap.Service.Binding.Local.Behind)
 }
 
 // Without a git manager, a local source is still bound -- just not
@@ -76,6 +102,9 @@ func TestBuilder_Build_Binding_LocalWithoutGit(t *testing.T) {
 	require.NotNil(t, binding.Local)
 	assert.Equal(t, filepath.Join(ws.Dir, "order-service"), binding.Local.Path)
 	assert.Empty(t, binding.Local.Branch)
+	// Package discovery does not need git, so it still runs with no
+	// Manager configured.
+	assert.Equal(t, filepath.Join(ws.Dir, "order-service", "api"), binding.Local.Package)
 }
 
 func TestBuilder_Build_Binding_GitSourceIsTeam(t *testing.T) {

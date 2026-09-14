@@ -83,6 +83,15 @@ export interface LocalCheckout {
   remote?: string;
   /** Modified and untracked files under the package dir: work that exists here and nowhere else yet. */
   dirty?: number;
+  /** HEAD's commit time (RFC3339): separates a checkout worked in recently from an old backup clone. */
+  committed_at?: string;
+  /** Commits ahead/behind the team's ref (origin/<ref>) as of this clone's last fetch; 0 when the ref is unknown here. */
+  ahead?: number;
+  behind?: number;
+  /** A `git worktree` checkout rather than a full clone. */
+  worktree?: boolean;
+  /** The API package directory discovered under Path; absent when none (not indexable yet). */
+  package?: string;
 }
 
 /**
@@ -358,6 +367,14 @@ export interface Flow {
   owner_id?: string;
 }
 
+/**
+ * How far a workspace-tier flow's file has travelled towards the team, from
+ * a read-only git status of the workspace repo: untracked (never added),
+ * modified (tracked, uncommitted changes), unpushed (committed, not on the
+ * remote yet), shipped (committed and on the upstream).
+ */
+export type ShipStatus = 'untracked' | 'modified' | 'unpushed' | 'shipped';
+
 export interface FlowSummary {
   id: string;
   name?: string;
@@ -370,6 +387,8 @@ export interface FlowSummary {
   step_count: number;
   hash: string;
   updated: string;
+  /** Only for workspace-tier flows; absent for local/service tiers or when the workspace isn't in git. */
+  shipped?: ShipStatus;
 }
 
 export type Severity = 'error' | 'warning';
@@ -887,6 +906,10 @@ export interface CreateFlowRequest extends FlowYAMLRequest {
 export interface RescopeFlowRequest {
   owner_kind: FlowOwnerKind;
   owner_id?: string;
+  /** Also `git add` + `git commit` the moved file in the workspace repo (never a push). Refused with 400 for any tier but `workspace`. */
+  commit?: boolean;
+  /** Commit message; daemon default when omitted. */
+  message?: string;
 }
 
 /** GET /v1/services/{name}/binding (engine.BindingInfo). */
@@ -900,6 +923,37 @@ export interface BindingInfo {
 /** PUT /v1/services/{name}/binding. */
 export interface BindServiceRequest {
   path: string;
+  /** Bypass the origin/package refusal: bind a fork/mirror, or a checkout with no API package yet. */
+  force?: boolean;
+}
+
+/** GET /v1/services/{name}/checkouts?path=<dir> -> one directory level, for the checkout picker. */
+export interface DirListing {
+  path: string;
+  /** Absent at the filesystem root. */
+  parent?: string;
+  entries: DirEntry[];
+}
+
+/** One subdirectory in a DirListing. `checkout` is set when it is the root of a git repository. */
+export interface DirEntry {
+  name: string;
+  path: string;
+  checkout?: LocalCheckout;
+  /** Its origin names this service's team repository. */
+  matches: boolean;
+  /** Why not (another repository's origin), or "no API package under this checkout" when matches but not indexable. */
+  reason?: string;
+}
+
+/** POST /v1/services/from-checkout: registers a local checkout's origin as the team's git source and binds it here. */
+export interface AddFromCheckoutRequest {
+  name?: string;
+  path: string;
+  ref?: string;
+  force?: boolean;
+  /** Accept a path that is a subdirectory of its repository (a monorepo service) instead of refusing it. */
+  allow_subdir?: boolean;
 }
 
 export interface RunFlowSourceRequest {

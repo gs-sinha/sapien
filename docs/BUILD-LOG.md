@@ -628,3 +628,67 @@ bindings have been used for a while. One rough edge seen live: a one-shot
 `service bind` logs `semantic: list operations failed ... context canceled`
 because the CLI exits while the semantic enqueue is in flight; harmless,
 pre-existing for `service add`, worth silencing.
+
+### Validated binding, the checkout picker, add-from-checkout, and shipping state (2026-09-14, same day)
+
+Three follow-ups from the user's review of the first cut, each a question
+before it was a request. "How are we autodetecting the path of the local
+repo?" -- from the local sources of registered workspaces, matched by
+origin, which meant the candidate offered for one service was a directory
+whose name said it was a backup. "If a new hire clones the team repo and
+writes a service, does onboarding work?" -- only the clunky way: push first,
+add the URL with a name, then bind; a plain `service add <path>` would have
+committed an absolute local path into the shared file. And "when I promote
+a flow to team, that is basically a commit, right?" -- no, it was a move
+into `flows/` that nothing recorded. The user chose a daemon-side browser
+with remote validation over the working-directory-only alternative I had
+argued for, because MCP lets an agent do the same from an instruction, and
+asked for the shipping state plus an opt-in commit.
+
+- **Binding is validated.** `BindWith` refuses a checkout whose origin
+  names another repository or which has no API package unless forced; an
+  empty name infers the service from the origin, so `sapien service bind
+  .` from inside a checkout is the common case. `gitsrc.DescribeAgainst`
+  adds last commit time, ahead/behind the team ref as of the clone's last
+  fetch, and whether it is a worktree, so a stale clone reads as stale.
+- **The picker is daemon-side.** `GET /v1/services/{name}/checkouts?path=`
+  lists one directory level; each git repository is annotated with whether
+  its origin is this service's (a cheap `.git/config` read, the full
+  description only for a match). The Source panel's Browse dialog descends
+  into folders, marks matches, greys the rest with "clone of <origin>", and
+  offers "bind anyway" for forks. Over MCP: `bind_service`,
+  `unbind_service`, `find_checkouts`.
+- **`service add` is team-aware.** In a shared workspace -- one whose
+  workspace file is tracked by a repository with a remote, not merely a
+  folder inside some repo, which is what keeps the README quickstart
+  adding plain local sources -- a checkout path commits its origin as a git
+  source and binds the checkout here (`AddFromCheckout`). A path that is a
+  subdirectory of its repository falls back to a local add unless `--team`
+  asks for a source with `subdir`. `add_service` follows the same rule.
+- **Promotion says whether it shipped.** Workspace-tier flows carry
+  `shipped` from one `git status` and one `git log @{upstream}..HEAD` over
+  the workspace repo: not committed, modified, not pushed, shipped. Shown
+  on the flows page, in `flow list` and `list_flows`. `flow promote
+  --commit` (and the "and commit" checkbox, `rescope_flow` with `commit`)
+  commits the moved file, only that file, only into the workspace repo,
+  never a push.
+
+Verified live with the dev binary: from inside a real checkout, `service
+bind .` inferred the service and read `local stage`; binding it to a
+sibling checkout of a different service was refused naming both origins;
+browsing the parent folder of the checkouts through the daemon returned
+each sibling repository with its branch and origin and exactly one
+`matches: true`. In a throwaway shared workspace with its own bare origins:
+`service add <clone>` committed `type: git` with the origin URL and bound
+the clone, the catalog indexed from the working copy before any push;
+`flow promote --commit` produced one commit ("Promote flow smoke-flow to
+the team workspace") and `flow list` read `not pushed`, then `shipped`
+after the push. Go suite green with `-race` (38 packages, vet clean), 149
+UI tests, bundle 67.5 KB initial / 220.1 KB total gzipped.
+
+Two seams worth knowing: `rescope_flow`'s MCP text reads the commit sha
+with a direct `git rev-parse` because `FlowAPI.RescopeWith` returns only
+the flow, and the flow page fetches the ship state through a second
+`list_flows` lookup because a single `Flow` does not carry it. Both are
+cheap and both would be cleaner with the sha and the state on the engine's
+own return values.

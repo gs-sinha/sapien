@@ -33,6 +33,15 @@ var routeTable = []routeDef{
 		func(s *Server) http.HandlerFunc { return s.handleServicesList }},
 	{http.MethodPost, "/v1/services", "addService", "Register a service", true,
 		func(s *Server) http.HandlerFunc { return s.handleServiceAdd }},
+	// bindServiceByCheckout and addServiceFromCheckout are literal segments
+	// under /v1/services; registered here, before the /v1/services/{id}...
+	// routes below, so the route table reads the way chi resolves it even
+	// though chi itself always prefers a literal segment ("binding",
+	// "from-checkout") over the {id} wildcard regardless of table order.
+	{http.MethodPut, "/v1/services/binding", "bindServiceByCheckout", "Bind the service whose repository a checkout was cloned from", true,
+		func(s *Server) http.HandlerFunc { return s.handleServiceBindByCheckout }},
+	{http.MethodPost, "/v1/services/from-checkout", "addServiceFromCheckout", "Register a checkout's origin as a team git source and bind the checkout here", true,
+		func(s *Server) http.HandlerFunc { return s.handleServiceAddFromCheckout }},
 	{http.MethodGet, "/v1/services/{id}", "getService", "Get one service", true,
 		func(s *Server) http.HandlerFunc { return s.handleServiceGet }},
 	{http.MethodDelete, "/v1/services/{id}", "removeService", "Unregister a service", true,
@@ -47,6 +56,8 @@ var routeTable = []routeDef{
 		func(s *Server) http.HandlerFunc { return s.handleServiceBind }},
 	{http.MethodDelete, "/v1/services/{id}/binding", "unbindService", "Read a service from its committed source again", true,
 		func(s *Server) http.HandlerFunc { return s.handleServiceUnbind }},
+	{http.MethodGet, "/v1/services/{id}/checkouts", "browseCheckouts", "Browse a directory for checkouts of this service's repository", true,
+		func(s *Server) http.HandlerFunc { return s.handleServiceBrowseCheckouts }},
 	{http.MethodPost, "/v1/services/reindex", "reindexServices", "Rebuild the catalog", true,
 		func(s *Server) http.HandlerFunc { return s.handleServicesReindex }},
 

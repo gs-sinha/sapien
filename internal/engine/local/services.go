@@ -2,6 +2,7 @@ package local
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -176,19 +177,63 @@ func (l *Local) emit(typ domain.EventType, payload any) {
 	events.Emit(l.bus, typ, payload)
 }
 
-// Bind makes this machine read name from the local checkout at path
+// Bind is BindWith with no options: an explicit name, and no validation
+// beyond checkoutDir's own. Kept as a thin wrapper because most existing
+// callers (and the harness in binding_test.go) already know the name and
+// trust the checkout.
+func (s *serviceAPI) Bind(ctx context.Context, name, path string) (*domain.Service, error) {
+	return s.BindWith(ctx, name, path, engine.BindOptions{})
+}
+
+// BindWith makes this machine read name from the local checkout at path
 // (PLAN §7b). The override goes to sapien.workspace.local.yaml and never to
 // the committed file, so it cannot reach a teammate through a commit; the
 // root .gitignore is made to say so for workspaces older than the file.
 // The override is kept even when the resync fails, for the reason Add
 // keeps a failed registration: the developer fixes the checkout and syncs
 // rather than binding again.
-func (s *serviceAPI) Bind(ctx context.Context, name, path string) (*domain.Service, error) {
+//
+// An empty name is inferred from the checkout's own origin
+// (inferServiceFromCheckout): exactly one registered service, ambiguity
+// is an error. Unless opts.Force, the checkout is also validated before
+// it is recorded (validateCheckoutForBind) -- binding the wrong sibling
+// clone, or a directory with nothing indexable in it, would otherwise
+// surface as a confusing sync error days later with nothing pointing back
+// at the bind that caused it.
+func (s *serviceAPI) BindWith(ctx context.Context, name, path string, opts engine.BindOptions) (*domain.Service, error) {
 	l := s.l
 	dir, err := checkoutDir(path)
 	if err != nil {
 		return nil, err
 	}
+
+	// Described once regardless of Force or an explicit name: inference,
+	// validation and the older-clone nudge below all need it, and it is a
+	// handful of fast, read-only git queries either way.
+	co, err := l.gitMgr.Describe(ctx, dir)
+	if err != nil {
+		return nil, err
+	}
+
+	if name == "" {
+		inferred, err := inferServiceFromCheckout(l.ws, dir, co)
+		if err != nil {
+			return nil, err
+		}
+		name = inferred
+	}
+
+	ref, ok := findRef(l.ws, name)
+	if !ok {
+		return nil, errs.New(errs.ServiceNotFound, "service %q not found", name).WithDetail("name", name)
+	}
+
+	if !opts.Force {
+		if err := validateCheckoutForBind(dir, co, ref); err != nil {
+			return nil, err
+		}
+	}
+
 	if err := workspace.Bind(l.ws, name, dir); err != nil {
 		return nil, err
 	}
@@ -198,7 +243,154 @@ func (s *serviceAPI) Bind(ctx context.Context, name, path string) (*domain.Servi
 	if err := workspace.EnsureLocalIgnored(l.ws); err != nil {
 		return nil, err
 	}
+
+	l.warnAboutOlderClone(ctx, name, dir, co, ref)
+
 	return s.resyncRebound(ctx, name)
+}
+
+// teamSourceOf returns the source every other machine reads ref from: the
+// committed one (ref.Team) when this machine has overridden it with a
+// local checkout, else ref.Source itself.
+func teamSourceOf(ref domain.ServiceRef) domain.Source {
+	if ref.Team != nil {
+		return *ref.Team
+	}
+	return ref.Source
+}
+
+// teamContract returns the contract override the committed source
+// carries, regardless of what this machine currently binds ref to --
+// DiscoverPackage's second argument, when validating or browsing a
+// checkout against ref.
+func teamContract(ref domain.ServiceRef) string {
+	if ref.Team != nil {
+		return ref.Team.Contract
+	}
+	return ref.Source.Contract
+}
+
+// isGitRepoRoot reports whether dir is the root of a git repository: git
+// marks that with a ".git" entry, a directory for an ordinary clone or a
+// file for a worktree. Cheap to check without shelling out.
+func isGitRepoRoot(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, ".git"))
+	return err == nil
+}
+
+// resolvedOrSelf returns p with symlinks resolved, or p itself when that
+// fails (a path that no longer exists, say). Used only to compare a path
+// against something git itself reported, since `git rev-parse
+// --show-toplevel` always resolves symlinks and the paths this package is
+// handed otherwise never do.
+func resolvedOrSelf(p string) string {
+	if real, err := filepath.EvalSymlinks(p); err == nil {
+		return real
+	}
+	return p
+}
+
+// inferServiceFromCheckout names the one registered service whose team
+// source (PLAN §7b: ref.Team when already bound elsewhere, else
+// ref.Source when it is itself a git source) is the same repository as
+// co's origin -- BindWith's answer to an omitted name.
+func inferServiceFromCheckout(ws *domain.Workspace, dir string, co *domain.LocalCheckout) (string, error) {
+	if co.Remote == "" {
+		return "", errs.New(errs.Invalid, "%s has no git origin to infer a service from", dir).
+			WithDetail("path", dir).
+			WithHint("pass the service name: `sapien service bind <name> <path>`")
+	}
+	origin := gitsrc.NormalizeRemote(co.Remote)
+
+	var matches []string
+	for _, ref := range ws.Services {
+		team := teamSourceOf(ref)
+		if team.Kind == domain.SourceGit && gitsrc.NormalizeRemote(team.URL) == origin {
+			matches = append(matches, ref.Name)
+		}
+	}
+
+	switch len(matches) {
+	case 1:
+		return matches[0], nil
+	case 0:
+		return "", errs.New(errs.Invalid, "no registered service is cloned from %s", co.Remote).
+			WithDetail("path", dir).
+			WithDetail("origin", co.Remote).
+			WithHint("pass the service name (`sapien service bind <name> <path>`), or register it first with `sapien service add`")
+	default:
+		return "", errs.New(errs.Conflict, "%s is a clone of a repository more than one registered service uses: %s", co.Remote, strings.Join(matches, ", ")).
+			WithDetail("path", dir).
+			WithDetail("origin", co.Remote).
+			WithDetail("names", matches).
+			WithHint("pass the service name: `sapien service bind <name> <path>`")
+	}
+}
+
+// validateCheckoutForBind applies BindWith's default safety checks (PLAN
+// §7b) unless Force overrides them.
+func validateCheckoutForBind(dir string, co *domain.LocalCheckout, ref domain.ServiceRef) error {
+	if !isGitRepoRoot(dir) {
+		return errs.New(errs.Invalid, "%s is not a git repository", dir).
+			WithDetail("path", dir).
+			WithHint("pass --force to bind a plain directory (with no drift or staleness information)")
+	}
+
+	team := teamSourceOf(ref)
+	if co.Remote != "" && team.Kind == domain.SourceGit &&
+		gitsrc.NormalizeRemote(co.Remote) != gitsrc.NormalizeRemote(team.URL) {
+		return errs.New(errs.Invalid, "checkout at %s is a clone of %s, not of %s", dir, co.Remote, team.URL).
+			WithDetail("path", dir).
+			WithDetail("origin", co.Remote).
+			WithDetail("team_url", team.URL).
+			WithHint("pass --force to bind a fork or mirror")
+	}
+
+	if _, err := registry.DiscoverPackage(dir, teamContract(ref)); err != nil {
+		return errs.New(errs.Invalid, "no API package under %s", dir).
+			WithDetail("path", dir).
+			WithHint("looked for api/openapi.{yaml,yml,json} (or api/service.yaml), openapi.{yaml,yml,json} in the root, and docs/, spec/, openapi/ subdirectories; pass --force to bind anyway and add the package later")
+	}
+
+	return nil
+}
+
+// warnAboutOlderClone logs at Info when another checkout of the same
+// repository this machine already knows about (findCheckouts) was worked
+// in more recently than the one just bound. This is deliberately not a
+// field on the returned Service (no new API): the UI already gets the
+// same information from Binding's Candidates, and a one-shot bind command
+// only has a log line to say it with.
+func (l *Local) warnAboutOlderClone(ctx context.Context, name, dir string, co *domain.LocalCheckout, ref domain.ServiceRef) {
+	if co == nil || co.CommittedAt.IsZero() {
+		return
+	}
+	team := teamSourceOf(ref)
+	if team.Kind != domain.SourceGit {
+		return
+	}
+	want := gitsrc.NormalizeRemote(team.URL)
+	if want == "" {
+		return
+	}
+
+	var newest *domain.LocalCheckout
+	for _, other := range l.findCheckouts(ctx, want, dir) {
+		if !other.CommittedAt.After(co.CommittedAt) {
+			continue
+		}
+		if newest == nil || other.CommittedAt.After(newest.CommittedAt) {
+			o := other
+			newest = &o
+		}
+	}
+	if newest == nil {
+		return
+	}
+	if days := int(newest.CommittedAt.Sub(co.CommittedAt).Hours() / 24); days >= 1 {
+		l.logger.Info(fmt.Sprintf("binding an older clone; %s is %d days newer", newest.Path, days),
+			"service", name, "path", dir, "newer_checkout", newest.Path)
+	}
 }
 
 // Unbind removes name's override so it is read from its committed source
@@ -414,20 +606,101 @@ func checkoutDir(path string) (string, error) {
 	return abs, nil
 }
 
-// BindWith, BrowseCheckouts and AddFromCheckout: Phase 0 stubs for the
-// checkout picker and validated binding (PLAN §7b); the binding work in
-// this change replaces them.
-func (s *serviceAPI) BindWith(ctx context.Context, name, path string, opts engine.BindOptions) (*domain.Service, error) {
-	if name == "" {
-		return nil, errs.New(errs.NotImplemented, "inferring the service from a checkout is not available yet")
-	}
-	return s.Bind(ctx, name, path)
-}
-
-func (s *serviceAPI) BrowseCheckouts(ctx context.Context, name, dir string) (*engine.DirListing, error) {
-	return nil, errs.New(errs.NotImplemented, "browsing checkouts is not available yet")
-}
-
+// AddFromCheckout registers the repository a local checkout was cloned
+// from as a git source in the committed workspace file, and binds the
+// checkout on this machine (PLAN §7b): the fix for a new hire who writes
+// a new service and has no good way to onboard it -- `service add <path>`
+// would commit an absolute local path into the shared file, and `service
+// add <url>` needs the package already pushed. Because the service ends
+// up bound, indexing reads the checkout directly and succeeds even when
+// nothing has been pushed yet.
+//
+// path may be a subdirectory of its repository (a monorepo service) only
+// when opts.AllowSubdir is set; otherwise that is refused with an
+// errs.Invalid carrying the detail local_add=true, the same detail a path
+// with no git origin at all carries, meaning "this is not committable as
+// a git source, but a plain `service add <path>` still is" -- callers
+// (the CLI, MCP) use it to fall back automatically.
 func (s *serviceAPI) AddFromCheckout(ctx context.Context, name, path string, opts engine.AddFromCheckoutOptions) (*domain.Service, error) {
-	return nil, errs.New(errs.NotImplemented, "adding a service from a checkout is not available yet")
+	l := s.l
+	dir, err := checkoutDir(path)
+	if err != nil {
+		return nil, err
+	}
+
+	co, err := l.gitMgr.Describe(ctx, dir)
+	if err != nil {
+		return nil, err
+	}
+	if co.Remote == "" {
+		return nil, errs.New(errs.Invalid,
+			"%s is not a git checkout with an origin; use `service add <path>` for a local-only source", dir).
+			WithDetail("path", dir).
+			WithDetail("local_add", true)
+	}
+
+	toplevel, err := l.gitMgr.Toplevel(ctx, dir)
+	if err != nil {
+		return nil, err
+	}
+	isSubdir := !workspace.SameDir(toplevel, dir)
+	if isSubdir && !opts.AllowSubdir {
+		return nil, errs.New(errs.Invalid, "path is inside the repository at %s, not its root", toplevel).
+			WithDetail("path", dir).
+			WithDetail("toplevel", toplevel).
+			WithDetail("local_add", true).
+			WithHint("pass --team (CLI) or team (MCP) to commit the repository with this path recorded as a subdir")
+	}
+
+	pkg, pkgErr := registry.DiscoverPackage(dir, "")
+	if pkgErr != nil && !opts.Force {
+		return nil, errs.New(errs.Invalid, "no API package under %s", dir).
+			WithDetail("path", dir).
+			WithHint("looked for api/openapi.{yaml,yml,json} (or api/service.yaml), openapi.{yaml,yml,json} in the root, and docs/, spec/, openapi/ subdirectories; pass --force to register anyway and add the package later")
+	}
+
+	src := domain.Source{Kind: domain.SourceGit, URL: co.Remote, Ref: opts.Ref}
+	if isSubdir && pkgErr == nil {
+		// toplevel came from git, which always resolves symlinks; pkg.Dir
+		// was built from dir, which (like every path this package is handed)
+		// was not. On a machine where the temp or home directory is itself a
+		// symlink (macOS: /tmp -> /private/tmp), comparing them unresolved
+		// would produce a nonsense Subdir full of "..".
+		if rel, relErr := filepath.Rel(resolvedOrSelf(toplevel), resolvedOrSelf(pkg.Dir)); relErr == nil {
+			src.Subdir = filepath.ToSlash(rel)
+		}
+	}
+
+	ref := domain.ServiceRef{Name: name, Source: src}
+	if ref.Name == "" {
+		// A local ServiceRef, built from the checkout directly -- the same
+		// "peek, then derive" trick Add uses for an unnamed git source, but
+		// against the working copy so no clone is needed just to learn a
+		// name.
+		peek, err := registry.NewBuilder(l.ws).Build(ctx, domain.ServiceRef{
+			Source: domain.Source{Kind: domain.SourceLocal, Path: dir},
+		})
+		if err != nil {
+			return nil, err
+		}
+		ref.Name = peek.Service.Name
+	}
+
+	if err := workspace.AddService(l.ws, ref); err != nil {
+		return nil, err
+	}
+	if err := workspace.Save(l.ws); err != nil {
+		return nil, err
+	}
+	if err := workspace.Bind(l.ws, ref.Name, dir); err != nil {
+		return nil, err
+	}
+	if err := workspace.SaveLocal(l.ws); err != nil {
+		return nil, err
+	}
+	if err := workspace.EnsureLocalIgnored(l.ws); err != nil {
+		return nil, err
+	}
+
+	return s.resyncRebound(ctx, ref.Name)
 }

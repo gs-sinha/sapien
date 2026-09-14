@@ -76,6 +76,6 @@ type Report struct {
 	Created   time.Time `json:"created"`
 	Status    string    `json:"status"` // "pending" | "sent"
 	SentURL   string    `json:"sent_url,omitempty"`
-	SentAt    time.Time `json:"sent_at,omitempty"`
+	SentAt    time.Time `json:"sent_at,omitzero"`
 	Path      string    `json:"path,omitempty"` // file path; not persisted in the front matter itself
 }

@@ -156,6 +156,57 @@ describe('ServiceDetailPage', () => {
     await waitFor(() => expect(servicesBind).toHaveBeenCalledWith('orders', '~/code/orders'));
   });
 
+  it('team mode: shows drift on candidates and a "N clones" notice, sorted most-recently-committed first', async () => {
+    const user = userEvent.setup();
+    const backupClone = { path: '/backup/orders', branch: 'main', committed_at: '2020-01-01T00:00:00Z' };
+    const activeClone = {
+      path: '/home/me/code/orders',
+      branch: 'feat/allocation',
+      committed_at: new Date(Date.now() - 2 * 3600_000).toISOString(),
+      ahead: 2,
+      behind: 1,
+      worktree: true,
+    };
+    // Passed oldest-first, to show the panel does its own sorting.
+    useTeamMode([backupClone, activeClone]);
+    renderPage();
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Source' })).toBeInTheDocument());
+
+    const section = screen.getByRole('heading', { name: 'Source' }).closest('section')!;
+    expect(section).toHaveTextContent('2 clones of this repository on this machine; the most recently committed is /home/me/code/orders.');
+
+    const candidate = await screen.findByRole('button', {
+      name: 'local · /home/me/code/orders · branch feat/allocation · last commit 2 hours ago · +2/-1 vs team · worktree',
+    });
+    await user.click(candidate);
+    await waitFor(() => expect(servicesBind).toHaveBeenCalledWith('orders', '/home/me/code/orders'));
+  });
+
+  it('local override with drift: the "listening to" line shows last commit, +A/-B vs team, and worktree', async () => {
+    const driftedBinding: ServiceBinding = {
+      mode: 'local',
+      team: teamSource,
+      local: {
+        path: '/home/me/code/orders',
+        branch: 'feat/allocation',
+        committed_at: new Date(Date.now() - 3600_000).toISOString(),
+        ahead: 3,
+        behind: 0,
+        worktree: true,
+      },
+      writable: true,
+    };
+    const driftedService: Service = { ...localService, package_dir: '/home/me/code/orders/api', binding: driftedBinding };
+    servicesGet.mockResolvedValue(driftedService);
+    servicesBinding.mockResolvedValue({ service: 'orders', binding: driftedBinding });
+    renderPage();
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Source' })).toBeInTheDocument());
+
+    expect(
+      screen.getByText('local · /home/me/code/orders · branch feat/allocation · last commit 1 hour ago · +3/-0 vs team · worktree'),
+    ).toBeInTheDocument();
+  });
+
   it('local override: shows the checkout, offers the team source back, and unbinds', async () => {
     const user = userEvent.setup();
     servicesGet.mockResolvedValue(overrideService);

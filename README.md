@@ -140,11 +140,20 @@ services:
 
 A git source is read from a managed clone that Sapien resets on every
 sync, so it is read-only. When you work on a service, bind it to your
-checkout:
+checkout, from inside it or by path:
 
 ```sh
+cd ~/code/rider-service && sapien service bind .      # the service is inferred from origin
 sapien service bind rider-service ~/code/rider-service
 ```
+
+A bind checks that the checkout's origin is the service's repository and
+that it carries an `api/` package (`--force` for a fork or a package you
+have not written yet). The service page has a Browse button that walks
+your disk from the daemon's side and marks the checkouts that match, with
+their branch, last commit and how far they are from the team's ref, so
+the clone you actually work in stands out from an old copy. Your agent
+can do the same from an instruction through the `bind_service` tool.
 
 That writes `sapien.workspace.local.yaml` beside the committed file
 (gitignored, one per machine). From then on this machine reads rider-service
@@ -160,12 +169,22 @@ ignored by git. Run it until it is green, then promote it:
 
 ```sh
 sapien flow promote order-cancel            # local -> flows/ (the team repo)
+sapien flow promote order-cancel --commit   # same, and commit the moved file
 sapien flow promote order-cancel --to service --service rider-service
 ```
 
 Memories climb the same way: personal (this machine) -> workspace (the
 team repo) -> service (the owning repo), with `sapien memory rescope`.
-Sapien never commits or pushes; what reaches the team is what you commit.
+A promoted flow shows whether it has shipped: not committed, committed but
+not pushed, or shipped. Sapien never pushes; what reaches the team is what
+you push.
+
+Onboarding a new service from a shared workspace is one command from the
+checkout: `sapien service add .` commits the checkout's origin as the
+team's git source and binds the checkout on your machine, so your catalog
+indexes it at once and teammates get it as soon as the `api/` package
+reaches the branch. `--local` keeps a path-only source for a personal
+workspace.
 
 ## Optional semantic search
 

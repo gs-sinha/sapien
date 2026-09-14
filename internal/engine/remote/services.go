@@ -129,16 +129,17 @@ func (s *serviceAPI) BrowseCheckouts(ctx context.Context, name, dir string) (*en
 }
 
 type addFromCheckoutRequest struct {
-	Name  string `json:"name,omitempty"`
-	Path  string `json:"path"`
-	Ref   string `json:"ref,omitempty"`
-	Force bool   `json:"force,omitempty"`
+	Name        string `json:"name,omitempty"`
+	Path        string `json:"path"`
+	Ref         string `json:"ref,omitempty"`
+	Force       bool   `json:"force,omitempty"`
+	AllowSubdir bool   `json:"allow_subdir,omitempty"`
 }
 
 // AddFromCheckout maps to POST /v1/services/from-checkout.
 func (s *serviceAPI) AddFromCheckout(ctx context.Context, name, path string, opts engine.AddFromCheckoutOptions) (*domain.Service, error) {
 	var out domain.Service
-	body := addFromCheckoutRequest{Name: name, Path: path, Ref: opts.Ref, Force: opts.Force}
+	body := addFromCheckoutRequest{Name: name, Path: path, Ref: opts.Ref, Force: opts.Force, AllowSubdir: opts.AllowSubdir}
 	if err := s.r().do(ctx, http.MethodPost, "/v1/services/from-checkout", nil, body, &out); err != nil {
 		return nil, err
 	}

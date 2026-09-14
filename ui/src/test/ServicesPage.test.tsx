@@ -2,6 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 import ServicesPage from '../pages/ServicesPage';
+import { services } from '../api/client';
 import type { Service } from '../api/types';
 
 vi.mock('../api/client', () => ({
@@ -87,5 +88,28 @@ describe('ServicesPage', () => {
     // No binding reported: the source kind alone.
     expect(rowOf('billing')).toHaveTextContent('team');
     expect(rowOf('billing')).not.toHaveTextContent('team ·');
+  });
+
+  it('appends +A/-B to the pill when a local binding is ahead or behind the team ref', async () => {
+    vi.mocked(services.list).mockResolvedValueOnce([
+      {
+        id: 'orders',
+        name: 'orders',
+        status: 'ok',
+        source: { type: 'local', path: '/repo/orders' },
+        package_dir: '/repo/orders/api',
+        operation_count: 12,
+        binding: { mode: 'local', local: { path: '/repo/orders', branch: 'feat/x', ahead: 2, behind: 3 }, writable: true },
+      },
+    ]);
+    render(
+      <MemoryRouter>
+        <ServicesPage />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getByRole('link', { name: 'orders' })).toBeInTheDocument());
+
+    const row = screen.getByRole('link', { name: 'orders' }).closest('tr')!;
+    expect(row).toHaveTextContent('local · feat/x · +2/-3');
   });
 });

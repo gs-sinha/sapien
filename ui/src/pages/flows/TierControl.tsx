@@ -31,6 +31,9 @@ export function TierControl({ flow, onChanged }: { flow: Flow; onChanged: () => 
   const [busy, setBusy] = useState(false);
   // Services this flow could move into: null until GET /v1/services answers.
   const [bindable, setBindable] = useState<Service[] | null>(null);
+  // "and commit" on the local -> workspace promotion only; unchecked by
+  // default so a promotion never commits on the developer's behalf.
+  const [commitOnPromote, setCommitOnPromote] = useState(false);
 
   useEffect(() => {
     if (tier !== 'workspace' || called.length === 0) {
@@ -67,12 +70,42 @@ export function TierControl({ flow, onChanged }: { flow: Flow; onChanged: () => 
     }
   };
 
+  // Local -> workspace only: the daemon refuses `commit` for any other
+  // target tier. Committing only ever touches the moved file in the
+  // workspace repo (git add + git commit); it never pushes.
+  const promoteToTeam = async () => {
+    setBusy(true);
+    try {
+      if (commitOnPromote) {
+        await flows.rescope(flow.id, 'workspace', undefined, { commit: true });
+        pushToast('success', `${flow.id} moved to flows/ and committed.`);
+      } else {
+        await flows.rescope(flow.id, 'workspace', undefined);
+        pushToast('success', `${flow.id} moved to flows/, not committed yet.`);
+      }
+      onChanged();
+    } catch (e) {
+      pushToast('error', e instanceof Error ? e.message : 'Move failed.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (tier === 'local') {
     return (
       <div className="flex flex-wrap items-center gap-2 text-xs">
-        <button type="button" disabled={busy} onClick={() => move('workspace')} className={buttonCls}>
+        <button type="button" disabled={busy} onClick={promoteToTeam} className={buttonCls}>
           {busy ? 'Moving…' : 'Promote to team'}
         </button>
+        <label className="flex items-center gap-1 text-slate-500">
+          <input
+            type="checkbox"
+            checked={commitOnPromote}
+            disabled={busy}
+            onChange={(e) => setCommitOnPromote(e.target.checked)}
+          />
+          and commit in the workspace repo (never pushes)
+        </label>
         <span className="text-slate-400">Moves the file into flows/, where it ships with the workspace repo.</span>
       </div>
     );

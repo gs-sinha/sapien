@@ -2,7 +2,9 @@ package mcp
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -545,4 +547,113 @@ func TestTool_GetContext_MemoriesStrippedWithoutPermission(t *testing.T) {
 	require.False(t, res.IsError, firstText(res))
 	out := decodeStructured[map[string]any](t, res.StructuredContent)
 	assert.Nil(t, out["memories"])
+}
+
+// --- ship state (PLAN §7b) ---
+
+func TestShipStateText(t *testing.T) {
+	cases := map[string]string{
+		domain.ShipUntracked: "not committed",
+		domain.ShipModified:  "modified",
+		domain.ShipUnpushed:  "committed, not pushed",
+		domain.ShipShipped:   "shipped",
+		"":                   "",
+		"something-unknown":  "",
+	}
+	for in, want := range cases {
+		assert.Equalf(t, want, shipStateText(in), "shipStateText(%q)", in)
+	}
+}
+
+// TestTool_RescopeFlow_CommitNoteNotCommittedByDefault: a rescope to the
+// workspace tier without commit says so, plainly, so an agent does not
+// mistake a promotion for a share.
+func TestTool_RescopeFlow_CommitNoteNotCommittedByDefault(t *testing.T) {
+	cs := newTestSession(t, Config{Default: DefaultPermissions()}, "claude-code")
+	res := callTool(t, cs, "rescope_flow", map[string]any{"id": "rider-flow", "scope": "workspace"})
+	require.False(t, res.IsError, firstText(res))
+	assert.Contains(t, firstText(res), "; not committed")
+}
+
+// TestTool_RescopeFlow_CommitNoteCommitted: with commit=true the text says
+// "committed" -- with a sha appended when one can be read from the
+// workspace directory (the fake's default workspace dir, "/workspace", is
+// not a real directory, so no sha is available and the note is bare).
+func TestTool_RescopeFlow_CommitNoteCommitted(t *testing.T) {
+	cs := newTestSession(t, Config{Default: DefaultPermissions()}, "claude-code")
+	res := callTool(t, cs, "rescope_flow", map[string]any{"id": "rider-flow", "scope": "workspace", "commit": true})
+	require.False(t, res.IsError, firstText(res))
+	text := firstText(res)
+	assert.Contains(t, text, "; committed")
+	assert.NotContains(t, text, "; not committed")
+}
+
+// TestTool_RescopeFlow_CommitNoteReadsRealSHA: against a real git
+// repository at the workspace directory, the commit note carries the
+// actual HEAD short sha (commitShortSHA's one job) -- the rescope itself
+// is still faked, so this only proves the text renders whatever HEAD is at
+// the time, not that RescopeWith made that commit.
+func TestTool_RescopeFlow_CommitNoteReadsRealSHA(t *testing.T) {
+	cs, eng := newTestSessionAndEngine(t, Config{Default: DefaultPermissions()}, "claude-code")
+	tmpDir := withTempWorkspaceDir(t, eng)
+
+	runGit := func(args ...string) string {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = tmpDir
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null", "GIT_TERMINAL_PROMPT=0")
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, string(out))
+		return strings.TrimSpace(string(out))
+	}
+	runGit("init", "-q", "-b", "main")
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "seed.txt"), []byte("x"), 0o644))
+	runGit("add", "-A")
+	runGit("-c", "user.name=Sapien Test", "-c", "user.email=test@sapien.dev", "commit", "-q", "-m", "seed")
+	wantSHA := runGit("rev-parse", "--short", "HEAD")
+	require.NotEmpty(t, wantSHA)
+
+	res := callTool(t, cs, "rescope_flow", map[string]any{"id": "rider-flow", "scope": "workspace", "commit": true})
+	require.False(t, res.IsError, firstText(res))
+	assert.Contains(t, firstText(res), "; committed "+wantSHA)
+}
+
+// TestTool_RescopeFlow_CommitNoteOnlyForWorkspaceTarget: the commit note is
+// specific to a promotion to the workspace tier (the only target Commit
+// applies to); moving to local or service never gets one, even if the
+// caller passed commit=true.
+func TestTool_RescopeFlow_CommitNoteOnlyForWorkspaceTarget(t *testing.T) {
+	cs := newTestSession(t, Config{Default: DefaultPermissions()}, "claude-code")
+	res := callTool(t, cs, "rescope_flow", map[string]any{"id": "rider-flow", "scope": "local", "commit": true})
+	require.False(t, res.IsError, firstText(res))
+	text := firstText(res)
+	assert.NotContains(t, text, "committed")
+	assert.NotContains(t, text, "not committed")
+}
+
+// TestTool_RescopeFlow_MessageInput: message rides through to
+// RescopeOptions.Message without validation (the engine owns any further
+// meaning); this only proves the input field exists and reaches a
+// successful call.
+func TestTool_RescopeFlow_MessageInput(t *testing.T) {
+	cs := newTestSession(t, Config{Default: DefaultPermissions()}, "claude-code")
+	res := callTool(t, cs, "rescope_flow", map[string]any{
+		"id": "rider-flow", "scope": "workspace", "commit": true, "message": "Ship the rider flow",
+	})
+	require.False(t, res.IsError, firstText(res))
+}
+
+// TestTool_CreateFlow_ShippedFieldPresent: FlowSaveResult carries a Shipped
+// field (empty here: the fake engine never populates it, matching the real
+// engine's own "empty for local/service, and for a workspace not in git"
+// rule) -- this pins the field's presence and JSON tag rather than its
+// value, which internal/engine/local's own tests cover against real git.
+func TestTool_CreateFlow_ShippedFieldPresent(t *testing.T) {
+	cs := newTestSession(t, Config{Default: DefaultPermissions()}, "claude-code")
+	res := callTool(t, cs, "create_flow", map[string]any{
+		"flow_yaml": "version: 1\nid: ship-check\nsteps:\n  - id: a\n    call: rider-service.getRider\n",
+		"scope":     "workspace",
+	})
+	require.False(t, res.IsError, firstText(res))
+	out := decodeStructured[FlowSaveResult](t, res.StructuredContent)
+	assert.Empty(t, out.Shipped)
 }

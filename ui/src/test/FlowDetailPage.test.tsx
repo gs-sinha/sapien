@@ -4,7 +4,8 @@ import { MemoryRouter, Route, Routes, useParams } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import FlowDetailPage from '../pages/FlowDetailPage';
 import { useEvents } from '../state/events';
-import type { Environment, Operation, Run, Service } from '../api/types';
+import { useToasts } from '../state/toast';
+import type { Environment, FlowSummary, Operation, Run, Service } from '../api/types';
 
 const stageEnv: Environment = { version: 1, name: 'stage', production: false };
 const prodEnv: Environment = { version: 1, name: 'prod', production: true };
@@ -59,13 +60,17 @@ const flowsRun = vi.fn(
       releaseRun = resolve;
     }),
 );
-const flowsRescope = vi.fn(async (id: string, ownerKind: string, ownerId?: string) => ({
+const flowsRescope = vi.fn(async (id: string, ownerKind: string, ownerId?: string, _opts?: { commit?: boolean; message?: string }) => ({
   version: 1,
   id,
   steps: [],
   owner_kind: ownerKind,
   owner_id: ownerId,
 }));
+// GET /v1/flows/{id} carries no `shipped` (only FlowSummary does); the page
+// looks it up via a second, best-effort flows.list(id) call. Empty by
+// default so the default page has no ship badge to account for.
+const flowsList = vi.fn(async (_q?: string): Promise<FlowSummary[]> => []);
 // No service is bound to a checkout unless a test says so, so the default
 // page has exactly one <select> (the environment picker).
 const servicesList = vi.fn(async (): Promise<Service[]> => []);
@@ -93,9 +98,13 @@ const runsRunSource = vi.fn(
 vi.mock('../api/client', () => ({
   flows: {
     get: (id: string) => flowsGet(id),
+    list: (q?: string) => flowsList(q),
     update: (id: string, req: { yaml: string }) => flowsUpdate(id, req),
     run: (id: string, opts: unknown) => flowsRun(id, opts),
-    rescope: (id: string, ownerKind: string, ownerId?: string) => flowsRescope(id, ownerKind, ownerId),
+    // Forwards a 4th arg only when the caller passed one, so a plain
+    // 3-arg rescope call is recorded (and assertable) as exactly 3 args.
+    rescope: (id: string, ownerKind: string, ownerId?: string, opts?: { commit?: boolean; message?: string }) =>
+      opts !== undefined ? flowsRescope(id, ownerKind, ownerId, opts) : flowsRescope(id, ownerKind, ownerId),
     validate: vi.fn(async () => ({ valid: true, diagnostics: [] })),
   },
   services: {
@@ -138,6 +147,7 @@ function renderPage() {
 
 beforeEach(() => {
   sessionStorage.clear();
+  useToasts.setState({ toasts: [] });
 });
 
 afterEach(() => {
@@ -147,6 +157,8 @@ afterEach(() => {
   environmentsGetDefault.mockImplementation(async () => ({ name: 'stage' }));
   flowsUpdate.mockClear();
   flowsRescope.mockClear();
+  flowsList.mockClear();
+  flowsList.mockImplementation(async () => []);
   servicesList.mockClear();
   servicesList.mockImplementation(async () => []);
   runsRunSource.mockClear();
@@ -377,6 +389,67 @@ describe('FlowDetailPage', () => {
     await waitFor(() => expect(flowsRescope).toHaveBeenCalledWith('qcom-order', 'workspace', undefined));
     // The page reloads to pick up the new tier.
     await waitFor(() => expect(flowsGet.mock.calls.length).toBeGreaterThanOrEqual(2));
+  });
+
+  it('promoting without ticking "and commit" leaves it uncommitted, and says so', async () => {
+    const user = userEvent.setup();
+    flowsGet.mockImplementationOnce(async () => flowAtTier('local'));
+    renderPage();
+    await waitFor(() => expect(screen.getByText('QCOM order')).toBeInTheDocument());
+
+    const commitBox = screen.getByRole('checkbox', { name: /and commit in the workspace repo/i });
+    expect(commitBox).not.toBeChecked();
+
+    await user.click(screen.getByRole('button', { name: 'Promote to team' }));
+    await waitFor(() => expect(flowsRescope).toHaveBeenCalledWith('qcom-order', 'workspace', undefined));
+    await waitFor(() =>
+      expect(useToasts.getState().toasts.some((t) => t.message === 'qcom-order moved to flows/, not committed yet.')).toBe(true),
+    );
+  });
+
+  it('ticking "and commit" passes commit: true and reports it committed', async () => {
+    const user = userEvent.setup();
+    flowsGet.mockImplementationOnce(async () => flowAtTier('local'));
+    renderPage();
+    await waitFor(() => expect(screen.getByText('QCOM order')).toBeInTheDocument());
+
+    await user.click(screen.getByRole('checkbox', { name: /and commit in the workspace repo/i }));
+    await user.click(screen.getByRole('button', { name: 'Promote to team' }));
+
+    await waitFor(() => expect(flowsRescope).toHaveBeenCalledWith('qcom-order', 'workspace', undefined, { commit: true }));
+    await waitFor(() =>
+      expect(useToasts.getState().toasts.some((t) => t.message === 'qcom-order moved to flows/ and committed.')).toBe(true),
+    );
+  });
+
+  it('shows the Shipped badge in the header for a workspace-tier flow, from the flow\'s own summary', async () => {
+    flowsList.mockImplementationOnce(
+      async (): Promise<FlowSummary[]> => [
+        {
+          id: 'qcom-order',
+          path: 'flows/qcom-order.flow.yaml',
+          owner_kind: 'workspace',
+          step_count: 1,
+          hash: 'h',
+          updated: '2026-01-01T00:00:00Z',
+          shipped: 'unpushed',
+        },
+      ],
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByText('QCOM order')).toBeInTheDocument());
+
+    expect(await screen.findByText('committed, not pushed')).toBeInTheDocument();
+    expect(flowsList).toHaveBeenCalledWith('qcom-order');
+  });
+
+  it('shows no Shipped badge when the summary lookup has no shipped value', async () => {
+    renderPage();
+    await waitFor(() => expect(screen.getByText('QCOM order')).toBeInTheDocument());
+
+    for (const text of ['not committed', 'modified', 'committed, not pushed', 'shipped']) {
+      expect(screen.queryByText(text)).not.toBeInTheDocument();
+    }
   });
 
   it('a team flow: offers local, and the service tier only for a called service bound to a checkout', async () => {
