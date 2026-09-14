@@ -123,6 +123,12 @@ type FlowAPI interface {
 	// the workspace repository with one commit (never a push, never a
 	// service repository), only when the target tier is workspace.
 	RescopeWith(ctx context.Context, id string, ownerKind, ownerID string, opts RescopeOptions) (*domain.Flow, error)
+	// Commit records a workspace-tier flow's file in the workspace repository
+	// with one commit of that file (message "" picks a default), never a push.
+	// Refused (errs.Invalid) for the local and service tiers, for a workspace
+	// not inside a git repository, and when the file has nothing to commit.
+	// The returned summary carries the new Shipped state.
+	Commit(ctx context.Context, id, message string) (*domain.FlowSummary, error)
 	Update(ctx context.Context, id string, yamlSrc string) (*domain.Flow, error)
 	Delete(ctx context.Context, id string) error
 	// Reference returns the DSL reference text for agents (PLAN §23): topic is sapien|flow|memory|expressions|service.

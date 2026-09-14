@@ -254,3 +254,30 @@ func (fl *flowAPI) RescopeWith(ctx context.Context, id string, ownerKind, ownerI
 	f.mu.Unlock()
 	return fl.Rescope(ctx, id, ownerKind, ownerID)
 }
+
+// Commit marks the stored flow's summary as unpushed: the fake has no
+// repository, so a commit is a recorded call plus the state change a
+// caller would observe.
+func (fl *flowAPI) Commit(ctx context.Context, id, message string) (*domain.FlowSummary, error) {
+	f := fl.f()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.recordLocked("Flows.Commit", map[string]string{"id": id, "message": message})
+	stored, ok := f.flows[id]
+	if !ok {
+		return nil, errs.New(errs.FlowNotFound, "flow %q not found", id).WithDetail("id", id)
+	}
+	if stored.OwnerKind != "" && stored.OwnerKind != domain.FlowOwnerWorkspace {
+		return nil, errs.New(errs.Invalid, "only a workspace-tier flow can be committed; %q is %s", id, stored.OwnerKind)
+	}
+	ops := make([]string, 0, len(stored.Steps))
+	for _, st := range stored.Steps {
+		ops = append(ops, st.Call)
+	}
+	return &domain.FlowSummary{
+		ID: stored.ID, Name: stored.Name, Path: stored.Path,
+		OwnerKind: stored.OwnerKind, OwnerID: stored.OwnerID, Tags: stored.Tags,
+		Operations: ops, StepCount: len(stored.Steps), Hash: hashOf(stored.Source),
+		Updated: f.flowUpdated[stored.ID], Shipped: domain.ShipUnpushed,
+	}, nil
+}

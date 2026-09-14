@@ -965,3 +965,8 @@ old one. The edit happens in the service's own repo, reviewed like any
 other change; nothing here writes it automatically. Once applied, mark
 the memory ` + "`status: promoted`" + `.
 `
+
+// Commit: Phase 0 stub, filled in by the shipping work.
+func (f *flowAPI) Commit(ctx context.Context, id, message string) (*domain.FlowSummary, error) {
+	return nil, errs.New(errs.NotImplemented, "committing a flow is not available yet")
+}

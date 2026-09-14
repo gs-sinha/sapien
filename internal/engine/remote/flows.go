@@ -134,3 +134,16 @@ func (fl *flowAPI) RescopeWith(ctx context.Context, id string, ownerKind, ownerI
 	}
 	return &out, nil
 }
+
+type commitFlowRequest struct {
+	Message string `json:"message,omitempty"`
+}
+
+// Commit maps to POST /v1/flows/{id}/commit.
+func (fl *flowAPI) Commit(ctx context.Context, id, message string) (*domain.FlowSummary, error) {
+	var out domain.FlowSummary
+	if err := fl.r().do(ctx, http.MethodPost, "/v1/flows/"+id+"/commit", nil, commitFlowRequest{Message: message}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}

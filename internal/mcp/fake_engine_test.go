@@ -1320,3 +1320,18 @@ func (a fakeFlows) RescopeWith(ctx context.Context, id string, ownerKind, ownerI
 	}
 	return fl, nil
 }
+
+func (a fakeFlows) Commit(_ context.Context, id, message string) (*domain.FlowSummary, error) {
+	a.st.mu.Lock()
+	defer a.st.mu.Unlock()
+	for _, fl := range a.st.flows {
+		if fl.ID != id {
+			continue
+		}
+		if fl.OwnerKind != "" && fl.OwnerKind != domain.FlowOwnerWorkspace {
+			return nil, errs.New(errs.Invalid, "only a workspace-tier flow can be committed; %q is %s", id, fl.OwnerKind)
+		}
+		return &domain.FlowSummary{ID: fl.ID, Name: fl.Name, Path: fl.Path, OwnerKind: fl.OwnerKind, OwnerID: fl.OwnerID, StepCount: len(fl.Steps), Shipped: domain.ShipUnpushed}, nil
+	}
+	return nil, errs.New(errs.FlowNotFound, "flow %q not found", id)
+}
