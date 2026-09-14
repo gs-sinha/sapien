@@ -6,6 +6,15 @@ and phase numbers refer to PLAN.md §34's roadmap.
 
 ## [Unreleased]
 
+### Fixed
+- **`.sapien/` is gitignored at the workspace root.** `sapien init` now
+  writes `.sapien/` into the root `.gitignore` beside
+  `sapien.workspace.local.yaml`, and binding or adding a service adds it to
+  older workspaces. The `*` file inside `.sapien/` did not cover a clone of a
+  workspace repository, which creates `.sapien/` on first open without it.
+- **`sapien workspace forget` and `close` no longer panic when no daemon is
+  running.**
+
 ## [1.3.0] - 2026-09-15
 
 ### Added

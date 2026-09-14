@@ -182,30 +182,39 @@ func TestEnsureLocalIgnored(t *testing.T) {
 	require.NoError(t, err)
 	gitignore := filepath.Join(ws.Dir, ".gitignore")
 
-	// Init already wrote it.
+	// Init already wrote it: the override file and the state directory.
 	raw, err := os.ReadFile(gitignore)
 	require.NoError(t, err)
-	assert.Equal(t, domain.WorkspaceLocalFileName+"\n", string(raw))
+	assert.Equal(t, domain.WorkspaceLocalFileName+"\n.sapien/\n", string(raw))
 
 	// Idempotent.
 	require.NoError(t, workspace.EnsureLocalIgnored(ws))
 	raw, err = os.ReadFile(gitignore)
 	require.NoError(t, err)
 	assert.Equal(t, 1, strings.Count(string(raw), domain.WorkspaceLocalFileName))
+	assert.Equal(t, 1, strings.Count(string(raw), ".sapien"))
 
-	// Appends to an existing file that lacks a trailing newline, and
-	// recognises the slash-prefixed spelling.
+	// Appends to an existing file that lacks a trailing newline.
 	require.NoError(t, os.WriteFile(gitignore, []byte("node_modules"), 0o644))
 	require.NoError(t, workspace.EnsureLocalIgnored(ws))
 	raw, err = os.ReadFile(gitignore)
 	require.NoError(t, err)
-	assert.Equal(t, "node_modules\n"+domain.WorkspaceLocalFileName+"\n", string(raw))
+	assert.Equal(t, "node_modules\n"+domain.WorkspaceLocalFileName+"\n.sapien/\n", string(raw))
 
-	require.NoError(t, os.WriteFile(gitignore, []byte("/"+domain.WorkspaceLocalFileName+"\n"), 0o644))
+	// Recognises the usual spellings, and adds only what is missing: an
+	// existing workspace that ignored one of them gets the other.
+	for _, existing := range []string{"/" + domain.WorkspaceLocalFileName + "\n/.sapien\n", domain.WorkspaceLocalFileName + "\n.sapien\n"} {
+		require.NoError(t, os.WriteFile(gitignore, []byte(existing), 0o644))
+		require.NoError(t, workspace.EnsureLocalIgnored(ws))
+		raw, err = os.ReadFile(gitignore)
+		require.NoError(t, err)
+		assert.Equal(t, existing, string(raw))
+	}
+	require.NoError(t, os.WriteFile(gitignore, []byte(domain.WorkspaceLocalFileName+"\n"), 0o644))
 	require.NoError(t, workspace.EnsureLocalIgnored(ws))
 	raw, err = os.ReadFile(gitignore)
 	require.NoError(t, err)
-	assert.Equal(t, "/"+domain.WorkspaceLocalFileName+"\n", string(raw))
+	assert.Equal(t, domain.WorkspaceLocalFileName+"\n.sapien/\n", string(raw))
 
 	// Missing file: created.
 	require.NoError(t, os.Remove(gitignore))

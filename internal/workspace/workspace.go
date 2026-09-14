@@ -129,7 +129,8 @@ func Save(ws *domain.Workspace) error {
 // Init creates a new workspace rooted at dir: sapien.workspace.yaml,
 // flows/, memories/, environments/local.yaml (a default, non-production
 // local environment), .sapien/ (with a .gitignore that ignores everything
-// inside it), and a root .gitignore carrying sapien.workspace.local.yaml.
+// inside it), and a root .gitignore carrying sapien.workspace.local.yaml and
+// .sapien/.
 // It returns errs.Conflict if a workspace already exists at dir.
 func Init(dir, name string) (*domain.Workspace, error) {
 	absDir, err := filepath.Abs(dir)
@@ -186,9 +187,10 @@ func Init(dir, name string) (*domain.Workspace, error) {
 		return nil, err
 	}
 
-	// A new workspace starts ignoring the per-machine override file, so the
-	// first `sapien service bind` on any teammate's machine cannot land it
-	// in a commit by accident.
+	// A new workspace starts ignoring the per-machine override file and its
+	// own state directory, so neither the first `sapien service bind` nor
+	// the index a clone builds on first open can land in a commit by
+	// accident.
 	if err := EnsureLocalIgnored(ws); err != nil {
 		return nil, err
 	}

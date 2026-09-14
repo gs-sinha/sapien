@@ -175,13 +175,21 @@ func Unbind(ws *domain.Workspace, name string) error {
 	return errs.New(errs.ServiceNotFound, "service %q not found", name).WithDetail("name", name)
 }
 
-// EnsureLocalIgnored makes sure ws's root .gitignore lists
-// sapien.workspace.local.yaml, creating the file or appending the line.
-// The override file names paths on one developer's disk, so committing it
-// would rebind every teammate's machine to directories they do not have;
-// Init calls this for new workspaces and Bind for ones created before the
-// file existed. Idempotent: an existing entry, with or without a leading
-// slash, is left as it is.
+// EnsureLocalIgnored makes sure ws's root .gitignore lists the two things
+// that belong to one machine, creating the file or appending what is
+// missing:
+//
+//   - sapien.workspace.local.yaml names paths on one developer's disk, so
+//     committing it would rebind every teammate's machine to directories
+//     they do not have;
+//   - .sapien/ holds the local index, daemon state, logs and this machine's
+//     MCP permissions. Init also writes a "*" .gitignore inside it, but a
+//     clone of a workspace repository creates .sapien/ on first open without
+//     one, so the rule has to live in the committed root file.
+//
+// Init calls this for new workspaces, and bind and add for ones created
+// before either rule existed. Idempotent: an entry already there, in any of
+// its usual spellings (leading slash, trailing slash), is left as it is.
 func EnsureLocalIgnored(ws *domain.Workspace) error {
 	path := filepath.Join(ws.Dir, ".gitignore")
 	data, err := os.ReadFile(path)
@@ -189,11 +197,20 @@ func EnsureLocalIgnored(ws *domain.Workspace) error {
 		return errs.Wrap(errs.Internal, err, "reading %s", path)
 	}
 
+	present := map[string]bool{}
 	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if line == domain.WorkspaceLocalFileName || line == "/"+domain.WorkspaceLocalFileName {
-			return nil
+		line = strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(line), "/"), "/")
+		present[line] = true
+	}
+
+	var missing []string
+	for _, entry := range []string{domain.WorkspaceLocalFileName, domain.WorkspaceStateDir + "/"} {
+		if !present[strings.TrimSuffix(entry, "/")] {
+			missing = append(missing, entry)
 		}
+	}
+	if len(missing) == 0 {
+		return nil
 	}
 
 	var b strings.Builder
@@ -201,7 +218,9 @@ func EnsureLocalIgnored(ws *domain.Workspace) error {
 	if len(data) > 0 && !strings.HasSuffix(string(data), "\n") {
 		b.WriteByte('\n')
 	}
-	b.WriteString(domain.WorkspaceLocalFileName + "\n")
+	for _, entry := range missing {
+		b.WriteString(entry + "\n")
+	}
 	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
 		return errs.Wrap(errs.Internal, err, "writing %s", path)
 	}
