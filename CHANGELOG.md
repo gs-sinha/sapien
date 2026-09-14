@@ -114,6 +114,12 @@ and phase numbers refer to PLAN.md §34's roadmap.
   `${...}`), and the Agent terminal uses its code-panel colours.
 
 ### Fixed
+- **A commit on a machine with no git identity says how to set one.**
+  `flow commit`, `memory commit`, `example commit` and promote `--commit`
+  failed with a bare `exit status 128` when git had no user to commit as
+  (a fresh machine or container); the error now carries the two
+  `git config` lines to run. The commit tests set their own identity, so
+  they no longer depend on the machine they run on.
 - **A forgotten workspace stays closed.** One daemon serves many
   workspaces and opened any directory a request header named, so a stale
   browser tab or an old MCP bridge kept reopening a workspace the user had

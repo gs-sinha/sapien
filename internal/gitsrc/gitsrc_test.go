@@ -156,6 +156,7 @@ func TestHintFor(t *testing.T) {
 		{"repo not found", "remote: Repository not found.\nfatal: repository 'https://example.com/nope.git/' not found", "check the repository URL and that you have access to it"},
 		{"does not exist", "fatal: '/no/such/path' does not exist", "check the repository URL and that you have access to it"},
 		{"not a git repo", "fatal: not a git repository (or any of the parent directories): .git", "not a git repository"},
+		{"no identity", "Author identity unknown\n\n*** Please tell me who you are.\n\nfatal: unable to auto-detect email address (got 'runner@host.(none)')", `git has no identity to commit as: run git config --global user.name "Your Name" and git config --global user.email you@example.com`},
 		{"unrecognized", "fatal: something else entirely went wrong", ""},
 	}
 	for _, tc := range cases {

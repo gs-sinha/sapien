@@ -263,6 +263,10 @@ func gitError(cctx context.Context, args []string, stderrOutput string, cause er
 func hintFor(stderrOutput string) string {
 	s := strings.ToLower(stderrOutput)
 	switch {
+	case strings.Contains(s, "please tell me who you are"),
+		strings.Contains(s, "author identity unknown"),
+		strings.Contains(s, "unable to auto-detect email address"):
+		return `git has no identity to commit as: run git config --global user.name "Your Name" and git config --global user.email you@example.com`
 	case strings.Contains(s, "permission denied (publickey)"),
 		strings.Contains(s, "authentication failed"),
 		strings.Contains(s, "could not read username"),
