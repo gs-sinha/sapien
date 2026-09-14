@@ -48,9 +48,10 @@ formula download `sapien_<ver>_<os>_<arch>.tar.gz` and verify it against
    A binary from `go install` reports `sapien dev`: `go install` does not
    pass the version ldflags. Only the archives carry the version string.
 
-6. Update the website's Releases section in `site/index.html`: move the
-   "Next" entry under the new version's heading with its date. The
-   "Latest release" number and date refresh themselves from the GitHub API.
+6. Update the website in `site/index.html`: add the version's highlights
+   to the top of the Releases timeline, and bump the `data-latest` fallbacks
+   (hero pill, "Latest release" card) and the `SAPIEN_VERSION` examples.
+   In a browser the latest number and date also refresh from the GitHub API.
    Pushing `site/` to `main` redeploys https://gs-sinha.github.io/sapien/
    (`.github/workflows/pages.yml`), which also serves `scripts/install.sh`
    as `/install.sh`.

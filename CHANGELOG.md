@@ -6,6 +6,8 @@ and phase numbers refer to PLAN.md §34's roadmap.
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-09-15
+
 ### Added
 - **`sapien mcp config --allow-mutations`: one command to let agents run
   the flows they write.** Agents were denied every POST, PUT, PATCH and
