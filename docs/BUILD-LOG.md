@@ -797,3 +797,49 @@ live: after `forget`, the daemon listed the workspace closed, its lock
 file was gone, and a request carrying its header got 404 without
 recreating the lock. Six existing tests that relied on the implicit open
 now register the workspace first, which is what they were modelling.
+
+### Three stages for memories and examples, and Push (2026-09-14, same day)
+
+The user saw one flow read "committed, not pushed" and could not act on
+it from the product: the only way to push was a terminal in the repo.
+And memories and examples still had scopes but no stages. Decided: the
+same ladder for all three kinds -- local, committed, pushed -- with
+every step possible from the UI, push included. Push is the workspace
+repository's own branch to its upstream, on request, never forced,
+refused when the branch is behind, and never a service repository, so
+the one rule that mattered ("Sapien never pushes on its own") still
+holds; what changed is that the human's push no longer needs a shell.
+
+- **Tier on disk.** A workspace-scope memory or example lives in
+  `local/memories` / `local/examples` (this machine, ignored) or in
+  `memories/` / `examples/` (the team's), and the tier is read from the
+  path -- no column, no migration. A new one lands in the local tier, as
+  a new flow does, and `Update` keeps whatever tier it already has, so
+  editing a team memory's text cannot silently pull it back to local.
+  `Move` changes the tier through the store's own rewrite, so the old
+  file goes as the new one lands.
+- **Shipped and Commit** for memories and examples exactly as for flows:
+  one `git status` and one `git log @{upstream}..HEAD` per listing over
+  the workspace-tier paths; `Commit` on one file with a default message.
+  `sapien memory move|commit`, `sapien example move|commit`, the rescope
+  tools with `tier`, `commit_memory`, `commit_example`, badges and
+  buttons on both pages.
+- **Push.** `gitsrc.PushRepo` sets the upstream when the branch has none
+  and never forces; `Repo().Push` refuses when behind ("pull first") and
+  is a no-op when nothing is ahead. `sapien workspace push`, `POST
+  /v1/workspace/repo/push`, a Push button beside every "not pushed"
+  badge and in the status bar. No push tool over MCP: pushing is the
+  human's, and a test pins that no tool name carries "push".
+
+Verified live on the team workspace after restarting its daemon: 25
+memories at the local tier, 4 written by agents earlier at the team tier
+reading "not committed", 3 examples the same, one unpushed commit and
+nine uncommitted files in the status. In a throwaway shared workspace: a
+new memory landed under `local/memories`, `memory move --to team` put it
+in `memories/` as not committed, `memory commit` made it not pushed with
+"Add memory <id> to the team workspace" in the log, `workspace push`
+reported one commit and the bare origin had it, and after a second clone
+pushed, a push from behind was refused with "pull first". Go suite green
+with `-race` (38 packages, vet clean), 196 UI tests, bundle 69.3 KB
+initial / 221.9 KB total gzipped. The acceptance scenario now expects a
+new example at the local tier and moves it to the team's.

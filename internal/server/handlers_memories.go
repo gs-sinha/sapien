@@ -126,3 +126,62 @@ func (s *Server) handleMemoryPromotion(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, out)
 }
+
+// moveTierRequest is POST /v1/memories/{id}/move and POST
+// /v1/examples/{id}/move's shared body (PLAN §7b): the tier to move the
+// file to. The client-side twin is internal/engine/remote's own
+// moveTierRequest (memories.go, examples.go), which sends the same shape.
+type moveTierRequest struct {
+	Tier string `json:"tier"`
+}
+
+// handleMemoryMove implements POST /v1/memories/{id}/move: places a
+// workspace-scope memory's file in another tier (local or workspace),
+// keeping its id and scope. A blank tier is rejected before the engine is
+// asked; every other refusal (personal/service scope, an unknown tier) is
+// the engine's own error, passed through writeError unchanged.
+func (s *Server) handleMemoryMove(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var req moveTierRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, err)
+		return
+	}
+	if req.Tier == "" {
+		writeError(w, errs.New(errs.Invalid, "tier is required").
+			WithHint("pass tier local or workspace"))
+		return
+	}
+	out, err := engineFrom(r.Context()).Memories().Move(r.Context(), id, req.Tier)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// commitMessageRequest is POST /v1/memories/{id}/commit and POST
+// /v1/examples/{id}/commit's shared body: message "" picks the engine's
+// own default. The client-side twin is internal/engine/remote's own
+// commitMessageRequest.
+type commitMessageRequest struct {
+	Message string `json:"message,omitempty"`
+}
+
+// handleMemoryCommit implements POST /v1/memories/{id}/commit: records a
+// workspace-tier memory's file in the workspace repository with one
+// commit, never a push.
+func (s *Server) handleMemoryCommit(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var req commitMessageRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, err)
+		return
+	}
+	out, err := engineFrom(r.Context()).Memories().Commit(r.Context(), id, req.Message)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}

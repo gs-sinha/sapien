@@ -119,3 +119,60 @@ func TestWorkspaceSync_DirtyTreeSkipsWithoutError(t *testing.T) {
 	require.Equal(t, 0, code, "stderr: %s", stderr)
 	assert.Contains(t, stdout, "not pulled: uncommitted changes")
 }
+
+// --- workspace push ---
+
+func TestWorkspacePush_PushedCommits(t *testing.T) {
+	dir, fake := setupFakeEngine(t)
+	fake.SetRepoStatus(domain.RepoStatus{InGit: true, Branch: "main", Upstream: "origin/main", Ahead: 3})
+
+	stdout, stderr, code := run(t, "--workspace", dir, "workspace", "push")
+	require.Equal(t, 0, code, "stderr: %s", stderr)
+	assert.Contains(t, stdout, "pushed 3 commits")
+	assert.Equal(t, "Repo.Push", lastCall(fake, "Repo.Push").Method)
+}
+
+func TestWorkspacePush_NothingToPush(t *testing.T) {
+	dir, fake := setupFakeEngine(t)
+	fake.SetRepoStatus(domain.RepoStatus{InGit: true, Branch: "main", Upstream: "origin/main"})
+
+	stdout, stderr, code := run(t, "--workspace", dir, "workspace", "push")
+	require.Equal(t, 0, code, "stderr: %s", stderr)
+	assert.Contains(t, stdout, "nothing to push")
+}
+
+// TestWorkspacePush_BehindIsConflict: the engine's Conflict error renders
+// through the CLI's normal error formatting -- a non-zero exit and the
+// error code on stderr -- the same way TestWorkspacePull_DirtyTreeIsConflict
+// proves it for pull.
+func TestWorkspacePush_BehindIsConflict(t *testing.T) {
+	dir, fake := setupFakeEngine(t)
+	fake.SetRepoStatus(domain.RepoStatus{InGit: true, Branch: "main", Upstream: "origin/main", Behind: 2})
+
+	_, stderr, code := run(t, "--workspace", dir, "workspace", "push")
+	assert.NotEqual(t, 0, code)
+	assert.Contains(t, stderr, "E_CONFLICT")
+}
+
+func TestWorkspacePush_JSON(t *testing.T) {
+	dir, fake := setupFakeEngine(t)
+	fake.SetRepoStatus(domain.RepoStatus{InGit: true, Branch: "main", Upstream: "origin/main", Ahead: 5})
+
+	stdout, stderr, code := run(t, "--workspace", dir, "workspace", "push", "--json")
+	require.Equal(t, 0, code, "stderr: %s", stderr)
+	var got domain.RepoStatus
+	require.NoError(t, json.Unmarshal([]byte(stdout), &got))
+	assert.True(t, got.Pushed)
+	assert.Equal(t, 5, got.PushedCount)
+}
+
+// TestWorkspaceStatus_AheadLineMentionsPushCommand: the "you have N
+// unpushed commits" line now points at the command that clears it.
+func TestWorkspaceStatus_AheadLineMentionsPushCommand(t *testing.T) {
+	dir, fake := setupFakeEngine(t)
+	fake.SetRepoStatus(domain.RepoStatus{InGit: true, Branch: "main", Upstream: "origin/main", Ahead: 2})
+
+	stdout, stderr, code := run(t, "--workspace", dir, "workspace", "status")
+	require.Equal(t, 0, code, "stderr: %s", stderr)
+	assert.Contains(t, stdout, "you have 2 unpushed commits (sapien workspace push)")
+}

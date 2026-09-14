@@ -16,6 +16,7 @@ func TestLocalDir_Paths(t *testing.T) {
 	assert.Equal(t, filepath.Join("/ws", "local"), LocalDir(ws))
 	assert.Equal(t, filepath.Join("/ws", "local", "flows"), LocalFlowsDir(ws))
 	assert.Equal(t, filepath.Join("/ws", "local", "memories"), LocalMemoriesDir(ws))
+	assert.Equal(t, filepath.Join("/ws", "local", "examples"), LocalExamplesDir(ws))
 }
 
 // A fresh workspace has no local/ (Init does not create it); the first
@@ -29,6 +30,7 @@ func TestEnsureLocalDir_CreatesSelfIgnoringTier(t *testing.T) {
 	require.NoError(t, EnsureLocalDir(ws))
 	assert.DirExists(t, LocalFlowsDir(ws))
 	assert.DirExists(t, LocalMemoriesDir(ws))
+	assert.DirExists(t, LocalExamplesDir(ws))
 	data, err := os.ReadFile(filepath.Join(LocalDir(ws), ".gitignore"))
 	require.NoError(t, err)
 	assert.Equal(t, "*\n", string(data))

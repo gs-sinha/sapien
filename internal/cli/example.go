@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -9,6 +11,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/engine"
 	"github.com/gs-sinha/sapien/internal/errs"
 )
 
@@ -25,6 +28,8 @@ func newExampleCmd(app *App) *cobra.Command {
 		newExampleAddCmd(app),
 		newExampleRmCmd(app),
 		newExampleRescopeCmd(app),
+		newExampleMoveCmd(app),
+		newExampleCommitCmd(app),
 	)
 	return cmd
 }
@@ -55,11 +60,11 @@ func newExampleListCmd(app *App) *cobra.Command {
 			rows := make([][]string, 0, len(examples))
 			for _, ex := range examples {
 				rows = append(rows, []string{
-					ex.ID, ex.Operation, string(ex.Scope), verifiedEnvString(ex.Verified),
-					formatExampleTime(ex.Updated), truncate(ex.Description, 60),
+					ex.ID, ex.Operation, string(ex.Scope), tierColumn(ex.Tier), shipStateColumn(ex.Shipped),
+					verifiedEnvString(ex.Verified), formatExampleTime(ex.Updated), truncate(ex.Description, 60),
 				})
 			}
-			app.Printer.Table([]string{"ID", "OPERATION", "SCOPE", "VERIFIED", "UPDATED", "DESCRIPTION"}, rows)
+			app.Printer.Table([]string{"ID", "OPERATION", "SCOPE", "TIER", "SHIPPED", "VERIFIED", "UPDATED", "DESCRIPTION"}, rows)
 			return nil
 		},
 	}
@@ -122,6 +127,9 @@ func newExampleShowCmd(app *App) *cobra.Command {
 // its path as a comment line when known.
 func renderExampleYAML(ex *domain.SavedExample) string {
 	var b strings.Builder
+	if ex.Tier != "" {
+		fmt.Fprintf(&b, "# tier: %s\n", tierWithShip(ex.Tier, ex.Shipped))
+	}
 	if ex.Path != "" {
 		fmt.Fprintf(&b, "# %s\n", ex.Path)
 	}
@@ -291,6 +299,160 @@ who clones that repo; workspace scope keeps it local under
 	cmd.Flags().StringVar(&body, "body", "", "request body: inline JSON, or @file to read it from a file")
 	cmd.Flags().StringArrayVarP(&headers, "header", "H", nil, "extra request header key:value (repeatable)")
 	return cmd
+}
+
+// newExampleMoveCmd is `sapien example move <id> --to local|team`: places a
+// workspace-scope example's file in another tier, keeping its id and
+// scope. Mirrors `sapien memory move`.
+func newExampleMoveCmd(app *App) *cobra.Command {
+	var to string
+	cmd := &cobra.Command{
+		Use:   "move <id> --to local|team",
+		Short: "Move a workspace-scope example's file to another tier",
+		Long: `Move a workspace-scope example's file between tiers, keeping its id and
+scope: local (` + "`<workspace>/local/examples`" + `, this machine only, never
+committed) or team (` + "`<workspace>/examples`" + `, the team's repo). Refused for
+service scope, whose home is the service's own repo, not a tier.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			tier, err := tierFlag("example move", to)
+			if err != nil {
+				return err
+			}
+
+			eng, err := app.Engine()
+			if err != nil {
+				return err
+			}
+			defer eng.Close()
+
+			ex, err := eng.Examples().Get(cmd.Context(), args[0])
+			if err != nil {
+				return err
+			}
+			oldPath := ex.Path
+
+			moved, err := eng.Examples().Move(cmd.Context(), args[0], tier)
+			if err != nil {
+				return err
+			}
+
+			if app.Printer.IsJSON() {
+				return app.Printer.JSON(map[string]any{
+					"id":       moved.ID,
+					"tier":     moved.Tier,
+					"old_path": oldPath,
+					"new_path": moved.Path,
+					"example":  moved,
+				})
+			}
+			app.Printer.Line("%s -> %s", oldPath, moved.Path)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&to, "to", "", "local|team (required)")
+	return cmd
+}
+
+// newExampleCommitCmd is `sapien example commit <id> [-m <message>]` or
+// `sapien example commit --all`: records a workspace-tier example's file
+// in the workspace repository with one commit, never a push. Mirrors
+// `sapien memory commit`.
+func newExampleCommitCmd(app *App) *cobra.Command {
+	var message string
+	var all bool
+	cmd := &cobra.Command{
+		Use:   "commit <id> [-m <message>]",
+		Short: "Commit a workspace-tier example's file in the workspace repository",
+		Long: `Record a workspace-tier example's file with one commit; never pushes.
+Refused when the example is not at the team tier, the workspace is not a
+git repository, or the file already has nothing to commit.
+
+--all commits every team-tier example that is not committed or modified
+(untracked, or tracked with an uncommitted edit), one commit per example,
+using the same message for each (or each example's own default when -m is
+omitted); an example already committed is left alone.`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			switch {
+			case all && len(args) == 1:
+				return errs.New(errs.Invalid, "example commit: pass an example id or --all, not both")
+			case !all && len(args) != 1:
+				return errs.New(errs.Invalid, "example commit: requires an example id, or --all")
+			}
+
+			eng, err := app.Engine()
+			if err != nil {
+				return err
+			}
+			defer eng.Close()
+
+			if !all {
+				return commitOneExample(app, cmd.Context(), eng, args[0], message)
+			}
+			return commitAllExamples(app, cmd.Context(), eng, message)
+		},
+	}
+	cmd.Flags().StringVarP(&message, "message", "m", "", "commit message; default depends on whether the file was ever added to git")
+	cmd.Flags().BoolVar(&all, "all", false, "commit every team-tier example that is not committed or modified")
+	return cmd
+}
+
+func commitOneExample(app *App, ctx context.Context, eng engine.Engine, id, message string) error {
+	ex, err := eng.Examples().Commit(ctx, id, message)
+	if err != nil {
+		return err
+	}
+	if app.Printer.IsJSON() {
+		return app.Printer.JSON(ex)
+	}
+	app.Printer.Line("committed %s (%s)", ex.Path, shipStateColumn(ex.Shipped))
+	return nil
+}
+
+// commitAllExamples is `example commit --all`: every team-tier example
+// whose Shipped state says it has something to commit (untracked or
+// modified), committed one at a time with the same message (id order, so
+// output is stable).
+func commitAllExamples(app *App, ctx context.Context, eng engine.Engine, message string) error {
+	examples, err := eng.Examples().List(ctx, domain.ExampleQuery{})
+	if err != nil {
+		return err
+	}
+	var ids []string
+	for _, ex := range examples {
+		if ex.Tier != domain.TierWorkspace {
+			continue
+		}
+		if ex.Shipped == domain.ShipUntracked || ex.Shipped == domain.ShipModified {
+			ids = append(ids, ex.ID)
+		}
+	}
+	sort.Strings(ids)
+
+	if len(ids) == 0 {
+		if app.Printer.IsJSON() {
+			return app.Printer.JSON([]domain.SavedExample{})
+		}
+		app.Printer.Line("nothing to commit")
+		return nil
+	}
+
+	results := make([]*domain.SavedExample, 0, len(ids))
+	for _, id := range ids {
+		ex, err := eng.Examples().Commit(ctx, id, message)
+		if err != nil {
+			return err
+		}
+		results = append(results, ex)
+	}
+	if app.Printer.IsJSON() {
+		return app.Printer.JSON(results)
+	}
+	for _, ex := range results {
+		app.Printer.Line("committed %s (%s)", ex.Path, shipStateColumn(ex.Shipped))
+	}
+	return nil
 }
 
 // defaultExampleID derives a default example id from the operation

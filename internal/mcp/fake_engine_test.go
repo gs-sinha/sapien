@@ -570,9 +570,45 @@ func (a fakeMemories) Create(_ context.Context, m domain.Memory) (*domain.Memory
 	}
 	now := time.Now()
 	m.Created, m.Updated = now, now
+	// Tier defaults the way the real engine does (PLAN §7b): a new
+	// workspace-scope item lands at the local tier unless told otherwise; a
+	// service-scope item is always the service tier. Personal and flow
+	// scope carry no tier. This lets create_memory's tier-landed text and
+	// the TIER/SHIPPED columns be exercised against the fake.
+	if m.Tier == "" {
+		switch m.Scope {
+		case domain.ScopeWorkspace:
+			m.Tier = domain.TierLocal
+		case domain.ScopeService:
+			m.Tier = domain.TierService
+		}
+	}
+	if m.FilePath == "" {
+		m.FilePath = fakeMemoryFilePath(m.Tier, m.Subject.Service, m.ID)
+	}
 	a.st.memories = append(a.st.memories, m)
 	c := m
 	return &c, nil
+}
+
+// fakeMemoryFilePath models where a memory's file would sit for tier
+// (PLAN §7b), so create_memory's tier-landed text and TIER/SHIPPED columns
+// have something realistic to show in tests; "" for personal/flow scope,
+// which has no file at all.
+func fakeMemoryFilePath(tier, service, id string) string {
+	switch tier {
+	case domain.TierWorkspace:
+		return "memories/" + id + ".md"
+	case domain.TierService:
+		if service != "" {
+			return service + "/api/memories/" + id + ".md"
+		}
+		return ""
+	case domain.TierLocal:
+		return "local/memories/" + id + ".md"
+	default:
+		return ""
+	}
 }
 
 func (a fakeMemories) Get(_ context.Context, id string) (*domain.Memory, error) {
@@ -1122,6 +1158,23 @@ func (a fakeExamples) ForOperations(_ context.Context, operationIDs []string, li
 
 func (a fakeExamples) Reindex(context.Context) error { return nil }
 
+// fakeExamplePath models where an example's file would sit for tier
+// (PLAN §7b), so create_example's tier-landed text and TIER/SHIPPED
+// columns have something realistic to show in tests.
+func fakeExamplePath(tier, service, id string) string {
+	switch tier {
+	case domain.TierWorkspace:
+		return "examples/" + id + ".yaml"
+	case domain.TierService:
+		if service != "" {
+			return service + "/api/examples/" + id + ".yaml"
+		}
+		return ""
+	default:
+		return "local/examples/" + id + ".yaml"
+	}
+}
+
 func fakeExampleDefaults(ex *domain.SavedExample) {
 	if ex.Version == 0 {
 		ex.Version = 1
@@ -1133,6 +1186,19 @@ func fakeExampleDefaults(ex *domain.SavedExample) {
 		if i := strings.Index(ex.Operation, "."); i > 0 {
 			ex.Service = ex.Operation[:i]
 		}
+	}
+	// Tier defaults the way the real engine does (PLAN §7b): a new
+	// workspace-scope example lands at the local tier unless told
+	// otherwise; a service-scope example is always the service tier.
+	if ex.Tier == "" {
+		if ex.Scope == domain.ExampleScopeService {
+			ex.Tier = domain.TierService
+		} else {
+			ex.Tier = domain.TierLocal
+		}
+	}
+	if ex.Path == "" {
+		ex.Path = fakeExamplePath(ex.Tier, ex.Service, ex.ID)
 	}
 	now := time.Now()
 	if ex.Created.IsZero() {
@@ -1405,6 +1471,7 @@ func (a fakeMemories) Move(_ context.Context, id, tier string) (*domain.Memory, 
 				return nil, errs.New(errs.Invalid, "only a workspace-scope memory moves between tiers")
 			}
 			a.st.memories[i].Tier = tier
+			a.st.memories[i].FilePath = fakeMemoryFilePath(tier, a.st.memories[i].Subject.Service, id)
 			if tier == domain.TierWorkspace {
 				a.st.memories[i].Shipped = domain.ShipUntracked
 			} else {
@@ -1436,6 +1503,7 @@ func (a fakeExamples) Move(_ context.Context, id, tier string) (*domain.SavedExa
 	for i := range a.st.examples {
 		if a.st.examples[i].ID == id {
 			a.st.examples[i].Tier = tier
+			a.st.examples[i].Path = fakeExamplePath(tier, a.st.examples[i].Service, id)
 			if tier == domain.TierWorkspace {
 				a.st.examples[i].Shipped = domain.ShipUntracked
 			} else {

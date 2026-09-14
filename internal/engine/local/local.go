@@ -224,7 +224,12 @@ func Open(ws *domain.Workspace, opts Options) (*Local, error) {
 		},
 	}
 	l.memStore = memory.New(db, loc, &retrieval.CatalogResolver{Cat: cat})
-	l.exStore = example.New(db, example.Locator{WorkspaceDir: ws.Dir, ServiceDirs: l.serviceDirs, ReadOnly: l.readOnlyServices})
+	l.exStore = example.New(db, example.Locator{
+		WorkspaceDir: ws.Dir,
+		LocalDir:     workspace.LocalDir(ws),
+		ServiceDirs:  l.serviceDirs,
+		ReadOnly:     l.readOnlyServices,
+	})
 	l.ctxBuilder = retrieval.New(cat, srch, l.memStore, runsStore)
 	l.runner = runner.New(&operationsAdapter{cat: cat})
 

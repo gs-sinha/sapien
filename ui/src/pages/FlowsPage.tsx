@@ -6,7 +6,7 @@ import { Table } from '../components/Table';
 import { Timestamp } from '../components/Timestamp';
 import { useAsync } from '../lib/useAsync';
 import { subscribe } from '../state/events';
-import { CommitButton, FLOW_TIERS, ShippedBadge, TIER_NAMES, tierLabel, tierOf } from './flows/tier';
+import { CommitButton, FLOW_TIERS, PushButton, ShippedBadge, TIER_NAMES, tierLabel, tierOf } from './flows/tier';
 import type { FlowOwnerKind, FlowSummary } from '../api/types';
 
 function matches(flow: FlowSummary, needle: string): boolean {
@@ -110,7 +110,8 @@ export default function FlowsPage() {
                   {tierOf(f.owner_kind) === 'workspace' && (
                     <>
                       <ShippedBadge shipped={f.shipped} />
-                      <CommitButton id={f.id} shipped={f.shipped} onCommitted={reload} />
+                      <CommitButton id={f.id} shipped={f.shipped} onCommit={() => flows.commit(f.id)} onCommitted={reload} />
+                      {f.shipped === 'unpushed' && <PushButton onPushed={reload} />}
                     </>
                   )}
                 </span>

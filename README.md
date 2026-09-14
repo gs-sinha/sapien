@@ -174,11 +174,14 @@ sapien flow commit order-cancel             # commit a flow already in flows/
 sapien flow promote order-cancel --to service --service rider-service
 ```
 
-Memories climb the same way: personal (this machine) -> workspace (the
-team repo) -> service (the owning repo), with `sapien memory rescope`.
-A promoted flow shows whether it has shipped: not committed, committed but
-not pushed, or shipped. Sapien never pushes; what reaches the team is what
-you push.
+Memories and examples climb the same ladder: a new one lands in `local/`
+(this machine only) and `sapien memory move <id> --to team` (or `example
+move`) puts it in the team repo; scope (`memory rescope`) is a separate
+axis, saying who a memory is about. Everything at the team tier shows
+whether it is not committed, committed but not pushed, or shipped, with
+Commit and Push beside the badge; `sapien workspace push` is the same
+push from the terminal. Sapien never pushes on its own; what reaches the
+team is what you push.
 
 The workspace repository is fetched on the same ten-minute tick as the
 services, read-only. The status bar says when teammates' commits are

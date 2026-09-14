@@ -54,6 +54,7 @@ func newWorkspaceCmd(app *App) *cobra.Command {
 		newWorkspaceStatusCmd(app),
 		newWorkspacePullCmd(app),
 		newWorkspaceSyncCmd(app),
+		newWorkspacePushCmd(app),
 	)
 	return cmd
 }
@@ -291,7 +292,7 @@ func printRepoStatus(p *Printer, st *domain.RepoStatus) {
 		noted = true
 	}
 	if st.Ahead > 0 {
-		p.Line("you have %d unpushed commits", st.Ahead)
+		p.Line("you have %d unpushed commits (sapien workspace push)", st.Ahead)
 		noted = true
 	}
 	if st.Dirty > 0 {
@@ -385,6 +386,50 @@ func newWorkspaceSyncCmd(app *App) *cobra.Command {
 			return nil
 		},
 	}
+}
+
+// newWorkspacePushCmd is `sapien workspace push`: send the workspace
+// repository's unpushed commits to its upstream. The engine refuses
+// (errs.Conflict) a branch that is behind its upstream, since a pull must
+// come first; that error renders the way every CLI error does, through
+// the root command's own error formatting. Never a force push, never a
+// service repository (PLAN §7b) -- this is the one place Sapien pushes at
+// all, and only because a human ran this command.
+func newWorkspacePushCmd(app *App) *cobra.Command {
+	return &cobra.Command{
+		Use:   "push",
+		Short: "Push the workspace repository's unpushed commits to its upstream",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			eng, err := app.Engine()
+			if err != nil {
+				return err
+			}
+			defer eng.Close()
+
+			st, err := eng.Repo().Push(cmd.Context())
+			if err != nil {
+				return err
+			}
+			if app.Printer.IsJSON() {
+				return app.Printer.JSON(st)
+			}
+			app.Printer.Line("%s", repoPushLine(st))
+			return nil
+		},
+	}
+}
+
+// repoPushLine renders the outcome of a Repo().Push call: "pushed N
+// commits", or "nothing to push" when Ahead was already zero. A behind
+// branch never reaches here: the engine refuses with errs.Conflict before
+// returning a status, which the CLI's normal error formatting reports
+// instead.
+func repoPushLine(st *domain.RepoStatus) string {
+	if st.Pushed {
+		return fmt.Sprintf("pushed %d commits", st.PushedCount)
+	}
+	return "nothing to push"
 }
 
 // repoPullLine renders the outcome of a Repo().Pull or Repo().Sync call:

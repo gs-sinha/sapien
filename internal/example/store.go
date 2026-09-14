@@ -63,6 +63,12 @@ func (s *Store) Create(ctx context.Context, ex domain.SavedExample) (*domain.Sav
 		return nil, err
 	}
 	ex.Path = path
+	// Re-derived from the resulting path rather than left as whatever the
+	// caller passed (typically ""): PathFor treats an unset Tier as "local
+	// tier" for workspace scope, so this turns that default into an
+	// explicit domain.TierLocal on the record (PLAN §7b), mirroring
+	// memory.Store.writeFileForScope.
+	ex.Tier = s.loc.tierOfPath(path)
 
 	if err := writeFile(&ex); err != nil {
 		return nil, err
@@ -88,7 +94,12 @@ func (s *Store) Get(ctx context.Context, id string) (*domain.SavedExample, error
 	if row == nil {
 		return nil, errs.New(errs.ExampleNotFound, "example %q not found", id).WithDetail("id", id)
 	}
-	return readFile(row.path, row.scope)
+	ex, err := readFile(row.path, row.scope)
+	if err != nil {
+		return nil, err
+	}
+	ex.Tier = s.loc.tierOfPath(ex.Path)
+	return ex, nil
 }
 
 // Update validates ex (which must have an ID naming an existing example),
@@ -109,6 +120,13 @@ func (s *Store) Update(ctx context.Context, ex domain.SavedExample) (*domain.Sav
 	if ex.Scope == "" {
 		ex.Scope = existing.Scope
 	}
+	// A caller that doesn't name a tier keeps the example where it already
+	// is (PLAN §7b) -- see memory.Store.Update's identical guard against
+	// PathFor's "unset Tier defaults to local" reading a plain field edit
+	// as a request to move it back to local.
+	if ex.Tier == "" {
+		ex.Tier = existing.Tier
+	}
 	if ex.Operation == "" {
 		ex.Operation = existing.Operation
 	}
@@ -126,6 +144,7 @@ func (s *Store) Update(ctx context.Context, ex domain.SavedExample) (*domain.Sav
 		return nil, err
 	}
 	ex.Path = newPath
+	ex.Tier = s.loc.tierOfPath(newPath)
 
 	if err := writeFile(&ex); err != nil {
 		return nil, err
@@ -197,7 +216,7 @@ func (s *Store) List(ctx context.Context, q domain.ExampleQuery) ([]domain.Saved
 	if err != nil {
 		return nil, err
 	}
-	return hydrate(rows), nil
+	return s.hydrate(rows), nil
 }
 
 // ForOperations returns up to limit (default 50) examples of the given
@@ -227,7 +246,7 @@ func (s *Store) ForOperations(ctx context.Context, operationIDs []string, limit 
 	if err != nil {
 		return nil, err
 	}
-	return hydrate(rows), nil
+	return s.hydrate(rows), nil
 }
 
 // Reindex rebuilds the SQLite index for every example file: it reads every
@@ -391,14 +410,17 @@ func (s *Store) readIndexRows(ctx context.Context, query string, args ...any) ([
 
 // hydrate reads and parses each row's file, in order, skipping any that can
 // no longer be read or parsed (its backing file was deleted or hand-edited
-// into something invalid since it was last indexed).
-func hydrate(rows []indexRow) []domain.SavedExample {
+// into something invalid since it was last indexed), and setting Tier from
+// the Locator (there is no tier column to read it back from; see
+// Locator.tierOfPath).
+func (s *Store) hydrate(rows []indexRow) []domain.SavedExample {
 	out := make([]domain.SavedExample, 0, len(rows))
 	for _, r := range rows {
 		ex, err := readFile(r.path, r.scope)
 		if err != nil {
 			continue
 		}
+		ex.Tier = s.loc.tierOfPath(ex.Path)
 		out = append(out, *ex)
 	}
 	return out

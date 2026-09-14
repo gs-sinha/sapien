@@ -4,8 +4,9 @@ import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import FlowsPage from '../pages/FlowsPage';
 import { flows } from '../api/client';
+import { useRepo } from '../state/repo';
 import { useToasts } from '../state/toast';
-import type { FlowSummary } from '../api/types';
+import type { FlowSummary, RepoStatus } from '../api/types';
 
 const sampleFlows: FlowSummary[] = [
   {
@@ -62,17 +63,25 @@ const flowsCommit = vi.fn(async (_id: string, _message?: string): Promise<FlowSu
   updated: '2026-01-05T00:00:00Z',
   shipped: 'unpushed',
 }));
+const repoPush = vi.fn(
+  async (): Promise<RepoStatus> => ({ in_git: true, branch: 'main', behind: 0, ahead: 0, dirty: 0, pushed: true, pushed_count: 2 }),
+);
 
 vi.mock('../api/client', () => ({
   flows: {
     list: vi.fn(async (): Promise<FlowSummary[]> => sampleFlows),
     commit: (id: string, message?: string) => flowsCommit(id, message),
   },
+  repo: {
+    push: () => repoPush(),
+  },
 }));
 
 beforeEach(() => {
   flowsCommit.mockClear();
+  repoPush.mockClear();
   useToasts.setState({ toasts: [] });
+  useRepo.setState({ status: null, started: false });
 });
 
 describe('FlowsPage', () => {
@@ -232,5 +241,35 @@ describe('FlowsPage', () => {
     // The row is untouched: still "modified", still offering Commit.
     expect(screen.getByText('modified')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Commit' })).toBeInTheDocument();
+  });
+
+  it('shows a Push button only next to an unpushed row; pushing updates the repo store and reloads the row', async () => {
+    const user = userEvent.setup();
+    useRepo.setState({ status: { in_git: true, branch: 'main', behind: 0, ahead: 2, dirty: 0 } });
+    vi.mocked(flows.list).mockResolvedValueOnce([
+      { ...sampleFlows[0], id: 'flow-c', shipped: 'unpushed' },
+      { ...sampleFlows[0], id: 'flow-d', shipped: 'shipped' },
+    ]);
+    render(
+      <MemoryRouter>
+        <FlowsPage />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getByText('flow-c')).toBeInTheDocument());
+
+    const rowOf = (id: string) => screen.getByRole('link', { name: id }).closest('tr')!;
+    const pushButton = within(rowOf('flow-c')).getByRole('button', { name: /Push 2 commits/ });
+    expect(pushButton).toHaveAttribute('title', 'pushes every unpushed commit in the workspace repository');
+    expect(within(rowOf('flow-d')).queryByRole('button', { name: /Push/ })).not.toBeInTheDocument();
+
+    vi.mocked(flows.list).mockResolvedValueOnce([{ ...sampleFlows[0], id: 'flow-c', shipped: 'shipped' }]);
+    await user.click(pushButton);
+
+    await waitFor(() => expect(repoPush).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(useToasts.getState().toasts.some((t) => t.kind === 'success' && t.message === 'pushed 2 commits')).toBe(true),
+    );
+    expect(useRepo.getState().status?.ahead).toBe(0);
+    await waitFor(() => expect(screen.queryByRole('button', { name: /Push/ })).not.toBeInTheDocument());
   });
 });

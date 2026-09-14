@@ -7,6 +7,7 @@ import { Link, useParams } from 'react-router-dom';
 import { memories } from '../api/client';
 import { KeyValue } from '../components/KeyValue';
 import { Timestamp } from '../components/Timestamp';
+import { CommitButton, ItemTierBadge, MoveTierControl, PushButton, ShippedBadge } from '../components/tiers';
 import { useAsync } from '../lib/useAsync';
 import { MarkdownLite } from './memories/MarkdownLite';
 import { pushToast } from '../state/toast';
@@ -91,6 +92,14 @@ export default function MemoryDetailPage() {
         <h1 className="font-mono text-lg font-semibold">{mem.id}</h1>
         <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">{mem.type}</span>
         <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">{mem.status}</span>
+        <ItemTierBadge tier={mem.tier} />
+        {mem.tier === 'workspace' && (
+          <>
+            <ShippedBadge shipped={mem.shipped} />
+            <CommitButton id={mem.id} shipped={mem.shipped} onCommit={() => memories.commit(mem.id)} onCommitted={reload} />
+            {mem.shipped === 'unpushed' && <PushButton onPushed={reload} />}
+          </>
+        )}
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -158,7 +167,11 @@ export default function MemoryDetailPage() {
             >
               {promotionLoading ? 'Looking…' : 'Where does this belong'}
             </button>
+            <MoveTierControl tier={mem.tier} onMove={(target) => memories.move(mem.id, target)} onMoved={reload} />
           </div>
+          <p className="mt-1 text-xs text-slate-400">
+            Scope says who the memory is about; tier says where its file is: local until you move it to the team.
+          </p>
 
           {promotionError && <div className="mt-2 text-xs text-red-600">{promotionError}</div>}
           {promotion && (

@@ -51,3 +51,17 @@ func (s *Server) handleWorkspaceRepoSync(w http.ResponseWriter, r *http.Request)
 	}
 	writeJSON(w, http.StatusOK, out)
 }
+
+// handleWorkspaceRepoPush implements POST /v1/workspace/repo/push: sends
+// the branch's unpushed commits to its upstream. The engine refuses
+// (errs.Conflict) a branch that is behind, since a pull must come first;
+// writeError maps that to 409 like every other engine error. A no-op
+// success (Pushed false) when nothing is ahead.
+func (s *Server) handleWorkspaceRepoPush(w http.ResponseWriter, r *http.Request) {
+	out, err := engineFrom(r.Context()).Repo().Push(r.Context())
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}

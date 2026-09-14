@@ -253,6 +253,10 @@ export const repo = {
   status: (): Promise<RepoStatus> => get('/v1/workspace/repo'),
   sync: (): Promise<RepoStatus> => post('/v1/workspace/repo/sync'),
   pull: (): Promise<RepoStatus> => post('/v1/workspace/repo/pull'),
+  // Pushes every unpushed commit on the workspace repo's current branch (it
+  // is per branch, not per file/flow/memory/example). 409s ("pull first")
+  // when the branch is behind; 400 when the workspace isn't a git checkout.
+  push: (): Promise<RepoStatus> => post('/v1/workspace/repo/push'),
 };
 
 // ---- services ----
@@ -443,6 +447,15 @@ export const memories = {
   delete: (id: string): Promise<void> => del(`/v1/memories/${encodeURIComponent(id)}`),
   promotion: (id: string): Promise<PromotionTarget> => get(`/v1/memories/${encodeURIComponent(id)}/promotion`),
   reindex: (): Promise<void> => post('/v1/memories/reindex'),
+  // Move a workspace-scope memory's file between local (this machine) and
+  // workspace (the team repo) tiers; mirrors flows.rescope, but there is no
+  // move-to-service endpoint for memories.
+  move: (id: string, tier: 'local' | 'workspace'): Promise<Memory> =>
+    post(`/v1/memories/${encodeURIComponent(id)}/move`, { tier }),
+  // git add + git commit a workspace-tier memory's file in the workspace
+  // repo (never a push); mirrors flows.commit.
+  commit: (id: string, message?: string): Promise<Memory> =>
+    post(`/v1/memories/${encodeURIComponent(id)}/commit`, { ...(message ? { message } : {}) }),
 };
 
 // ---- examples ----
@@ -457,6 +470,15 @@ export const examples = {
   forOperations: (operationIDs: string[], limit?: number): Promise<SavedExample[]> =>
     orEmpty(get(`/v1/examples/for-operations${buildQuery({ op: operationIDs, limit })}`)),
   reindex: (): Promise<void> => post('/v1/examples/reindex'),
+  // Move a workspace-scope example's file between local (this machine) and
+  // workspace (the team repo) tiers; mirrors flows.rescope, but there is no
+  // move-to-service endpoint for examples.
+  move: (id: string, tier: 'local' | 'workspace'): Promise<SavedExample> =>
+    post(`/v1/examples/${encodeURIComponent(id)}/move`, { tier }),
+  // git add + git commit a workspace-tier example's file in the workspace
+  // repo (never a push); mirrors flows.commit.
+  commit: (id: string, message?: string): Promise<SavedExample> =>
+    post(`/v1/examples/${encodeURIComponent(id)}/commit`, { ...(message ? { message } : {}) }),
 };
 
 // ---- friction reports ----

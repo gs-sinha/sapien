@@ -156,10 +156,14 @@ gets it, or to `service` when that service is bound. A workspace-tier
 flow carries `shipped` (not committed, modified, not pushed, shipped);
 `commit_flow`, or `rescope_flow` with `commit`, records the file in the
 workspace repository when the user asks, one file per commit, never a
-push. Memories climb the
-same way with `rescope_memory`: personal (this machine) -> workspace (the
-team's repo) -> service (the owning repo). Nothing is committed or pushed
-by Sapien; what reaches the team is what the developer commits.
+push. Memories and examples climb the
+same ladder: a new workspace-scope memory or example lands in the local
+tier (this machine only); `rescope_memory` / `rescope_example` with
+`tier: workspace` move it into the team's repo, and `commit_memory` /
+`commit_example` commit it there when the user asks. Scope is a separate
+axis: it says who the memory is about and where it belongs (personal,
+workspace, service). Nothing is committed or pushed by Sapien on its own;
+pushing is the human's, from the UI or `sapien workspace push`.
 
 ## When Sapien itself gets in your way
 

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { getWorkspace, repo as repoApi } from '../api/client';
+import { PushButton } from './tiers';
 import { relative } from './Timestamp';
 import { useDaemon } from '../state/daemon';
 import { useEvents } from '../state/events';
@@ -82,6 +83,14 @@ function RepoSegment() {
       )}
       {status.behind > 0 && status.dirty > 0 && (
         <span className="ml-1 text-amber-600 dark:text-amber-400">pull blocked: {status.dirty} uncommitted</span>
+      )}
+      {status.ahead > 0 && status.behind === 0 && (
+        <span className="ml-1">
+          <PushButton />
+        </span>
+      )}
+      {status.ahead > 0 && status.behind > 0 && (
+        <span className="ml-1 text-amber-600 dark:text-amber-400">pull first</span>
       )}
     </span>
   );

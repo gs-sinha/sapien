@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -30,6 +31,8 @@ func newMemoryCmd(app *App) *cobra.Command {
 		newMemoryRmCmd(app),
 		newMemoryPromoteCmd(app),
 		newMemoryRescopeCmd(app),
+		newMemoryMoveCmd(app),
+		newMemoryCommitCmd(app),
 		newMemoryReindexCmd(app),
 	)
 	return cmd
@@ -221,9 +224,12 @@ func newMemoryListCmd(app *App) *cobra.Command {
 			}
 			rows := make([][]string, 0, len(mems))
 			for _, m := range mems {
-				rows = append(rows, []string{m.ID, string(m.Type), string(m.Scope), subjectString(m.Subject), truncate(m.Text, 60)})
+				rows = append(rows, []string{
+					m.ID, string(m.Type), string(m.Scope), tierColumn(m.Tier), shipStateColumn(m.Shipped),
+					subjectString(m.Subject), truncate(m.Text, 60),
+				})
 			}
-			app.Printer.Table([]string{"ID", "TYPE", "SCOPE", "SUBJECT", "TEXT"}, rows)
+			app.Printer.Table([]string{"ID", "TYPE", "SCOPE", "TIER", "SHIPPED", "SUBJECT", "TEXT"}, rows)
 			return nil
 		},
 	}
@@ -293,6 +299,9 @@ func newMemoryShowCmd(app *App) *cobra.Command {
 
 			if app.Printer.IsJSON() {
 				return app.Printer.JSON(mem)
+			}
+			if mem.Tier != "" {
+				app.Printer.Line("# tier: %s (%s)", tierWithShip(mem.Tier, mem.Shipped), mem.FilePath)
 			}
 			app.Printer.Line("%s", renderMemoryMarkdown(mem))
 			return nil
@@ -415,6 +424,206 @@ machine. Rescoping never changes what the memory is about unless
 	cmd.Flags().StringVar(&scope, "scope", "", "personal|workspace|service|flow (required)")
 	cmd.Flags().StringVar(&service, "service", "", "service subject to set; required for service scope if the memory has none")
 	return cmd
+}
+
+// tierColumn renders a memory or example's Tier (PLAN §7b) for a TIER
+// column: "local" (this machine), "team" (the workspace repo), "service"
+// (the owning service's own repo), or "" for a personal-scope memory,
+// which has no tier at all -- it lives in SQLite only.
+func tierColumn(tier string) string {
+	switch tier {
+	case domain.TierLocal:
+		return "local"
+	case domain.TierWorkspace:
+		return "team"
+	case domain.TierService:
+		return "service"
+	default:
+		return ""
+	}
+}
+
+// tierWithShip renders tier the way `memory show` and `example show`'s
+// leading "# tier:" comment does: the tier alone, or with the workspace
+// tier's ship state appended ("team, not committed").
+func tierWithShip(tier, shipped string) string {
+	t := tierColumn(tier)
+	if s := shipStateColumn(shipped); s != "" {
+		t += ", " + s
+	}
+	return t
+}
+
+// newMemoryMoveCmd is `sapien memory move <id> --to local|team`: places a
+// workspace-scope memory's file in another tier, keeping its id and scope.
+// "team" (not "workspace") to match the TIER column and flow's own
+// promote/rescope vocabulary; it maps to domain.TierWorkspace underneath.
+func newMemoryMoveCmd(app *App) *cobra.Command {
+	var to string
+	cmd := &cobra.Command{
+		Use:   "move <id> --to local|team",
+		Short: "Move a workspace-scope memory's file to another tier",
+		Long: `Move a workspace-scope memory's file between tiers, keeping its id and
+scope: local (` + "`<workspace>/local/memories`" + `, this machine only, never
+committed) or team (` + "`<workspace>/memories`" + `, the team's repo). Refused for
+personal and service scope, whose home is their scope, not a tier.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			tier, err := tierFlag("memory move", to)
+			if err != nil {
+				return err
+			}
+
+			eng, err := app.Engine()
+			if err != nil {
+				return err
+			}
+			defer eng.Close()
+
+			mem, err := eng.Memories().Get(cmd.Context(), args[0])
+			if err != nil {
+				return err
+			}
+			oldPath := mem.FilePath
+
+			moved, err := eng.Memories().Move(cmd.Context(), args[0], tier)
+			if err != nil {
+				return err
+			}
+
+			if app.Printer.IsJSON() {
+				return app.Printer.JSON(map[string]any{
+					"id":       moved.ID,
+					"tier":     moved.Tier,
+					"old_path": oldPath,
+					"new_path": moved.FilePath,
+					"memory":   moved,
+				})
+			}
+			app.Printer.Line("%s -> %s", displayMemoryPath(oldPath), displayMemoryPath(moved.FilePath))
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&to, "to", "", "local|team (required)")
+	return cmd
+}
+
+// tierFlag turns `--to local|team` into the domain.Tier* constant
+// Memories().Move and Examples().Move take, for `memory move` and
+// `example move`; cmdName names the caller for the error message.
+func tierFlag(cmdName, to string) (string, error) {
+	switch to {
+	case domain.TierLocal:
+		return domain.TierLocal, nil
+	case domain.TierWorkspace, "team":
+		return domain.TierWorkspace, nil
+	case "":
+		return "", errs.New(errs.Invalid, "%s: requires --to", cmdName).
+			WithHint("pass --to local|team")
+	default:
+		return "", errs.New(errs.Invalid, "unknown tier %q", to).
+			WithHint("--to is local (this machine) or team (the workspace repo)")
+	}
+}
+
+// newMemoryCommitCmd is `sapien memory commit <id> [-m <message>]` or
+// `sapien memory commit --all`: records a workspace-tier memory's file in
+// the workspace repository with one commit, never a push.
+func newMemoryCommitCmd(app *App) *cobra.Command {
+	var message string
+	var all bool
+	cmd := &cobra.Command{
+		Use:   "commit <id> [-m <message>]",
+		Short: "Commit a workspace-tier memory's file in the workspace repository",
+		Long: `Record a workspace-tier memory's file with one commit; never pushes.
+Refused when the memory is not at the team tier, the workspace is not a git
+repository, or the file already has nothing to commit.
+
+--all commits every team-tier memory that is not committed or modified
+(untracked, or tracked with an uncommitted edit), one commit per memory,
+using the same message for each (or each memory's own default when -m is
+omitted); a memory already committed is left alone.`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			switch {
+			case all && len(args) == 1:
+				return errs.New(errs.Invalid, "memory commit: pass a memory id or --all, not both")
+			case !all && len(args) != 1:
+				return errs.New(errs.Invalid, "memory commit: requires a memory id, or --all")
+			}
+
+			eng, err := app.Engine()
+			if err != nil {
+				return err
+			}
+			defer eng.Close()
+
+			if !all {
+				return commitOneMemory(app, cmd.Context(), eng, args[0], message)
+			}
+			return commitAllMemories(app, cmd.Context(), eng, message)
+		},
+	}
+	cmd.Flags().StringVarP(&message, "message", "m", "", "commit message; default depends on whether the file was ever added to git")
+	cmd.Flags().BoolVar(&all, "all", false, "commit every team-tier memory that is not committed or modified")
+	return cmd
+}
+
+func commitOneMemory(app *App, ctx context.Context, eng engine.Engine, id, message string) error {
+	mem, err := eng.Memories().Commit(ctx, id, message)
+	if err != nil {
+		return err
+	}
+	if app.Printer.IsJSON() {
+		return app.Printer.JSON(mem)
+	}
+	app.Printer.Line("committed %s (%s)", displayMemoryPath(mem.FilePath), shipStateColumn(mem.Shipped))
+	return nil
+}
+
+// commitAllMemories is `memory commit --all`: every team-tier memory whose
+// Shipped state says it has something to commit (untracked or modified),
+// committed one at a time with the same message (id order, so output is
+// stable).
+func commitAllMemories(app *App, ctx context.Context, eng engine.Engine, message string) error {
+	mems, err := eng.Memories().List(ctx, domain.MemoryQuery{Scope: domain.ScopeWorkspace})
+	if err != nil {
+		return err
+	}
+	var ids []string
+	for _, m := range mems {
+		if m.Tier != domain.TierWorkspace {
+			continue
+		}
+		if m.Shipped == domain.ShipUntracked || m.Shipped == domain.ShipModified {
+			ids = append(ids, m.ID)
+		}
+	}
+	sort.Strings(ids)
+
+	if len(ids) == 0 {
+		if app.Printer.IsJSON() {
+			return app.Printer.JSON([]domain.Memory{})
+		}
+		app.Printer.Line("nothing to commit")
+		return nil
+	}
+
+	results := make([]*domain.Memory, 0, len(ids))
+	for _, id := range ids {
+		mem, err := eng.Memories().Commit(ctx, id, message)
+		if err != nil {
+			return err
+		}
+		results = append(results, mem)
+	}
+	if app.Printer.IsJSON() {
+		return app.Printer.JSON(results)
+	}
+	for _, mem := range results {
+		app.Printer.Line("committed %s (%s)", displayMemoryPath(mem.FilePath), shipStateColumn(mem.Shipped))
+	}
+	return nil
 }
 
 func printPromotionTarget(p *Printer, t *engine.PromotionTarget) {

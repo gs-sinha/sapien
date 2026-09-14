@@ -28,8 +28,14 @@ func FileName(id string) string {
 // (PLAN.md §34b). It mirrors memory.Locator's role for the memory domain.
 type Locator struct {
 	// WorkspaceDir is the workspace root (containing sapien.workspace.yaml).
-	// Workspace-scoped examples live under WorkspaceDir/examples.
+	// Workspace-scoped examples live under WorkspaceDir/examples (the
+	// workspace tier) or LocalDir/examples (the local tier); see PathFor.
 	WorkspaceDir string
+	// LocalDir is the workspace's local tier (<workspace>/local, PLAN §7b),
+	// mirroring memory.Locator.LocalDir. Empty means the workspace has no
+	// local tier: a workspace-scope example then always lands in
+	// WorkspaceDir/examples regardless of its Tier.
+	LocalDir string
 	// ServiceDirs maps a service name to its resolved API package directory
 	// (the "…/api" directory, PLAN §6). Service-scoped examples live under
 	// ServiceDirs[name]/examples.
@@ -44,10 +50,18 @@ type Locator struct {
 // (and, for service scope, ex.Service, which callers derive from
 // ex.Operation before calling PathFor). An empty Scope is treated as
 // workspace scope.
+//
+// For workspace scope it additionally honours ex.Tier (PLAN §7b), mirroring
+// memory.Locator.DirFor: the workspace tier (domain.TierWorkspace) is the
+// team's workspaceExamplesDir(); the local tier (domain.TierLocal, and ""
+// -- the default for a newly created workspace-scope example) is
+// localExamplesDir(). A caller that wants to keep an example in its current
+// tier across an Update must carry that tier forward itself (Store.Update
+// does, from the existing row).
 func (l Locator) PathFor(ex domain.SavedExample) (string, error) {
 	switch ex.Scope {
 	case domain.ExampleScopeWorkspace, "":
-		return filepath.Join(l.workspaceExamplesDir(), FileName(ex.ID)), nil
+		return filepath.Join(l.workspaceDirForTier(ex.Tier), FileName(ex.ID)), nil
 	case domain.ExampleScopeService:
 		dir, ok := l.ServiceDirs[ex.Service]
 		if !ok {
@@ -64,6 +78,27 @@ func (l Locator) PathFor(ex domain.SavedExample) (string, error) {
 
 func (l Locator) workspaceExamplesDir() string {
 	return filepath.Join(l.WorkspaceDir, ExamplesDir)
+}
+
+// workspaceDirForTier resolves the examples directory for scope=workspace,
+// per the tier's name: TierWorkspace is the team's workspaceExamplesDir();
+// TierLocal, and "" (the default for an example that never named a tier),
+// is this machine's localExamplesDir().
+func (l Locator) workspaceDirForTier(tier string) string {
+	if tier == domain.TierWorkspace {
+		return l.workspaceExamplesDir()
+	}
+	return l.localExamplesDir()
+}
+
+// localExamplesDir is where a local-tier example lives, or
+// workspaceExamplesDir() when the Locator was built without a local tier
+// (LocalDir == ""), mirroring memory.Locator.localMemoriesDir.
+func (l Locator) localExamplesDir() string {
+	if l.LocalDir == "" {
+		return l.workspaceExamplesDir()
+	}
+	return filepath.Join(l.LocalDir, ExamplesDir)
 }
 
 func (l Locator) serviceExamplesDir(service string) (string, bool) {
@@ -112,6 +147,14 @@ func (l Locator) files() ([]scopedFile, error) {
 			return nil, err
 		}
 	}
+	if l.LocalDir != "" {
+		// The local tier is still workspace *scope* -- Tier, derived
+		// separately (tierOfPath), is what distinguishes it; readFile's
+		// scope parameter only ever needs "workspace" or "service".
+		if err := add(filepath.Join(l.LocalDir, ExamplesDir), domain.ExampleScopeWorkspace); err != nil {
+			return nil, err
+		}
+	}
 
 	names := make([]string, 0, len(l.ServiceDirs))
 	for name := range l.ServiceDirs {
@@ -146,6 +189,33 @@ func (l Locator) scopeForPath(path string) domain.ExampleScope {
 		}
 	}
 	return domain.ExampleScopeWorkspace
+}
+
+// tierOfPath reports which tier the example file at path lives in (PLAN
+// §7b), from which known directory it falls under: LocalDir/examples ->
+// TierLocal, WorkspaceDir/examples -> TierWorkspace, a known service's
+// examples dir -> TierService. "" when path matches none of them (path is
+// empty, or names a service no longer in ServiceDirs). There is no tier
+// column in the examples table to read this back from, so it is derived
+// fresh from Path every time an example is handed to a caller: Store.Get,
+// hydrate (List/ForOperations), and Create/Update right after they resolve
+// where a write lands, mirroring memory.Locator.tierOfPath.
+func (l Locator) tierOfPath(path string) string {
+	if path == "" {
+		return ""
+	}
+	if l.LocalDir != "" && isUnder(path, filepath.Join(l.LocalDir, ExamplesDir)) {
+		return domain.TierLocal
+	}
+	if l.WorkspaceDir != "" && isUnder(path, l.workspaceExamplesDir()) {
+		return domain.TierWorkspace
+	}
+	for name := range l.ServiceDirs {
+		if dir, ok := l.serviceExamplesDir(name); ok && isUnder(path, dir) {
+			return domain.TierService
+		}
+	}
+	return ""
 }
 
 // isUnder reports whether path is dir itself or lives underneath it.

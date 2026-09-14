@@ -26,12 +26,27 @@ type exampleAPI struct{ l *Local }
 
 var _ engine.ExampleAPI = (*exampleAPI)(nil)
 
+// List returns examples matching q. Workspace-tier results carry Shipped
+// (PLAN §7b), from one read-only look at the workspace's git repository;
+// service-tier results never do. See fillExampleShipped.
 func (e *exampleAPI) List(ctx context.Context, q domain.ExampleQuery) ([]domain.SavedExample, error) {
-	return e.l.exStore.List(ctx, q)
+	out, err := e.l.exStore.List(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	e.l.fillExampleShipped(ctx, out)
+	return out, nil
 }
 
 func (e *exampleAPI) Get(ctx context.Context, id string) (*domain.SavedExample, error) {
-	return e.l.exStore.Get(ctx, id)
+	ex, err := e.l.exStore.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	list := []domain.SavedExample{*ex}
+	e.l.fillExampleShipped(ctx, list)
+	out := list[0]
+	return &out, nil
 }
 
 // Create rejects a caller-supplied Verified (only FromRun sets it),
@@ -578,11 +593,123 @@ func splitURLPath(p string) []string {
 	return strings.Split(p, "/")
 }
 
-// Move and Commit: Phase 0 stubs, filled in by the tier work.
-func (e *exampleAPI) Move(ctx context.Context, id, tier string) (*domain.SavedExample, error) {
-	return nil, errs.New(errs.NotImplemented, "moving an example between tiers is not available yet")
+// fillExampleShipped fills Shipped on every workspace-tier example in exs,
+// in place, from one read-only look at the workspace's git repository
+// (PLAN §7b) -- mirrors flowAPI's fillShipped for flows and
+// memoryAPI.fillMemoryShipped for memories. Service-tier examples are left
+// alone. Any git failure leaves every Shipped empty and is logged at
+// Debug: a listing must never fail because git did. Only runs FileStates
+// at all when at least one result is workspace tier.
+func (l *Local) fillExampleShipped(ctx context.Context, exs []domain.SavedExample) {
+	var idx []int
+	var paths []string
+	for i := range exs {
+		if exs[i].Tier != domain.TierWorkspace {
+			continue
+		}
+		idx = append(idx, i)
+		paths = append(paths, exs[i].Path)
+	}
+	if len(idx) == 0 {
+		return
+	}
+	if _, ok := l.gitMgr.RepoRoot(ctx, l.ws.Dir); !ok {
+		return
+	}
+	states, err := l.gitMgr.FileStates(ctx, l.ws.Dir, paths)
+	if err != nil {
+		l.logger.Debug("computing example ship states failed; leaving them empty", "error", err)
+		return
+	}
+	for _, i := range idx {
+		exs[i].Shipped = states[exs[i].Path]
+	}
 }
 
+// Move places a workspace-scope example's file in another tier (PLAN §7b),
+// mirroring memoryAPI.Move: service scope is refused (its single home is
+// the service's own repo), tier must be domain.TierLocal or
+// domain.TierWorkspace, and the actual move rides Update (which already
+// knows how to rewrite an example's file at a new PathFor and remove the
+// old one). Moving to the tier an example is already in is a no-op that
+// still returns the current item (with Shipped).
+func (e *exampleAPI) Move(ctx context.Context, id, tier string) (*domain.SavedExample, error) {
+	existing, err := e.l.exStore.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if existing.Scope != domain.ExampleScopeWorkspace {
+		return nil, errs.New(errs.Invalid, "only a workspace-scope example can move between tiers; %q is %s scope", id, existing.Scope).
+			WithHint("a service-scoped example has a single home in the service's own repo")
+	}
+	if tier != domain.TierLocal && tier != domain.TierWorkspace {
+		return nil, errs.New(errs.Invalid, "unknown tier %q for Move; want %s or %s", tier, domain.TierLocal, domain.TierWorkspace)
+	}
+	if existing.Tier == tier {
+		return e.Get(ctx, id)
+	}
+
+	toMove := *existing
+	toMove.Tier = tier
+	if _, err := e.Update(ctx, toMove); err != nil {
+		return nil, err
+	}
+	return e.Get(ctx, id)
+}
+
+// Commit records a workspace-tier example's file in the workspace
+// repository with one commit of that file (PLAN §7b), mirroring
+// memoryAPI.Commit and flowAPI.Commit -- see their doc comments for the
+// full rationale, reused here via shipStateNothingToCommit. Refused with
+// errs.Invalid for the service tier, a workspace not inside a git
+// repository, and a file with nothing to commit.
+//
+// Note: unlike memory.changed/flow.changed, there is currently no
+// example.changed engine event, so -- like exampleAPI.Update today --
+// Commit does not emit one; a caller that wants to learn about the commit
+// reads the returned example (its Shipped is ShipUnpushed).
 func (e *exampleAPI) Commit(ctx context.Context, id, message string) (*domain.SavedExample, error) {
-	return nil, errs.New(errs.NotImplemented, "committing an example is not available yet")
+	l := e.l
+	existing, err := l.exStore.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if existing.Tier != domain.TierWorkspace {
+		tier := existing.Tier
+		if tier == "" {
+			tier = string(existing.Scope)
+		}
+		return nil, errs.New(errs.Invalid, "only a workspace-tier example can be committed; %q is %s", id, tier).
+			WithHint("move it to the workspace tier first (`sapien example move " + id + " workspace`)")
+	}
+	if _, ok := l.gitMgr.RepoRoot(ctx, l.ws.Dir); !ok {
+		return nil, errs.New(errs.Invalid, "workspace %s is not in a git repository", l.ws.Dir)
+	}
+
+	states, err := l.gitMgr.FileStates(ctx, l.ws.Dir, []string{existing.Path})
+	if err != nil {
+		return nil, errs.Wrap(errs.Internal, err, "checking the git state of %s", existing.Path)
+	}
+	state := states[existing.Path]
+	if sentence := shipStateNothingToCommit(state); sentence != "" {
+		return nil, errs.New(errs.Invalid, "example %q has nothing to commit: %s", id, sentence)
+	}
+
+	if message == "" {
+		if state == domain.ShipUntracked {
+			message = fmt.Sprintf("Add example %s to the team workspace", id)
+		} else {
+			message = fmt.Sprintf("Update example %s", id)
+		}
+	}
+	if _, err := l.gitMgr.CommitPaths(ctx, l.ws.Dir, []string{existing.Path}, message); err != nil {
+		return nil, err
+	}
+
+	updated, err := l.exStore.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	updated.Shipped = domain.ShipUnpushed
+	return updated, nil
 }

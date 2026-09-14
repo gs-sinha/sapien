@@ -80,6 +80,7 @@ func (s *Store) Get(ctx context.Context, id string) (*domain.Memory, error) {
 	if !found {
 		return nil, errs.New(errs.MemoryNotFound, "memory %s not found", id)
 	}
+	m.Tier = s.loc.tierOfPath(m.FilePath)
 	return &m, nil
 }
 
@@ -105,6 +106,15 @@ func (s *Store) Update(ctx context.Context, m domain.Memory) (*domain.Memory, er
 	if m.Scope == "" {
 		m.Scope = existing.Scope
 	}
+	// A caller that doesn't name a tier keeps the memory where it already
+	// is (PLAN §7b): without this, an ordinary text-only Update would read
+	// as "no tier requested", which writeFileForScope/DirFor treat as the
+	// local-tier default, silently moving a workspace-tier memory back to
+	// local on every unrelated edit. Move (engine) is what sets Tier on
+	// purpose.
+	if m.Tier == "" {
+		m.Tier = existing.Tier
+	}
 	if m.Source.Kind == "" {
 		m.Source = existing.Source
 	}
@@ -129,18 +139,29 @@ func (s *Store) Update(ctx context.Context, m domain.Memory) (*domain.Memory, er
 }
 
 // writeFileForScope resolves m's file path from its (possibly just-changed)
-// scope/subject, writes its file for every scope but personal, and removes
-// oldPath if the memory moved away from it (a different path, or a move to
-// personal scope leaving no file at all).
+// scope/subject/tier, writes its file for every scope but personal, and
+// removes oldPath if the memory moved away from it (a different path, or a
+// move to personal scope leaving no file at all).
+//
+// m.Tier is re-derived from the resulting FilePath (Locator.tierOfPath)
+// rather than left as whatever the caller passed in: DirFor treats an
+// unset Tier as "local tier" for a workspace-scope memory, so this is what
+// turns that default into an explicit domain.TierLocal on the record PLAN
+// §7b promises callers ("Tier ... derived from the path when the file is
+// read") -- and it does the same for every other scope's single tier
+// (service -> TierService, a flow-owned memory -> whichever tier its flow
+// is in).
 func (s *Store) writeFileForScope(m *domain.Memory, oldPath string) error {
 	if m.Scope == domain.ScopePersonal {
 		m.FilePath = ""
+		m.Tier = ""
 	} else {
 		dir, err := s.loc.DirFor(*m)
 		if err != nil {
 			return err
 		}
 		m.FilePath = filepath.Join(dir, FileName(m.ID))
+		m.Tier = s.loc.tierOfPath(m.FilePath)
 		if err := WriteFile(*m); err != nil {
 			return err
 		}
@@ -219,6 +240,7 @@ func (s *Store) List(ctx context.Context, q domain.MemoryQuery) ([]domain.Memory
 			if err != nil {
 				return err
 			}
+			m.Tier = s.loc.tierOfPath(m.FilePath)
 			out = append(out, m)
 		}
 		return rows.Err()

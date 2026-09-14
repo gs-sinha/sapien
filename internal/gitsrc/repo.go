@@ -119,6 +119,43 @@ func (m *Manager) PullFastForward(ctx context.Context, dir string) (int, error) 
 	return n, nil
 }
 
+// PushRepo sends dir's checkout's unpushed commits to its upstream (PLAN
+// §7b): `git push --set-upstream origin <branch>` when the branch has no
+// upstream configured yet, else a plain `git push` (which -- push.default's
+// built-in "simple" -- pushes to the already-tracked upstream on its own).
+// It returns how many commits went up, read from RepoStatus.Ahead before
+// the push runs: a successful push always brings Ahead back to zero and
+// nothing else on this branch can change it in the brief window in
+// between. Never forces (no --force, ever); a push into a branch with no
+// upstream yet has no "ahead" to report (Ahead is only ever computed
+// relative to an upstream), so the returned count is 0 for that first
+// push, same as RepoStatus would show beforehand. Errors are classified
+// through gitError like every other invocation in this package, so an
+// authentication failure carries the same hint FetchRepo's would.
+func (m *Manager) PushRepo(ctx context.Context, dir string) (int, error) {
+	root, err := m.Toplevel(ctx, dir)
+	if err != nil {
+		return 0, err
+	}
+
+	status, err := m.RepoStatus(ctx, root)
+	if err != nil {
+		return 0, err
+	}
+	pushed := status.Ahead
+
+	if status.Upstream == "" {
+		if _, err := m.run(ctx, root, "push", "--set-upstream", "origin", status.Branch); err != nil {
+			return 0, err
+		}
+		return pushed, nil
+	}
+	if _, err := m.run(ctx, root, "push"); err != nil {
+		return 0, err
+	}
+	return pushed, nil
+}
+
 // isDiverged reports whether stderrOutput is `merge --ff-only`'s way of
 // saying the two branches cannot be fast-forwarded into each other.
 func isDiverged(stderrOutput string) bool {

@@ -4,6 +4,7 @@ import { examples } from '../api/client';
 import { JsonView } from '../components/JsonView';
 import { KeyValue } from '../components/KeyValue';
 import { Timestamp } from '../components/Timestamp';
+import { CommitButton, ItemTierBadge, MoveTierControl, PushButton, ShippedBadge } from '../components/tiers';
 import { YamlView } from '../components/YamlView';
 import { useAsync } from '../lib/useAsync';
 import { dumpYaml } from '../lib/yaml';
@@ -75,8 +76,16 @@ export default function ExampleDetailPage() {
 
   return (
     <div className="p-4">
-      <div className="mb-3 flex flex-wrap items-center gap-2">
+      <div className="mb-1 flex flex-wrap items-center gap-2">
         <h1 className="text-lg font-semibold">{ex.id}</h1>
+        <ItemTierBadge tier={ex.tier} />
+        {ex.tier === 'workspace' && (
+          <>
+            <ShippedBadge shipped={ex.shipped} />
+            <CommitButton id={ex.id} shipped={ex.shipped} onCommit={() => examples.commit(ex.id)} onCommitted={reload} />
+            {ex.shipped === 'unpushed' && <PushButton onPushed={reload} />}
+          </>
+        )}
         <Link
           to={`/ui/try/${encodeURIComponent(ex.operation)}?example=${encodeURIComponent(ex.id)}`}
           className="rounded border border-slate-300 px-2 py-1 text-xs dark:border-slate-700"
@@ -107,7 +116,11 @@ export default function ExampleDetailPage() {
         >
           {deleting ? 'Deleting…' : 'Delete'}
         </button>
+        <MoveTierControl tier={ex.tier} onMove={(target) => examples.move(ex.id, target)} onMoved={reload} />
       </div>
+      <p className="mb-3 text-xs text-slate-400">
+        Scope says which catalog the example is filed under; tier says where its file is: local until you move it to the team.
+      </p>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div>

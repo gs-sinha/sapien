@@ -38,6 +38,11 @@ type ExampleListItem struct {
 	Verified    bool   `json:"verified"`
 	Env         string `json:"env,omitempty"`
 	Description string `json:"description,omitempty"`
+	// Tier is where the example's file sits (PLAN §7b): local, workspace,
+	// or service. Shipped is the workspace tier's ship state; both empty
+	// for a scope this fake/engine hasn't tiered yet.
+	Tier    string `json:"tier,omitempty"`
+	Shipped string `json:"shipped,omitempty"`
 }
 
 // ListExamplesOutput is list_examples' structured output.
@@ -49,6 +54,7 @@ func exampleListItem(ex domain.SavedExample) ExampleListItem {
 	item := ExampleListItem{
 		ID: ex.ID, Operation: ex.Operation, Scope: string(ex.Scope),
 		Verified: ex.Verified != nil, Description: ex.Description,
+		Tier: ex.Tier, Shipped: ex.Shipped,
 	}
 	if ex.Verified != nil {
 		item.Env = ex.Verified.Env
@@ -79,7 +85,8 @@ func (s *server) listExamples(ctx context.Context, req *sdkmcp.CallToolRequest, 
 		if item.Verified {
 			verified = "verified/" + item.Env
 		}
-		fmt.Fprintf(&b, "- %s [%s] %s scope (%s): %s\n", ex.ID, ex.Operation, item.Scope, verified, ex.Description)
+		fmt.Fprintf(&b, "- %s [%s] %s scope (%s): %s%s\n",
+			ex.ID, ex.Operation, item.Scope, verified, ex.Description, tierShipSuffix(ex.Tier, ex.Shipped))
 	}
 	if len(out.Examples) == 0 {
 		b.WriteString("no matches\n")
@@ -189,8 +196,12 @@ func (s *server) createExample(ctx context.Context, req *sdkmcp.CallToolRequest,
 		verified = fmt.Sprintf("verified against %s (run %s)", created.Verified.Env, created.Verified.RunID)
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "created example %s for %s (%s scope, %s) in workspace %s\nstored: %s\nuse it with execute_api(example=%q) or a flow step `example: %s`\n",
-		created.ID, created.Operation, created.Scope, verified, s.workspaceName(), examplePathText(created.Path), created.ID, created.ID)
+	fmt.Fprintf(&b, "created example %s for %s (%s scope, %s) in workspace %s\nstored: %s\n",
+		created.ID, created.Operation, created.Scope, verified, s.workspaceName(), examplePathText(created.Path))
+	if line := tierLandedLine("rescope_example", created.Tier); line != "" {
+		fmt.Fprintf(&b, "%s\n", line)
+	}
+	fmt.Fprintf(&b, "use it with execute_api(example=%q) or a flow step `example: %s`\n", created.ID, created.ID)
 	return result(b.String(), out), nil, nil
 }
 
@@ -210,6 +221,10 @@ func examplePathText(path string) string {
 type RescopeExampleInput struct {
 	ID    string `json:"id" jsonschema:"example id"`
 	Scope string `json:"scope" jsonschema:"workspace|service"`
+	// Tier is applied after the scope change, via Examples().Move, so one
+	// call can both rescope and place the file in a tier (PLAN §7b).
+	// Meaningful only when the example ends up at workspace scope.
+	Tier string `json:"tier,omitempty" jsonschema:"local|workspace; optional: also move the file to this tier, after the scope change"`
 }
 
 // RescopeExampleOutput is rescope_example's structured output.
@@ -236,9 +251,18 @@ func (s *server) rescopeExample(ctx context.Context, req *sdkmcp.CallToolRequest
 		return errResult(err), nil, nil
 	}
 
-	out := RescopeExampleOutput{Example: *moved}
 	text := fmt.Sprintf("rescoped example %s to %s scope (%s -> %s)\n",
 		moved.ID, moved.Scope, examplePathText(oldPath), examplePathText(moved.Path))
+
+	if in.Tier != "" {
+		moved, err = s.engine().Examples().Move(ctx, moved.ID, in.Tier)
+		if err != nil {
+			return errResult(err), nil, nil
+		}
+		text += fmt.Sprintf("moved to the %s tier: %s\n", in.Tier, examplePathText(moved.Path))
+	}
+
+	out := RescopeExampleOutput{Example: *moved}
 	return result(text, out), nil, nil
 }
 
@@ -263,4 +287,40 @@ func (s *server) deleteExample(ctx context.Context, req *sdkmcp.CallToolRequest,
 	}
 	out := DeleteExampleOutput{ID: in.ID}
 	return result(fmt.Sprintf("deleted example %s\n", in.ID), out), nil, nil
+}
+
+// --- commit_example -----------------------------------------------------
+//
+// commit_example is commit_memory's twin for saved examples (PLAN §7b):
+// the standalone way to record a workspace-tier example's file in the
+// workspace repository over MCP. Never pushes; there is no push tool over
+// MCP, since pushing what an agent wrote is the human's call.
+
+// CommitExampleInput is commit_example's arguments.
+type CommitExampleInput struct {
+	ID string `json:"id" jsonschema:"example id; must already be at the workspace tier"`
+	// Message overrides the engine's own default.
+	Message string `json:"message,omitempty" jsonschema:"commit message; default depends on whether the file was ever added to git"`
+}
+
+// CommitExampleOutput is commit_example's structured output.
+type CommitExampleOutput struct {
+	Example domain.SavedExample `json:"example"`
+}
+
+// commitExample commits a workspace-tier example's file in the workspace
+// repository: one commit of that file, never a push. Refused by the
+// engine for any other tier, a workspace not in git, or a file with
+// nothing to commit.
+func (s *server) commitExample(ctx context.Context, req *sdkmcp.CallToolRequest, in CommitExampleInput) (*sdkmcp.CallToolResult, any, error) {
+	if _, _, denied := s.checkPermission(req.Session, classWriteExamples); denied != nil {
+		return denied, nil, nil
+	}
+	ex, err := s.engine().Examples().Commit(ctx, in.ID, in.Message)
+	if err != nil {
+		return errResult(err), nil, nil
+	}
+	out := CommitExampleOutput{Example: *ex}
+	text := fmt.Sprintf("committed %s; not pushed\n", examplePathText(ex.Path))
+	return result(text, out), nil, nil
 }

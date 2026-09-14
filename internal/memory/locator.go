@@ -41,12 +41,21 @@ type Locator struct {
 // DirFor returns the directory m's file should live in, given m.Scope (and,
 // for service/flow scopes, m.Subject). It returns "" (with a nil error) for
 // domain.ScopePersonal, meaning "no file; SQLite only".
+//
+// For domain.ScopeWorkspace it additionally honours m.Tier (PLAN §7b): the
+// workspace tier (domain.TierWorkspace) is the team's WorkspaceDir/memories;
+// the local tier (domain.TierLocal, and "" -- the default for a newly
+// created workspace-scope memory, so a memory starts out on this machine
+// only, same as a flow) is localMemoriesDir(). Callers that want to keep a
+// memory in its current tier across an Update must carry that tier forward
+// themselves (Store.Update does, from the existing row) -- DirFor has no
+// memory of where a memory used to live.
 func (l Locator) DirFor(m domain.Memory) (string, error) {
 	switch m.Scope {
 	case domain.ScopePersonal:
 		return "", nil
 	case domain.ScopeWorkspace:
-		return l.workspaceMemoriesDir(), nil
+		return l.workspaceDirForTier(m.Tier), nil
 	case domain.ScopeService:
 		return l.serviceDirForSubject(m.Subject)
 	case domain.ScopeFlow:
@@ -54,6 +63,17 @@ func (l Locator) DirFor(m domain.Memory) (string, error) {
 	default:
 		return "", errs.New(errs.Invalid, "memory: unknown scope %q", m.Scope)
 	}
+}
+
+// workspaceDirForTier resolves the memories directory for scope=workspace,
+// per the tier's name: TierWorkspace is the team's workspaceMemoriesDir();
+// TierLocal, and "" (the default for a memory that never named a tier), is
+// this machine's localMemoriesDir().
+func (l Locator) workspaceDirForTier(tier string) string {
+	if tier == domain.TierWorkspace {
+		return l.workspaceMemoriesDir()
+	}
+	return l.localMemoriesDir()
 }
 
 func (l Locator) workspaceMemoriesDir() string {
@@ -164,6 +184,50 @@ func (l Locator) Files() ([]string, error) {
 	}
 	sort.Strings(files)
 	return files, nil
+}
+
+// tierOfPath reports which tier the memory file at path lives in (PLAN
+// §7b), from which known directory it falls under: LocalDir/memories ->
+// TierLocal, WorkspaceDir/memories -> TierWorkspace, a known service's
+// memories dir -> TierService. "" when path matches none of them (path is
+// empty -- personal scope has no file -- or names a service no longer in
+// ServiceDirs). There is no tier column in the memories table to read this
+// back from, so every caller that hands a Memory to someone outside this
+// package derives it fresh, from FilePath, every time: Store.Get/List after
+// scanning a row, and writeFileForScope right after it resolves where a
+// write lands.
+//
+// This applies uniformly regardless of Scope: a flow-scoped memory's file
+// sits wherever its flow's tier put it (PLAN §7b's "Flow-scoped memories
+// keep today's owner-following placement"), and tierOfPath reports that
+// placement the same way it would for a workspace-scope memory -- Tier
+// describes where the file is, not why.
+func (l Locator) tierOfPath(path string) string {
+	if path == "" {
+		return ""
+	}
+	if l.LocalDir != "" && isUnderDir(path, filepath.Join(l.LocalDir, domain.MemoriesDir)) {
+		return domain.TierLocal
+	}
+	if l.WorkspaceDir != "" && isUnderDir(path, l.workspaceMemoriesDir()) {
+		return domain.TierWorkspace
+	}
+	for _, dir := range l.ServiceDirs {
+		if isUnderDir(path, filepath.Join(dir, domain.MemoriesDir)) {
+			return domain.TierService
+		}
+	}
+	return ""
+}
+
+// isUnderDir reports whether path is dir itself or lives underneath it.
+// Mirrors internal/example's Locator.isUnder.
+func isUnderDir(path, dir string) bool {
+	rel, err := filepath.Rel(filepath.Clean(dir), filepath.Clean(path))
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }
 
 // ReadOnlyServices, when set on a Locator, names services whose package

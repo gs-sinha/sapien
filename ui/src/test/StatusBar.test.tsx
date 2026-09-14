@@ -11,22 +11,26 @@ const getWorkspace = vi.fn(async (): Promise<Workspace> => ({ version: 1, name: 
 const repoPull = vi.fn(
   async (): Promise<RepoStatus> => ({ in_git: true, branch: 'main', behind: 0, ahead: 0, dirty: 0, pulled: true, pulled_count: 1 }),
 );
+const repoPush = vi.fn(
+  async (): Promise<RepoStatus> => ({ in_git: true, branch: 'main', behind: 0, ahead: 0, dirty: 0, pushed: true, pushed_count: 4 }),
+);
 
-// Only getWorkspace and repo.pull are overridden: StatusBar calls nothing
-// else on api/client (the repo status shown here comes straight from the
-// store, seeded elsewhere by App.tsx).
+// Only getWorkspace, repo.pull, and repo.push are overridden: StatusBar
+// calls nothing else on api/client (the repo status shown here comes
+// straight from the store, seeded elsewhere by App.tsx).
 vi.mock('../api/client', async () => {
   const actual = await vi.importActual<typeof import('../api/client')>('../api/client');
   return {
     ...actual,
     getWorkspace: () => getWorkspace(),
-    repo: { ...actual.repo, pull: () => repoPull() },
+    repo: { ...actual.repo, pull: () => repoPull(), push: () => repoPush() },
   };
 });
 
 beforeEach(() => {
   getWorkspace.mockClear();
   repoPull.mockClear().mockResolvedValue({ in_git: true, branch: 'main', behind: 0, ahead: 0, dirty: 0, pulled: true, pulled_count: 1 });
+  repoPush.mockClear().mockResolvedValue({ in_git: true, branch: 'main', behind: 0, ahead: 0, dirty: 0, pushed: true, pushed_count: 4 });
   useRepo.setState({ status: null, started: false });
   useToasts.setState({ toasts: [] });
 });
@@ -90,6 +94,32 @@ describe('StatusBar repo segment', () => {
 
     expect(container.textContent).toContain('↑4 unpushed');
     expect(screen.queryByRole('button', { name: 'Pull' })).not.toBeInTheDocument();
+  });
+
+  it('ahead with nothing behind shows a Push button, which pushes and updates the store', async () => {
+    const user = userEvent.setup();
+    useRepo.setState({ status: { in_git: true, branch: 'main', behind: 0, ahead: 4, dirty: 0 } });
+    const { container } = await renderBar();
+
+    expect(container.textContent).toContain('↑4 unpushed');
+    const pushButton = screen.getByRole('button', { name: /Push 4 commits/ });
+    expect(pushButton).toHaveAttribute('title', 'pushes every unpushed commit in the workspace repository');
+
+    await user.click(pushButton);
+
+    await waitFor(() => expect(repoPush).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(useToasts.getState().toasts.some((t) => t.kind === 'success' && t.message === 'pushed 4 commits')).toBe(true));
+    expect(useRepo.getState().status).toEqual({ in_git: true, branch: 'main', behind: 0, ahead: 0, dirty: 0, pushed: true, pushed_count: 4 });
+  });
+
+  it('ahead while also behind blocks the push with "pull first" instead of a button', async () => {
+    useRepo.setState({ status: { in_git: true, branch: 'main', behind: 2, ahead: 3, dirty: 0 } });
+    const { container } = await renderBar();
+
+    expect(container.textContent).toContain('↓2 new');
+    expect(container.textContent).toContain('↑3 unpushed');
+    expect(container.textContent).toContain('pull first');
+    expect(screen.queryByRole('button', { name: /Push/ })).not.toBeInTheDocument();
   });
 
   it('shows "fetch failed" with the error as a title, alongside any other flags', async () => {

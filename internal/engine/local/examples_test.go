@@ -77,7 +77,11 @@ func TestExamples_Create_Valid_WorkspaceScope(t *testing.T) {
 	assert.Equal(t, domain.ExampleScopeWorkspace, created.Scope)
 	assert.Equal(t, "order-service", created.Service)
 	assert.Equal(t, 1, created.Version)
-	assert.Equal(t, filepath.Join(l.ws.Dir, "examples"), filepath.Dir(created.Path))
+	// PLAN §7b: a new workspace-scope example lands in the local tier by
+	// default, same as a new memory or flow, until it is moved to the
+	// workspace tier.
+	assert.Equal(t, domain.TierLocal, created.Tier)
+	assert.Equal(t, filepath.Join(l.ws.Dir, domain.LocalDir, "examples"), filepath.Dir(created.Path))
 	assert.FileExists(t, created.Path)
 
 	got, err := l.Examples().Get(ctx, "create-qcom-order")

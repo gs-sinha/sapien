@@ -23,6 +23,8 @@ func TestLocator_PathFor(t *testing.T) {
 		WorkspaceDir: ws,
 		ServiceDirs:  map[string]string{"order-service": svcDir},
 	}
+	locWithLocal := loc
+	locWithLocal.LocalDir = filepath.Join(ws, "local")
 
 	tests := []struct {
 		name    string
@@ -69,4 +71,30 @@ func TestLocator_PathFor(t *testing.T) {
 			assert.Equal(t, tt.want, got)
 		})
 	}
+
+	// PLAN §7b: a workspace-scope example's file lives in one of two
+	// tiers, decided by Tier (mirrors memory.Locator.DirFor).
+	t.Run("workspace tier: unset Tier defaults to local when a local tier exists", func(t *testing.T) {
+		got, err := locWithLocal.PathFor(domain.SavedExample{ID: "ex1", Scope: domain.ExampleScopeWorkspace})
+		require.NoError(t, err)
+		assert.Equal(t, filepath.Join(locWithLocal.LocalDir, "examples", "ex1.example.yaml"), got)
+	})
+
+	t.Run("workspace tier: explicit TierLocal goes to the local tier", func(t *testing.T) {
+		got, err := locWithLocal.PathFor(domain.SavedExample{ID: "ex1", Scope: domain.ExampleScopeWorkspace, Tier: domain.TierLocal})
+		require.NoError(t, err)
+		assert.Equal(t, filepath.Join(locWithLocal.LocalDir, "examples", "ex1.example.yaml"), got)
+	})
+
+	t.Run("workspace tier: TierWorkspace goes to the team's examples/", func(t *testing.T) {
+		got, err := locWithLocal.PathFor(domain.SavedExample{ID: "ex1", Scope: domain.ExampleScopeWorkspace, Tier: domain.TierWorkspace})
+		require.NoError(t, err)
+		assert.Equal(t, filepath.Join(ws, "examples", "ex1.example.yaml"), got)
+	})
+
+	t.Run("workspace tier: without a local tier configured, TierLocal still resolves to workspace", func(t *testing.T) {
+		got, err := loc.PathFor(domain.SavedExample{ID: "ex1", Scope: domain.ExampleScopeWorkspace, Tier: domain.TierLocal})
+		require.NoError(t, err)
+		assert.Equal(t, filepath.Join(ws, "examples", "ex1.example.yaml"), got)
+	})
 }

@@ -44,7 +44,10 @@ func TestMemories_Create_WorkspaceScope(t *testing.T) {
 	assert.NotEmpty(t, created.ID)
 	assert.Equal(t, domain.ScopeWorkspace, created.Scope)
 	require.NotEmpty(t, created.FilePath)
-	assert.Equal(t, filepath.Join(ws.Dir, domain.MemoriesDir), filepath.Dir(created.FilePath))
+	// PLAN §7b: a new workspace-scope memory lands in the local tier by
+	// default, same as a new flow, until it is moved to the workspace tier.
+	assert.Equal(t, domain.TierLocal, created.Tier)
+	assert.Equal(t, filepath.Join(ws.Dir, domain.LocalDir, domain.MemoriesDir), filepath.Dir(created.FilePath))
 	assert.True(t, strings.HasSuffix(created.FilePath, ".md"))
 	assert.FileExists(t, created.FilePath)
 

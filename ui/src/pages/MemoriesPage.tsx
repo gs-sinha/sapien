@@ -4,6 +4,7 @@ import { memories } from '../api/client';
 import { EmptyState } from '../components/EmptyState';
 import { Table } from '../components/Table';
 import { Timestamp } from '../components/Timestamp';
+import { CommitButton, ItemTierBadge, MoveTierControl, PushButton, ShippedBadge } from '../components/tiers';
 import { useAsync } from '../lib/useAsync';
 import { subscribe } from '../state/events';
 import type { Memory, MemoryScope, MemoryType } from '../api/types';
@@ -108,6 +109,23 @@ export default function MemoriesPage() {
             },
             { key: 'type', header: 'Type', render: (m) => m.type },
             { key: 'scope', header: 'Scope', render: (m) => m.scope },
+            {
+              key: 'tier',
+              header: 'Tier',
+              render: (m) => (
+                <span className="flex flex-wrap items-center gap-1.5">
+                  <ItemTierBadge tier={m.tier} />
+                  {m.tier === 'workspace' && (
+                    <>
+                      <ShippedBadge shipped={m.shipped} />
+                      <CommitButton id={m.id} shipped={m.shipped} onCommit={() => memories.commit(m.id)} onCommitted={reload} />
+                      {m.shipped === 'unpushed' && <PushButton onPushed={reload} />}
+                    </>
+                  )}
+                  <MoveTierControl tier={m.tier} onMove={(target) => memories.move(m.id, target)} onMoved={reload} />
+                </span>
+              ),
+            },
             {
               key: 'subject',
               header: 'Subject',

@@ -168,8 +168,13 @@ func (srv *server) registerTools(s *sdkmcp.Server) {
 
 	sdkmcp.AddTool(s, &sdkmcp.Tool{
 		Name:        "rescope_memory",
-		Description: "Move a memory to another scope without losing it: service = committed in <service>/api/memories and shared with everyone who clones; workspace = local to this workspace; personal = this machine only. Scope decides storage and sharing, not subject.",
+		Description: "Move a memory to another scope without losing it: service = committed in <service>/api/memories and shared with everyone who clones; workspace = local to this workspace; personal = this machine only. Scope decides storage and sharing, not subject. With `tier` (local|workspace), also move the file to that tier after the scope change (PLAN §7b): local is this machine only, workspace is the team's repo; meaningful only once the memory is at workspace scope.",
 	}, srv.rescopeMemory)
+
+	sdkmcp.AddTool(s, &sdkmcp.Tool{
+		Name:        "commit_memory",
+		Description: "Commit a workspace-tier memory's file in the workspace repository: one commit of that file, never a push. Only when the user asked you to commit -- a memory already at the workspace tier just needs this to record it. `message` defaults to the engine's own wording. Refused when the memory is not at the workspace tier, the workspace is not a git repository, or the file already has nothing to commit.",
+	}, srv.commitMemory)
 
 	sdkmcp.AddTool(s, &sdkmcp.Tool{
 		Name:        "delete_memory",
@@ -198,8 +203,13 @@ func (srv *server) registerTools(s *sdkmcp.Server) {
 
 	sdkmcp.AddTool(s, &sdkmcp.Tool{
 		Name:        "rescope_example",
-		Description: "Move a saved example to another scope without losing it: service = committed in <service>/api/examples and shared with everyone who clones; workspace = local to this workspace.",
+		Description: "Move a saved example to another scope without losing it: service = committed in <service>/api/examples and shared with everyone who clones; workspace = local to this workspace. With `tier` (local|workspace), also move the file to that tier after the scope change (PLAN §7b): local is this machine only, workspace is the team's repo; meaningful only once the example is at workspace scope.",
 	}, srv.rescopeExample)
+
+	sdkmcp.AddTool(s, &sdkmcp.Tool{
+		Name:        "commit_example",
+		Description: "Commit a workspace-tier example's file in the workspace repository: one commit of that file, never a push. Only when the user asked you to commit -- an example already at the workspace tier just needs this to record it. `message` defaults to the engine's own wording. Refused when the example is not at the workspace tier, the workspace is not a git repository, or the file already has nothing to commit.",
+	}, srv.commitExample)
 
 	sdkmcp.AddTool(s, &sdkmcp.Tool{
 		Name:        "delete_example",

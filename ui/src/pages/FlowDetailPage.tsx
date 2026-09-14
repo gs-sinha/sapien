@@ -9,7 +9,7 @@ import { FlowDescription } from './flows/FlowDescription';
 import { FlowStepCard } from './flows/FlowStepCard';
 import { RecentRuns } from './flows/RecentRuns';
 import { RunPanel } from './flows/RunPanel';
-import { CommitButton, isFlowOwnerKind, ShippedBadge, TierBadge, tierOf } from './flows/tier';
+import { CommitButton, isFlowOwnerKind, PushButton, ShippedBadge, TierBadge, tierOf } from './flows/tier';
 import { TierControl } from './flows/TierControl';
 import { ValidatePanel } from './flows/ValidatePanel';
 import { YamlSourcePanel } from './flows/YamlSourcePanel';
@@ -205,7 +205,8 @@ export default function FlowDetailPage() {
           {hasTier && tierOf(flow.owner_kind) === 'workspace' && (
             <>
               <ShippedBadge shipped={flow.shipped} />
-              <CommitButton id={flow.id} shipped={flow.shipped} onCommitted={reload} />
+              <CommitButton id={flow.id} shipped={flow.shipped} onCommit={() => flows.commit(flow.id)} onCommitted={reload} />
+              {flow.shipped === 'unpushed' && <PushButton onPushed={reload} />}
             </>
           )}
         </div>

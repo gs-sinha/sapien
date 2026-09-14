@@ -49,12 +49,48 @@ func (s *server) searchMemories(ctx context.Context, req *sdkmcp.CallToolRequest
 func renderMemories(results []domain.ScoredMemory) string {
 	var b strings.Builder
 	for _, r := range results {
-		fmt.Fprintf(&b, "- [%s/%s] %s (score %.2f): %s\n", r.Memory.Type, r.Memory.Scope, r.Memory.ID, r.Score, r.Memory.Text)
+		fmt.Fprintf(&b, "- [%s/%s] %s (score %.2f): %s%s\n",
+			r.Memory.Type, r.Memory.Scope, r.Memory.ID, r.Score, r.Memory.Text, tierShipSuffix(r.Memory.Tier, r.Memory.Shipped))
 	}
 	if len(results) == 0 {
 		b.WriteString("no matches\n")
 	}
 	return b.String()
+}
+
+// tierShipSuffix renders the workspace tier's ship state (PLAN §7b) as a
+// short bracketed suffix on a memory or example's list/search text line:
+// "" unless the item is at the workspace tier with a ship state to
+// report -- the structured Tier/Shipped fields already ride on the
+// domain type itself, so this only adds the same information where a
+// human or agent reads the plain-text line.
+func tierShipSuffix(tier, shipped string) string {
+	if tier != domain.TierWorkspace {
+		return ""
+	}
+	if s := shipStateText(shipped); s != "" {
+		return fmt.Sprintf(" [%s]", s)
+	}
+	return ""
+}
+
+// tierLandedLine is create_memory/create_example's one-line note on which
+// tier the new file landed in (PLAN §7b), read from the created item's own
+// Tier: local is spelled out, since it is the default and the reader needs
+// to know both where the file went and how to move it up; workspace and
+// service tiers just name themselves. toolName is the rescope tool to
+// point at in the local-tier hint ("rescope_memory" or "rescope_example").
+func tierLandedLine(toolName, tier string) string {
+	switch tier {
+	case domain.TierLocal:
+		return fmt.Sprintf("local tier: this machine only; move it to the workspace tier with %s(tier=workspace) when it should reach the team", toolName)
+	case domain.TierWorkspace:
+		return "workspace tier: the team's repo"
+	case domain.TierService:
+		return "service tier"
+	default:
+		return ""
+	}
 }
 
 // --- get_relevant_memories -----------------------------------------------------
@@ -146,6 +182,9 @@ func (s *server) writeMemoryHints(ctx context.Context, b *strings.Builder, creat
 		fmt.Fprintf(b, "stored: SQLite only\n")
 	} else if created.FilePath != "" {
 		fmt.Fprintf(b, "stored: %s\n", created.FilePath)
+	}
+	if line := tierLandedLine("rescope_memory", created.Tier); line != "" {
+		fmt.Fprintf(b, "%s\n", line)
 	}
 
 	if created.Scope == domain.ScopeWorkspace {
@@ -251,6 +290,10 @@ type RescopeMemoryInput struct {
 	ID      string `json:"id" jsonschema:"memory id"`
 	Scope   string `json:"scope" jsonschema:"personal|workspace|service|flow"`
 	Service string `json:"service,omitempty" jsonschema:"service name; required for service scope when the memory has no service subject"`
+	// Tier is applied after the scope change, via Memories().Move, so one
+	// call can both rescope and place the file in a tier (PLAN §7b).
+	// Meaningful only when the memory ends up at workspace scope.
+	Tier string `json:"tier,omitempty" jsonschema:"local|workspace; optional: also move the file to this tier, after the scope change"`
 }
 
 // RescopeMemoryOutput is rescope_memory's structured output.
@@ -285,9 +328,18 @@ func (s *server) rescopeMemory(ctx context.Context, req *sdkmcp.CallToolRequest,
 		return errResult(err), nil, nil
 	}
 
-	out := RescopeMemoryOutput{Memory: *moved}
 	text := fmt.Sprintf("rescoped memory %s to %s scope (%s -> %s)\n",
 		moved.ID, moved.Scope, memoryPathOrSQLite(oldPath), memoryPathOrSQLite(moved.FilePath))
+
+	if in.Tier != "" {
+		moved, err = s.engine().Memories().Move(ctx, moved.ID, in.Tier)
+		if err != nil {
+			return errResult(err), nil, nil
+		}
+		text += fmt.Sprintf("moved to the %s tier: %s\n", in.Tier, memoryPathOrSQLite(moved.FilePath))
+	}
+
+	out := RescopeMemoryOutput{Memory: *moved}
 	return result(text, out), nil, nil
 }
 
@@ -315,4 +367,42 @@ func (s *server) deleteMemory(ctx context.Context, req *sdkmcp.CallToolRequest, 
 		return errResult(err), nil, nil
 	}
 	return result(fmt.Sprintf("deleted memory %s from workspace %s\n", in.ID, s.workspaceName()), DeleteMemoryOutput{ID: in.ID}), nil, nil
+}
+
+// --- commit_memory -----------------------------------------------------
+//
+// commit_memory is the standalone form of what a promotion to the
+// workspace tier leaves undone (PLAN §7b): moving a memory's file there
+// never commits it, and rescope_memory carries no commit option of its
+// own (unlike rescope_flow) -- this is the one way to record it in the
+// workspace repository over MCP. It never pushes; there is no push tool
+// over MCP at all, since pushing what an agent wrote is the human's call.
+
+// CommitMemoryInput is commit_memory's arguments.
+type CommitMemoryInput struct {
+	ID string `json:"id" jsonschema:"memory id; must already be at the workspace tier"`
+	// Message overrides the engine's own default.
+	Message string `json:"message,omitempty" jsonschema:"commit message; default depends on whether the file was ever added to git"`
+}
+
+// CommitMemoryOutput is commit_memory's structured output.
+type CommitMemoryOutput struct {
+	Memory domain.Memory `json:"memory"`
+}
+
+// commitMemory commits a workspace-tier memory's file in the workspace
+// repository: one commit of that file, never a push. Refused by the
+// engine for any other tier, a workspace not in git, or a file with
+// nothing to commit.
+func (s *server) commitMemory(ctx context.Context, req *sdkmcp.CallToolRequest, in CommitMemoryInput) (*sdkmcp.CallToolResult, any, error) {
+	if _, _, denied := s.checkPermission(req.Session, classWriteMemories); denied != nil {
+		return denied, nil, nil
+	}
+	mem, err := s.engine().Memories().Commit(ctx, in.ID, in.Message)
+	if err != nil {
+		return errResult(err), nil, nil
+	}
+	out := CommitMemoryOutput{Memory: *mem}
+	text := fmt.Sprintf("committed %s; not pushed\n", memoryPathOrSQLite(mem.FilePath))
+	return result(text, out), nil, nil
 }

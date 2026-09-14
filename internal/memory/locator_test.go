@@ -34,6 +34,43 @@ func TestLocator_DirFor(t *testing.T) {
 		assert.Equal(t, filepath.Join("/ws", "memories"), dir)
 	})
 
+	// PLAN §7b: a workspace-scope memory's file lives in one of two tiers.
+	// DirFor decides which from m.Tier, not from anything else.
+	t.Run("workspace tier: unset Tier defaults to local when a local tier exists", func(t *testing.T) {
+		locWithLocal := loc
+		locWithLocal.LocalDir = filepath.Join("/ws", "local")
+		dir, err := locWithLocal.DirFor(domain.Memory{Scope: domain.ScopeWorkspace})
+		require.NoError(t, err)
+		assert.Equal(t, filepath.Join("/ws", "local", "memories"), dir)
+	})
+
+	t.Run("workspace tier: explicit TierLocal goes to the local tier", func(t *testing.T) {
+		locWithLocal := loc
+		locWithLocal.LocalDir = filepath.Join("/ws", "local")
+		dir, err := locWithLocal.DirFor(domain.Memory{Scope: domain.ScopeWorkspace, Tier: domain.TierLocal})
+		require.NoError(t, err)
+		assert.Equal(t, filepath.Join("/ws", "local", "memories"), dir)
+	})
+
+	t.Run("workspace tier: TierWorkspace goes to the team's memories/", func(t *testing.T) {
+		locWithLocal := loc
+		locWithLocal.LocalDir = filepath.Join("/ws", "local")
+		dir, err := locWithLocal.DirFor(domain.Memory{Scope: domain.ScopeWorkspace, Tier: domain.TierWorkspace})
+		require.NoError(t, err)
+		assert.Equal(t, filepath.Join("/ws", "memories"), dir)
+	})
+
+	// A Locator built without a local tier (LocalDir empty) has nowhere
+	// else to put a "local" memory, so it falls back to the workspace's
+	// memories/ regardless of Tier -- mirrors flow scope's identical
+	// fallback (see the "flow scope owned by the local tier without
+	// LocalDir" case below) and localMemoriesDir's own doc comment.
+	t.Run("workspace tier: without a local tier configured, TierLocal still resolves to workspace", func(t *testing.T) {
+		dir, err := loc.DirFor(domain.Memory{Scope: domain.ScopeWorkspace, Tier: domain.TierLocal})
+		require.NoError(t, err)
+		assert.Equal(t, filepath.Join("/ws", "memories"), dir)
+	})
+
 	t.Run("service via subject.service", func(t *testing.T) {
 		dir, err := loc.DirFor(domain.Memory{Scope: domain.ScopeService, Subject: domain.Subject{Service: "rider-service"}})
 		require.NoError(t, err)

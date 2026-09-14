@@ -30,16 +30,28 @@ func LocalMemoriesDir(ws *domain.Workspace) string {
 	return filepath.Join(LocalDir(ws), domain.MemoriesDir)
 }
 
+// localExamplesDirName mirrors example.ExamplesDir ("examples"); spelled
+// out here rather than imported so this package does not need to depend on
+// internal/example just for one directory name.
+const localExamplesDirName = "examples"
+
+// LocalExamplesDir returns <ws>/local/examples, the local tier's examples
+// directory (PLAN §7b): workspace-scope examples default here, same as a
+// new memory or flow, until they are moved to the workspace tier.
+func LocalExamplesDir(ws *domain.Workspace) string {
+	return filepath.Join(LocalDir(ws), localExamplesDirName)
+}
+
 // EnsureLocalDir creates the local tier -- local/, local/flows/,
-// local/memories/ -- and makes it self-ignoring with a local/.gitignore
-// containing "*", exactly as Init does for .sapien/. The workspace is
-// usually a git repo shared with the team, and the whole point of the tier
-// is that its contents never ride a commit, so the ignore file is written
-// in the same step as the directory rather than left to the user.
-// Idempotent: an existing .gitignore is never rewritten, so a developer who
-// deliberately edited it keeps their version.
+// local/memories/, local/examples/ -- and makes it self-ignoring with a
+// local/.gitignore containing "*", exactly as Init does for .sapien/. The
+// workspace is usually a git repo shared with the team, and the whole
+// point of the tier is that its contents never ride a commit, so the
+// ignore file is written in the same step as the directory rather than
+// left to the user. Idempotent: an existing .gitignore is never rewritten,
+// so a developer who deliberately edited it keeps their version.
 func EnsureLocalDir(ws *domain.Workspace) error {
-	for _, dir := range []string{LocalDir(ws), LocalFlowsDir(ws), LocalMemoriesDir(ws)} {
+	for _, dir := range []string{LocalDir(ws), LocalFlowsDir(ws), LocalMemoriesDir(ws), LocalExamplesDir(ws)} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return errs.Wrap(errs.Internal, err, "creating %s", dir)
 		}

@@ -124,3 +124,47 @@ func (s *Server) handleExampleDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	writeNoContent(w)
 }
+
+// handleExampleMove implements POST /v1/examples/{id}/move: places a
+// workspace-scope example's file in another tier (local or workspace),
+// keeping its id and scope. A blank tier is rejected before the engine is
+// asked (moveTierRequest is declared in handlers_memories.go, shared by
+// both routes' identical body shape).
+func (s *Server) handleExampleMove(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var req moveTierRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, err)
+		return
+	}
+	if req.Tier == "" {
+		writeError(w, errs.New(errs.Invalid, "tier is required").
+			WithHint("pass tier local or workspace"))
+		return
+	}
+	out, err := engineFrom(r.Context()).Examples().Move(r.Context(), id, req.Tier)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// handleExampleCommit implements POST /v1/examples/{id}/commit: records a
+// workspace-tier example's file in the workspace repository with one
+// commit, never a push (commitMessageRequest is declared in
+// handlers_memories.go, shared by both routes' identical body shape).
+func (s *Server) handleExampleCommit(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var req commitMessageRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, err)
+		return
+	}
+	out, err := engineFrom(r.Context()).Examples().Commit(r.Context(), id, req.Message)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}

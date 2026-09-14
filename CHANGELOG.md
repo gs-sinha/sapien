@@ -56,6 +56,21 @@ and phase numbers refer to PLAN.md §34's roadmap.
   repository: fetch, then pull when clean and behind, otherwise say why
   not. `sapien workspace status` and `GET /v1/workspace/repo` report it.
   Never a push.
+- **Memories and examples climb the same ladder as flows.** A
+  workspace-scope memory or example lives in the local tier
+  (`local/memories`, `local/examples`, this machine only, the default for
+  a new one) until it is moved to the team's `memories/` or `examples/`
+  (`sapien memory move <id> --to team`, `sapien example move`, the rescope
+  tools with `tier`, a button on the pages). A workspace-tier file shows
+  whether it is not committed, modified, not pushed or shipped, and can be
+  committed on its own (`memory commit`, `example commit`, `commit_memory`,
+  `commit_example`, the Commit button). Personal memories have no tier.
+- **Push from the product.** `sapien workspace push`, `POST
+  /v1/workspace/repo/push`, and a Push button beside any "not pushed"
+  badge and in the status bar send the workspace repository's unpushed
+  commits to its upstream: never forced, refused when the branch is
+  behind, only the workspace repository. Sapien still never pushes on its
+  own; this is the human's click.
 - **The Agent tab offers only writable directories.** The workspace, each
   service this machine reads from a local checkout (a bound service at its
   checkout), and home. A service still read from its team git source no

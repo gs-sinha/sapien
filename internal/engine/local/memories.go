@@ -2,6 +2,7 @@ package local
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
 
@@ -29,7 +30,14 @@ func (m *memoryAPI) Create(ctx context.Context, mem domain.Memory) (*domain.Memo
 }
 
 func (m *memoryAPI) Get(ctx context.Context, id string) (*domain.Memory, error) {
-	return m.l.memStore.Get(ctx, id)
+	mem, err := m.l.memStore.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	list := []domain.Memory{*mem}
+	m.l.fillMemoryShipped(ctx, list)
+	out := list[0]
+	return &out, nil
 }
 
 func (m *memoryAPI) Update(ctx context.Context, mem domain.Memory) (*domain.Memory, error) {
@@ -71,12 +79,34 @@ func (m *memoryAPI) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
+// List returns memories matching q. Workspace-tier results carry Shipped
+// (PLAN §7b), from one read-only look at the workspace's git repository;
+// other tiers, and personal (no file), never do. See fillMemoryShipped.
 func (m *memoryAPI) List(ctx context.Context, q domain.MemoryQuery) ([]domain.Memory, error) {
-	return m.l.memStore.List(ctx, q)
+	out, err := m.l.memStore.List(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	m.l.fillMemoryShipped(ctx, out)
+	return out, nil
 }
 
+// Search is List's counterpart for retrieval: the same Shipped fill,
+// applied to the memory embedded in each result.
 func (m *memoryAPI) Search(ctx context.Context, q domain.MemoryQuery) ([]domain.ScoredMemory, error) {
-	return m.l.memStore.Search(ctx, q)
+	out, err := m.l.memStore.Search(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	mems := make([]domain.Memory, len(out))
+	for i := range out {
+		mems[i] = out[i].Memory
+	}
+	m.l.fillMemoryShipped(ctx, mems)
+	for i := range out {
+		out[i].Memory = mems[i]
+	}
+	return out, nil
 }
 
 func (m *memoryAPI) Relevant(ctx context.Context, subjects []domain.Subject, limit int) ([]domain.ScoredMemory, error) {
@@ -356,11 +386,133 @@ func slugFirstWords(text string, n int) string {
 	return slug
 }
 
-// Move and Commit: Phase 0 stubs, filled in by the tier work.
-func (m *memoryAPI) Move(ctx context.Context, id, tier string) (*domain.Memory, error) {
-	return nil, errs.New(errs.NotImplemented, "moving a memory between tiers is not available yet")
+// fillMemoryShipped fills Shipped on every workspace-tier memory in mems,
+// in place, from one read-only look at the workspace's git repository
+// (PLAN §7b) -- mirrors flowAPI's fillShipped for flows. Local-, service-,
+// and (for a flow-scoped memory) any other tier are left alone, and so is
+// personal scope, which has no file at all. Any git failure -- the
+// workspace is not a git repository, git itself is unavailable, a
+// transient error -- leaves every Shipped empty and is logged at Debug: a
+// memory listing must never fail because git did. Only runs FileStates at
+// all when at least one result is workspace tier, so a plain personal- or
+// service-scope lookup never pays for a git call.
+func (l *Local) fillMemoryShipped(ctx context.Context, mems []domain.Memory) {
+	var idx []int
+	var paths []string
+	for i := range mems {
+		if mems[i].Tier != domain.TierWorkspace {
+			continue
+		}
+		idx = append(idx, i)
+		paths = append(paths, mems[i].FilePath)
+	}
+	if len(idx) == 0 {
+		return
+	}
+	if _, ok := l.gitMgr.RepoRoot(ctx, l.ws.Dir); !ok {
+		return
+	}
+	states, err := l.gitMgr.FileStates(ctx, l.ws.Dir, paths)
+	if err != nil {
+		l.logger.Debug("computing memory ship states failed; leaving them empty", "error", err)
+		return
+	}
+	for _, i := range idx {
+		mems[i].Shipped = states[mems[i].FilePath]
+	}
 }
 
+// Move places a workspace-scope memory's file in another tier (PLAN §7b):
+// workspace scope only (personal has no file; service and flow scope each
+// have exactly one tier already, so "move" doesn't apply to them -- a
+// flow-scoped memory follows its flow instead). tier must be
+// domain.TierLocal or domain.TierWorkspace.
+//
+// It delegates the actual move to Update (setting Tier on a copy of the
+// existing memory): that is the one place a memory's file is written
+// (writeFileForScope), so Move gets the same rewrite-in-the-new-place,
+// remove-the-old-one behavior, the same memory.changed event and semantic
+// reindex, for free, exactly as the tier work asks ("emit memory.changed
+// ... as Update does"). Moving to the tier a memory is already in is a
+// no-op that still returns the current item (with Shipped).
+func (m *memoryAPI) Move(ctx context.Context, id, tier string) (*domain.Memory, error) {
+	existing, err := m.l.memStore.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if existing.Scope != domain.ScopeWorkspace {
+		return nil, errs.New(errs.Invalid, "only a workspace-scope memory can move between tiers; %q is %s scope", id, existing.Scope).
+			WithHint("a personal memory has no file, a service memory belongs to its service, and a flow-scoped memory moves with its flow")
+	}
+	if tier != domain.TierLocal && tier != domain.TierWorkspace {
+		return nil, errs.New(errs.Invalid, "unknown tier %q for Move; want %s or %s", tier, domain.TierLocal, domain.TierWorkspace)
+	}
+	if existing.Tier == tier {
+		return m.Get(ctx, id)
+	}
+
+	toMove := *existing
+	toMove.Tier = tier
+	if _, err := m.Update(ctx, toMove); err != nil {
+		return nil, err
+	}
+	return m.Get(ctx, id)
+}
+
+// Commit records a workspace-tier memory's file in the workspace
+// repository with one commit of that file (PLAN §7b), mirroring
+// flowAPI.Commit (see its doc comment for the full rationale) and reusing
+// its shipStateNothingToCommit/default-message logic. Applies to any
+// memory whose file happens to sit in the workspace tier, regardless of
+// Scope -- a flow-scoped memory whose flow was promoted is exactly as
+// committable standalone as the flow itself is. Refused with errs.Invalid
+// for every other tier (including personal, which has no file at all), a
+// workspace not inside a git repository, and a file with nothing to commit
+// (FileStates already says unpushed or shipped -- Sapien never pushes, so
+// there is nothing left for a commit to do).
 func (m *memoryAPI) Commit(ctx context.Context, id, message string) (*domain.Memory, error) {
-	return nil, errs.New(errs.NotImplemented, "committing a memory is not available yet")
+	l := m.l
+	existing, err := l.memStore.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if existing.Tier != domain.TierWorkspace {
+		tier := existing.Tier
+		if tier == "" {
+			tier = "personal (no file)"
+		}
+		return nil, errs.New(errs.Invalid, "only a workspace-tier memory can be committed; %q is %s", id, tier).
+			WithHint("move it to the workspace tier first (`sapien memory move " + id + " workspace`), or promote its flow if it is flow-scoped")
+	}
+	if _, ok := l.gitMgr.RepoRoot(ctx, l.ws.Dir); !ok {
+		return nil, errs.New(errs.Invalid, "workspace %s is not in a git repository", l.ws.Dir)
+	}
+
+	states, err := l.gitMgr.FileStates(ctx, l.ws.Dir, []string{existing.FilePath})
+	if err != nil {
+		return nil, errs.Wrap(errs.Internal, err, "checking the git state of %s", existing.FilePath)
+	}
+	state := states[existing.FilePath]
+	if sentence := shipStateNothingToCommit(state); sentence != "" {
+		return nil, errs.New(errs.Invalid, "memory %q has nothing to commit: %s", id, sentence)
+	}
+
+	if message == "" {
+		if state == domain.ShipUntracked {
+			message = fmt.Sprintf("Add memory %s to the team workspace", id)
+		} else {
+			message = fmt.Sprintf("Update memory %s", id)
+		}
+	}
+	if _, err := l.gitMgr.CommitPaths(ctx, l.ws.Dir, []string{existing.FilePath}, message); err != nil {
+		return nil, err
+	}
+
+	updated, err := l.memStore.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	updated.Shipped = domain.ShipUnpushed
+	l.emit(domain.EventMemoryChanged, *updated)
+	return updated, nil
 }

@@ -243,7 +243,49 @@ func (l *Local) setRepoFetchError(err error) {
 	l.repoFetchErr = ""
 }
 
-// Push: Phase 0 stub, filled in by the repository work.
+// Push sends the workspace repository's unpushed commits to its upstream
+// (PLAN §7b): the one place Sapien pushes anywhere, and only on request,
+// only this repository. Refused (errs.Invalid) when the workspace is not a
+// git repository; refused (errs.Conflict) when the branch is behind --
+// gitsrc.PushRepo never forces, so a behind branch must be pulled first,
+// same message the UI shows; a no-op success (status unchanged, no git
+// call at all) when there is nothing ahead. Otherwise gitsrc.PushRepo runs
+// the push, a fresh Status carries Pushed/PushedCount, and
+// EventWorkspaceRepo is emitted, mirroring Fetch/Pull/Sync. A push failure
+// (an auth problem, a diverged remote someone force-pushed) is returned as
+// gitsrc's own classified error, whose hint already covers the common
+// cases.
 func (r *repoAPI) Push(ctx context.Context) (*domain.RepoStatus, error) {
-	return nil, errs.New(errs.NotImplemented, "pushing the workspace repository is not available yet")
+	l := r.l
+	status, err := l.gitMgr.RepoStatus(ctx, l.ws.Dir)
+	if err != nil {
+		return nil, err
+	}
+	status.FetchError = l.repoFetchError()
+
+	if !status.InGit {
+		return nil, errs.New(errs.Invalid, "not a git repository")
+	}
+	if status.Behind > 0 {
+		return nil, errs.New(errs.Conflict, "branch is behind its upstream by %d commits; pull first", status.Behind).
+			WithDetail("behind", status.Behind)
+	}
+	if status.Ahead == 0 {
+		return status, nil
+	}
+
+	count, err := l.gitMgr.PushRepo(ctx, l.ws.Dir)
+	if err != nil {
+		return nil, err
+	}
+
+	final, err := l.gitMgr.RepoStatus(ctx, l.ws.Dir)
+	if err != nil {
+		return nil, err
+	}
+	final.FetchError = l.repoFetchError()
+	final.Pushed = true
+	final.PushedCount = count
+	l.emit(domain.EventWorkspaceRepo, final)
+	return final, nil
 }

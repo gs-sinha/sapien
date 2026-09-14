@@ -1,14 +1,36 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import ExamplesPage from '../pages/ExamplesPage';
-import type { SavedExample } from '../api/types';
+import { useRepo } from '../state/repo';
+import { useToasts } from '../state/toast';
+import type { RepoStatus, SavedExample } from '../api/types';
 
 const examplesList = vi.fn();
+const examplesMove = vi.fn(async (id: string, tier: 'local' | 'workspace'): Promise<SavedExample> => ({
+  ...orderExample,
+  id,
+  tier,
+}));
+const examplesCommit = vi.fn(async (id: string, _message?: string): Promise<SavedExample> => ({
+  ...orderExample,
+  id,
+  tier: 'workspace',
+  shipped: 'unpushed',
+}));
+const repoPush = vi.fn(
+  async (): Promise<RepoStatus> => ({ in_git: true, branch: 'main', behind: 0, ahead: 0, dirty: 0, pushed: true, pushed_count: 1 }),
+);
 
 vi.mock('../api/client', () => ({
   examples: {
     list: (...a: unknown[]) => examplesList(...a),
+    move: (id: string, tier: 'local' | 'workspace') => examplesMove(id, tier),
+    commit: (id: string, message?: string) => examplesCommit(id, message),
+  },
+  repo: {
+    push: () => repoPush(),
   },
 }));
 
@@ -37,7 +59,14 @@ const billingExample: SavedExample = {
 
 beforeEach(() => {
   examplesList.mockReset().mockResolvedValue([orderExample, billingExample]);
+  examplesMove.mockClear();
+  examplesCommit.mockClear();
+  repoPush.mockClear();
+  useToasts.setState({ toasts: [] });
+  useRepo.setState({ status: null, started: false });
 });
+
+const rowOf = (id: string) => screen.getByRole('link', { name: id }).closest('tr')!;
 
 describe('ExamplesPage', () => {
   it('lists saved examples', async () => {
@@ -103,5 +132,69 @@ describe('ExamplesPage', () => {
     fireEvent.change(screen.getByPlaceholderText('search text'), { target: { value: 'nothing-matches-this' } });
 
     await waitFor(() => expect(screen.getByText(/no examples match these filters/i)).toBeInTheDocument());
+  });
+
+  it('shows the tier column: blank when absent, badges + Commit + move for a workspace-tier row', async () => {
+    const user = userEvent.setup();
+    examplesList.mockResolvedValueOnce([
+      orderExample, // no tier at all
+      { ...billingExample, id: 'ex-local', tier: 'local' },
+      { ...billingExample, id: 'ex-untracked', tier: 'workspace', shipped: 'untracked' },
+    ]);
+    render(
+      <MemoryRouter>
+        <ExamplesPage />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getByText('ex-local')).toBeInTheDocument());
+
+    expect(rowOf('order-happy-path')).not.toHaveTextContent('local');
+    expect(within(rowOf('order-happy-path')).queryByRole('button', { name: /Move to/ })).not.toBeInTheDocument();
+
+    expect(rowOf('ex-local')).toHaveTextContent('local');
+    expect(within(rowOf('ex-local')).getByRole('button', { name: 'Move to team' })).toBeInTheDocument();
+
+    expect(rowOf('ex-untracked')).toHaveTextContent('team');
+    expect(rowOf('ex-untracked')).toHaveTextContent('not committed');
+    const commitButton = within(rowOf('ex-untracked')).getByRole('button', { name: 'Commit' });
+
+    examplesList.mockResolvedValueOnce([{ ...billingExample, id: 'ex-untracked', tier: 'workspace', shipped: 'unpushed' }]);
+    await user.click(commitButton);
+
+    await waitFor(() => expect(examplesCommit).toHaveBeenCalledWith('ex-untracked', undefined));
+    await waitFor(() => expect(screen.getByText('committed, not pushed')).toBeInTheDocument());
+  });
+
+  it('shows a Push button only for an unpushed row, and moving calls examples.move', async () => {
+    const user = userEvent.setup();
+    useRepo.setState({ status: { in_git: true, branch: 'main', behind: 0, ahead: 1, dirty: 0 } });
+    examplesList.mockResolvedValueOnce([
+      { ...billingExample, id: 'ex-unpushed', tier: 'workspace', shipped: 'unpushed' },
+      { ...billingExample, id: 'ex-shipped', tier: 'workspace', shipped: 'shipped' },
+    ]);
+    render(
+      <MemoryRouter>
+        <ExamplesPage />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getByText('ex-unpushed')).toBeInTheDocument());
+
+    const pushButton = within(rowOf('ex-unpushed')).getByRole('button', { name: /Push 1 commits/ });
+    expect(within(rowOf('ex-shipped')).queryByRole('button', { name: /Push/ })).not.toBeInTheDocument();
+
+    // Pushing reloads the list (onPushed); it comes back with ex-unpushed
+    // now shipped too, so the next assertions still find both rows.
+    examplesList.mockResolvedValueOnce([
+      { ...billingExample, id: 'ex-unpushed', tier: 'workspace', shipped: 'shipped' },
+      { ...billingExample, id: 'ex-shipped', tier: 'workspace', shipped: 'shipped' },
+    ]);
+    await user.click(pushButton);
+    await waitFor(() => expect(repoPush).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(useToasts.getState().toasts.some((t) => t.kind === 'success' && t.message === 'pushed 1 commits')).toBe(true),
+    );
+
+    await user.click(within(rowOf('ex-shipped')).getByRole('button', { name: 'Move to local' }));
+    await waitFor(() => expect(examplesMove).toHaveBeenCalledWith('ex-shipped', 'local'));
   });
 });

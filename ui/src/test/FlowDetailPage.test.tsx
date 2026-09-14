@@ -4,8 +4,9 @@ import { MemoryRouter, Route, Routes, useParams } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import FlowDetailPage from '../pages/FlowDetailPage';
 import { useEvents } from '../state/events';
+import { useRepo } from '../state/repo';
 import { useToasts } from '../state/toast';
-import type { Environment, FlowSummary, Operation, Run, Service } from '../api/types';
+import type { Environment, FlowSummary, Operation, RepoStatus, Run, Service } from '../api/types';
 
 const stageEnv: Environment = { version: 1, name: 'stage', production: false };
 const prodEnv: Environment = { version: 1, name: 'prod', production: true };
@@ -94,6 +95,9 @@ const qcomBound: Service = {
 };
 const environmentsList = vi.fn(async (): Promise<Environment[]> => [stageEnv]);
 const environmentsGetDefault = vi.fn(async () => ({ name: 'stage' }));
+const repoPush = vi.fn(
+  async (): Promise<RepoStatus> => ({ in_git: true, branch: 'main', behind: 0, ahead: 0, dirty: 0, pushed: true, pushed_count: 3 }),
+);
 const runsRunSource = vi.fn(
   async (_req: { yaml: string; opts: unknown }): Promise<Run> => ({
     id: 'run_1',
@@ -137,6 +141,9 @@ vi.mock('../api/client', () => ({
     list: vi.fn(async () => []),
     runSource: (req: { yaml: string; opts: unknown }) => runsRunSource(req),
   },
+  repo: {
+    push: () => repoPush(),
+  },
 }));
 
 function RunStub() {
@@ -158,6 +165,7 @@ function renderPage() {
 beforeEach(() => {
   sessionStorage.clear();
   useToasts.setState({ toasts: [] });
+  useRepo.setState({ status: null, started: false });
 });
 
 afterEach(() => {
@@ -174,6 +182,7 @@ afterEach(() => {
   servicesList.mockImplementation(async () => []);
   runsRunSource.mockClear();
   flowsRun.mockClear();
+  repoPush.mockClear();
 });
 
 function flowAtTier(ownerKind: string, ownerId?: string) {
@@ -502,6 +511,42 @@ describe('FlowDetailPage', () => {
     await waitFor(() => expect(screen.getByText('committed, not pushed')).toBeInTheDocument());
     expect(screen.queryByRole('button', { name: 'Commit' })).not.toBeInTheDocument();
     expect(useToasts.getState().toasts.some((t) => t.kind === 'success' && t.message === 'committed qcom-order; not pushed')).toBe(true);
+  });
+
+  it('shows a header Push button once the flow is unpushed, wired to repo.push and the repo store', async () => {
+    const user = userEvent.setup();
+    useRepo.setState({ status: { in_git: true, branch: 'main', behind: 0, ahead: 3, dirty: 0 } });
+    flowsList.mockImplementationOnce(
+      async (): Promise<FlowSummary[]> => [
+        { id: 'qcom-order', path: 'flows/qcom-order.flow.yaml', owner_kind: 'workspace', step_count: 1, hash: 'h', updated: '2026-01-01T00:00:00Z', shipped: 'unpushed' },
+      ],
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByText('QCOM order')).toBeInTheDocument());
+
+    const pushButton = await screen.findByRole('button', { name: /Push 3 commits/ });
+    expect(pushButton).toHaveAttribute('title', 'pushes every unpushed commit in the workspace repository');
+
+    await user.click(pushButton);
+
+    await waitFor(() => expect(repoPush).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(useToasts.getState().toasts.some((t) => t.kind === 'success' && t.message === 'pushed 3 commits')).toBe(true),
+    );
+    expect(useRepo.getState().status?.ahead).toBe(0);
+  });
+
+  it('shows no Push button for a shipped flow', async () => {
+    flowsList.mockImplementationOnce(
+      async (): Promise<FlowSummary[]> => [
+        { id: 'qcom-order', path: 'flows/qcom-order.flow.yaml', owner_kind: 'workspace', step_count: 1, hash: 'h', updated: '2026-01-01T00:00:00Z', shipped: 'shipped' },
+      ],
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByText('QCOM order')).toBeInTheDocument());
+
+    expect(await screen.findByText('shipped')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Push/ })).not.toBeInTheDocument();
   });
 
   it('shows no Commit button once a flow is already shipped or merely unpushed', async () => {

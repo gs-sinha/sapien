@@ -613,7 +613,14 @@ func TestAcceptance_PRDSuccessScenario(t *testing.T) {
 	assert.Equal(t, runID, created.Example.Verified.RunID)
 	require.NotNil(t, created.Example.Expect)
 	assert.Equal(t, 201, created.Example.Expect.Status)
+	// A new example lands in this machine's tier (PLAN §7b); moving it to
+	// the team's examples/ is an explicit step, like promoting a flow.
+	assert.Equal(t, domain.TierLocal, created.Example.Tier)
+	assert.FileExists(t, filepath.Join(ws.Dir, domain.LocalDir, "examples", "qcom-order.example.yaml"))
+	res = callTool(t, cs, "rescope_example", map[string]any{"id": "qcom-order", "scope": "workspace", "tier": "workspace"})
+	require.False(t, res.IsError, firstText(res))
 	assert.FileExists(t, filepath.Join(ws.Dir, "examples", "qcom-order.example.yaml"))
+	assert.NoFileExists(t, filepath.Join(ws.Dir, domain.LocalDir, "examples", "qcom-order.example.yaml"))
 
 	// 16. list_examples(operation) and get_api(fields) both surface it.
 	res = callTool(t, cs, "list_examples", map[string]any{"operation": "order-service.createOrder"})

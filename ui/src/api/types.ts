@@ -530,6 +530,17 @@ export type MemoryScope = 'personal' | 'workspace' | 'service' | 'flow';
 
 export type MemoryStatus = 'active' | 'promoted' | 'superseded' | 'deprecated' | 'disputed';
 
+/**
+ * The local -> committed -> pushed tier a workspace-scope memory's or saved
+ * example's file lives at: local (this machine, the default for a new
+ * workspace-scope item), workspace (the team repo), or service. Structurally
+ * the same ladder as FlowOwnerKind, but kept as its own alias since `Tier`
+ * already names the context bundle's tier further below, and the wire field
+ * here is `tier`, not `owner_kind`. Absent on a personal-scope memory, which
+ * has no file to tier at all.
+ */
+export type ItemTier = 'local' | 'workspace' | 'service';
+
 export interface ErrorRef {
   operation?: string;
   status?: number;
@@ -580,6 +591,11 @@ export interface Memory {
   text: string;
   file_path?: string;
   hash?: string;
+  /** Absent for personal-scope memories, which have no file to tier. */
+  tier?: ItemTier;
+  /** Only for tier === 'workspace'; absent for local/service tiers, a
+   * personal memory, or when the workspace isn't in git. */
+  shipped?: ShipStatus;
 }
 
 export interface MemoryQueryParams {
@@ -632,6 +648,12 @@ export interface SavedExample {
   created: string;
   updated: string;
   path?: string;
+  /** Absent for a service-scope example filed under the service's own repo
+   * from the start (no local/workspace tiering applies to it). */
+  tier?: ItemTier;
+  /** Only for tier === 'workspace'; absent otherwise or when the workspace
+   * isn't in git. */
+  shipped?: ShipStatus;
 }
 
 // RequestExample is the daemon's answer to "what does a call to this
@@ -889,6 +911,10 @@ export interface RepoStatus {
   pulled_count?: number;
   /** Why /sync didn't pull despite being behind (e.g. a dirty tree). */
   skipped?: string;
+  /** Set by /push: whether it actually pushed. 409s ("pull first") when the
+   * branch is behind; 400 when the workspace isn't a git checkout. */
+  pushed?: boolean;
+  pushed_count?: number;
 }
 
 // ---- engine.go wire shapes (internal/server/wire.go, internal/engine/engine.go) ----

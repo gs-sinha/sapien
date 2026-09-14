@@ -255,6 +255,98 @@ func TestServicesSync_All_PullsCleanBehindWorkspaceRepo(t *testing.T) {
 	require.NotNil(t, row, "Sync all should have pulled the workspace repository too")
 }
 
+// TestRepo_Push_SendsCommitAndReportsPushed: after a local commit, Push
+// reports Pushed with the right count, and the bare origin actually has
+// the commit.
+func TestRepo_Push_SendsCommitAndReportsPushed(t *testing.T) {
+	ws, env, bareDir := setupGitWorkspace(t)
+	l, err := Open(ws, Options{})
+	require.NoError(t, err)
+	defer l.Close()
+	ctx := context.Background()
+
+	created, err := l.Memories().Create(ctx, qcomMemory())
+	require.NoError(t, err)
+	_, err = l.Memories().Move(ctx, created.ID, domain.TierWorkspace)
+	require.NoError(t, err)
+	_, err = l.Memories().Commit(ctx, created.ID, "")
+	require.NoError(t, err)
+
+	ch, cancel := l.Events().Subscribe(ctx)
+	defer cancel()
+
+	status, err := l.Repo().Push(ctx)
+	require.NoError(t, err)
+	assert.True(t, status.Pushed)
+	assert.Equal(t, 1, status.PushedCount)
+	assert.Zero(t, status.Ahead)
+
+	select {
+	case ev := <-ch:
+		require.Equal(t, domain.EventWorkspaceRepo, ev.Type)
+		payload, ok := ev.Payload.(*domain.RepoStatus)
+		require.True(t, ok, "payload should be a *domain.RepoStatus")
+		assert.True(t, payload.Pushed)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for a workspace.repo event")
+	}
+
+	// The bare origin actually received it.
+	verify := t.TempDir()
+	runGit(t, "", env, "clone", bareDir, verify)
+	assert.Equal(t, runGit(t, ws.Dir, env, "rev-parse", "HEAD"), runGit(t, verify, env, "rev-parse", "HEAD"))
+}
+
+// TestRepo_Push_BehindRefused: a branch behind its upstream cannot be
+// pushed -- a pull must come first -- and the message names how far behind.
+func TestRepo_Push_BehindRefused(t *testing.T) {
+	ws, env, bareDir := setupGitWorkspace(t)
+	l, err := Open(ws, Options{})
+	require.NoError(t, err)
+	defer l.Close()
+	ctx := context.Background()
+
+	pushTeammateFlow(t, bareDir, env, "teammate-flow")
+	_, err = l.Repo().Fetch(ctx)
+	require.NoError(t, err)
+
+	_, err = l.Repo().Push(ctx)
+	require.Error(t, err)
+	assert.Equal(t, errs.Conflict, errs.CodeOf(err))
+	assert.Contains(t, err.Error(), "behind its upstream by 1 commits")
+}
+
+// TestRepo_Push_NothingAheadIsNoOp: nothing to push is success, not an
+// error -- Pushed stays false and no git push is even attempted (nothing
+// here checks that directly, but a no-op push must never fail against a
+// repository with no commits to send).
+func TestRepo_Push_NothingAheadIsNoOp(t *testing.T) {
+	ws, _, _ := setupGitWorkspace(t)
+	l, err := Open(ws, Options{})
+	require.NoError(t, err)
+	defer l.Close()
+	ctx := context.Background()
+
+	status, err := l.Repo().Push(ctx)
+	require.NoError(t, err)
+	assert.False(t, status.Pushed)
+	assert.Zero(t, status.PushedCount)
+}
+
+// TestRepo_Push_NotInGitRefused: a workspace that is not a git repository
+// at all cannot be pushed.
+func TestRepo_Push_NotInGitRefused(t *testing.T) {
+	ws, _ := setupWorkspace(t) // a plain temp dir, never `git init`ed
+	l, err := Open(ws, Options{})
+	require.NoError(t, err)
+	defer l.Close()
+	ctx := context.Background()
+
+	_, err = l.Repo().Push(ctx)
+	require.Error(t, err)
+	assert.Equal(t, errs.Invalid, errs.CodeOf(err))
+}
+
 // TestRepo_Watch_PeriodicFetchShowsBehind: the daemon's git tick fetches
 // the workspace repository on its own, same as it already does for
 // git-sourced services (see git_test.go's TestGitService_Watch_...), and

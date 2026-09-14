@@ -4,6 +4,7 @@ import { examples } from '../api/client';
 import { EmptyState } from '../components/EmptyState';
 import { Table } from '../components/Table';
 import { Timestamp } from '../components/Timestamp';
+import { CommitButton, ItemTierBadge, MoveTierControl, PushButton, ShippedBadge } from '../components/tiers';
 import { useAsync } from '../lib/useAsync';
 import type { ExampleQueryParams, SavedExample } from '../api/types';
 
@@ -70,6 +71,23 @@ export default function ExamplesPage() {
             },
             { key: 'operation', header: 'Operation', render: (e) => <span className="font-mono text-xs">{e.operation}</span> },
             { key: 'scope', header: 'Scope', render: (e) => e.scope },
+            {
+              key: 'tier',
+              header: 'Tier',
+              render: (e) => (
+                <span className="flex flex-wrap items-center gap-1.5">
+                  <ItemTierBadge tier={e.tier} />
+                  {e.tier === 'workspace' && (
+                    <>
+                      <ShippedBadge shipped={e.shipped} />
+                      <CommitButton id={e.id} shipped={e.shipped} onCommit={() => examples.commit(e.id)} onCommitted={reload} />
+                      {e.shipped === 'unpushed' && <PushButton onPushed={reload} />}
+                    </>
+                  )}
+                  <MoveTierControl tier={e.tier} onMove={(target) => examples.move(e.id, target)} onMoved={reload} />
+                </span>
+              ),
+            },
             { key: 'verified', header: 'Verified env', render: (e) => (e.verified ? e.verified.env || 'yes' : 'draft') },
             { key: 'description', header: 'Description', render: (e) => e.description || '-' },
             { key: 'updated', header: 'Updated', render: (e) => <Timestamp value={e.updated} /> },
