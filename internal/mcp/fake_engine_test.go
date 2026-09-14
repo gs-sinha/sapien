@@ -1249,3 +1249,44 @@ func fakeTierPath(kind, ownerID, rel string) string {
 		return filepath.ToSlash(filepath.Join(domain.FlowsDir, rel))
 	}
 }
+
+func (a fakeServices) BindWith(ctx context.Context, name, path string, opts engine.BindOptions) (*domain.Service, error) {
+	if name == "" {
+		a.st.mu.Lock()
+		for _, s := range a.st.services {
+			if s.Binding != nil && s.Binding.Local != nil && s.Binding.Local.Path == path {
+				name = s.Name
+				break
+			}
+		}
+		a.st.mu.Unlock()
+		if name == "" {
+			return nil, errs.New(errs.Invalid, "no registered service is cloned from the repository at %s", path)
+		}
+	}
+	return a.Bind(ctx, name, path)
+}
+
+func (a fakeServices) BrowseCheckouts(_ context.Context, name, dir string) (*engine.DirListing, error) {
+	a.st.mu.Lock()
+	defer a.st.mu.Unlock()
+	for _, s := range a.st.services {
+		if s.Name == name {
+			if dir == "" {
+				dir = "/home"
+			}
+			return &engine.DirListing{Path: dir, Entries: []engine.DirEntry{}}, nil
+		}
+	}
+	return nil, errs.New(errs.ServiceNotFound, "service %q not found", name)
+}
+
+func (a fakeServices) AddFromCheckout(ctx context.Context, name, path string, opts engine.AddFromCheckoutOptions) (*domain.Service, error) {
+	if name == "" {
+		name = path[strings.LastIndex(path, "/")+1:]
+	}
+	if _, err := a.Add(ctx, name, domain.Source{Kind: domain.SourceGit, URL: "git@github.com:org/" + name + ".git", Ref: opts.Ref}); err != nil {
+		return nil, err
+	}
+	return a.Bind(ctx, name, path)
+}

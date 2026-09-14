@@ -54,6 +54,22 @@ type ServiceAPI interface {
 	// be read from instead, and any local checkouts of the same remote
 	// this machine already knows about.
 	Binding(ctx context.Context, name string) (*BindingInfo, error)
+
+	// BindWith is Bind with options. An empty name infers the service from
+	// the checkout's origin (the one team source naming that repository;
+	// ambiguity is an error). Without Force, a checkout whose origin names
+	// another repository, or which has no API package, is refused.
+	BindWith(ctx context.Context, name, path string, opts BindOptions) (*domain.Service, error)
+	// BrowseCheckouts lists the subdirectories of dir (the home directory
+	// when dir is "") for a picker, describing each git repository found
+	// and saying whether it is a checkout of name's team repository.
+	BrowseCheckouts(ctx context.Context, name, dir string) (*DirListing, error)
+	// AddFromCheckout registers the repository a local checkout was cloned
+	// from as a git source in the committed workspace file, and binds the
+	// checkout on this machine, so the team gets a source every clone can
+	// read while this machine reads the working copy at once. name ""
+	// derives the name from the contract, as Add does.
+	AddFromCheckout(ctx context.Context, name, path string, opts AddFromCheckoutOptions) (*domain.Service, error)
 }
 
 // BindingInfo is Services().Binding's answer: the service's current binding
@@ -259,4 +275,42 @@ type CreateFlowOptions struct {
 	OwnerKind string
 	// OwnerID names the service for OwnerKind service; ignored otherwise.
 	OwnerID string
+}
+
+// BindOptions tunes ServiceAPI.BindWith.
+type BindOptions struct {
+	// Force binds a checkout whose origin does not match the team source
+	// (a fork, a mirror) or which has no API package yet.
+	Force bool
+}
+
+// AddFromCheckoutOptions tunes ServiceAPI.AddFromCheckout.
+type AddFromCheckoutOptions struct {
+	// Ref is the branch the team source pins; "" means the remote's
+	// default branch, resolved when the clone is first made.
+	Ref string
+	// Force registers even when the checkout has no API package yet.
+	Force bool
+}
+
+// DirListing is ServiceAPI.BrowseCheckouts' answer: one directory level,
+// for a picker that walks the filesystem from the daemon's side of the
+// browser boundary (a web page cannot learn an absolute path from a file
+// dialog).
+type DirListing struct {
+	Path    string     `json:"path"`
+	Parent  string     `json:"parent,omitempty"` // "" at the filesystem root
+	Entries []DirEntry `json:"entries"`
+}
+
+// DirEntry is one subdirectory in a DirListing. Checkout is set when the
+// directory is the root of a git repository; Matches says its origin names
+// the service's team repository, and Reason says why it does not when it
+// is a repository of something else or lacks an API package.
+type DirEntry struct {
+	Name     string                `json:"name"`
+	Path     string                `json:"path"`
+	Checkout *domain.LocalCheckout `json:"checkout,omitempty"`
+	Matches  bool                  `json:"matches"`
+	Reason   string                `json:"reason,omitempty"`
 }

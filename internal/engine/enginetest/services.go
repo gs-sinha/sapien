@@ -3,6 +3,7 @@ package enginetest
 import (
 	"context"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/gs-sinha/sapien/internal/domain"
@@ -182,4 +183,58 @@ func fakeBinding(src domain.Source) *domain.ServiceBinding {
 		return &domain.ServiceBinding{Mode: domain.BindingTeam, Team: &s}
 	}
 	return &domain.ServiceBinding{Mode: domain.BindingLocal, Local: &domain.LocalCheckout{Path: src.Path}, Writable: true}
+}
+
+// BindWith is Bind for the fake; Force has nothing to override since the
+// fake validates no filesystem. An empty name infers the service from a
+// candidate the test seeded with the same path, else conflicts.
+func (s *serviceAPI) BindWith(ctx context.Context, name, path string, opts engine.BindOptions) (*domain.Service, error) {
+	if name == "" {
+		f := s.f()
+		f.mu.Lock()
+		for _, svc := range f.services {
+			if svc.Binding != nil && svc.Binding.Local != nil && svc.Binding.Local.Path == path {
+				name = svc.Name
+				break
+			}
+		}
+		f.mu.Unlock()
+		if name == "" {
+			return nil, errs.New(errs.Invalid, "no registered service is cloned from the repository at %s", path).WithDetail("path", path)
+		}
+	}
+	return s.Bind(ctx, name, path)
+}
+
+// BrowseCheckouts returns an empty listing rooted at dir.
+func (s *serviceAPI) BrowseCheckouts(ctx context.Context, name, dir string) (*engine.DirListing, error) {
+	f := s.f()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.recordLocked("Services.BrowseCheckouts", map[string]string{"name": name, "dir": dir})
+	if _, ok := f.services[name]; !ok {
+		return nil, errs.New(errs.ServiceNotFound, "service %q not found", name).WithDetail("name", name)
+	}
+	if dir == "" {
+		dir = "/home"
+	}
+	return &engine.DirListing{Path: dir, Entries: []engine.DirEntry{}}, nil
+}
+
+// AddFromCheckout registers a git source named after the path's last
+// element and binds the path, mirroring what the real engine does with the
+// checkout's origin.
+func (s *serviceAPI) AddFromCheckout(ctx context.Context, name, path string, opts engine.AddFromCheckoutOptions) (*domain.Service, error) {
+	if name == "" {
+		name = path[strings.LastIndex(path, "/")+1:]
+	}
+	src := domain.Source{Kind: domain.SourceGit, URL: "git@github.com:org/" + name + ".git", Ref: opts.Ref}
+	if _, err := s.Add(ctx, name, src); err != nil {
+		return nil, err
+	}
+	f := s.f()
+	f.mu.Lock()
+	f.recordLocked("Services.AddFromCheckout", map[string]any{"name": name, "path": path, "ref": opts.Ref, "force": opts.Force})
+	f.mu.Unlock()
+	return s.Bind(ctx, name, path)
 }

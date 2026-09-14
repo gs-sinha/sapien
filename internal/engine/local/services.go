@@ -413,3 +413,21 @@ func checkoutDir(path string) (string, error) {
 	}
 	return abs, nil
 }
+
+// BindWith, BrowseCheckouts and AddFromCheckout: Phase 0 stubs for the
+// checkout picker and validated binding (PLAN §7b); the binding work in
+// this change replaces them.
+func (s *serviceAPI) BindWith(ctx context.Context, name, path string, opts engine.BindOptions) (*domain.Service, error) {
+	if name == "" {
+		return nil, errs.New(errs.NotImplemented, "inferring the service from a checkout is not available yet")
+	}
+	return s.Bind(ctx, name, path)
+}
+
+func (s *serviceAPI) BrowseCheckouts(ctx context.Context, name, dir string) (*engine.DirListing, error) {
+	return nil, errs.New(errs.NotImplemented, "browsing checkouts is not available yet")
+}
+
+func (s *serviceAPI) AddFromCheckout(ctx context.Context, name, path string, opts engine.AddFromCheckoutOptions) (*domain.Service, error) {
+	return nil, errs.New(errs.NotImplemented, "adding a service from a checkout is not available yet")
+}

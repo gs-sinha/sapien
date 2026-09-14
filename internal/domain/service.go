@@ -166,4 +166,17 @@ type LocalCheckout struct {
 	// Dirty counts modified and untracked files under the package
 	// directory: work that exists here and nowhere else yet.
 	Dirty int `json:"dirty,omitempty"`
+	// CommittedAt is HEAD's commit time: how recently this clone was
+	// worked in, which is what separates the checkout someone develops in
+	// from an old backup clone of the same repository.
+	CommittedAt time.Time `json:"committed_at,omitempty"`
+	// Ahead and Behind count commits between HEAD and the team's ref as this
+	// clone last fetched it (origin/<ref>); zero when the ref is unknown here.
+	Ahead  int `json:"ahead,omitempty"`
+	Behind int `json:"behind,omitempty"`
+	// Worktree reports a `git worktree` checkout rather than a full clone.
+	Worktree bool `json:"worktree,omitempty"`
+	// Package is the API package directory discovered under Path ("" when
+	// none): a checkout without one cannot be indexed yet.
+	Package string `json:"package,omitempty"`
 }
