@@ -3,6 +3,9 @@
 // <workspace>/flows) -> service (the owning repo's api/flows). The wire
 // value is domain.FlowOwnerLocal/Workspace/Service; "team" is the label for
 // the workspace tier because that is who reads it.
+import { useState } from 'react';
+import { flows } from '../../api/client';
+import { pushToast } from '../../state/toast';
 import type { FlowOwnerKind, ShipStatus } from '../../api/types';
 
 export const FLOW_TIERS: FlowOwnerKind[] = ['local', 'workspace', 'service'];
@@ -68,5 +71,40 @@ export function ShippedBadge({ shipped }: { shipped?: ShipStatus }) {
     >
       {meta.label}
     </span>
+  );
+}
+
+// Only for the two states a commit actually fixes: untracked (never added)
+// and modified (uncommitted changes). POST /v1/flows/{id}/commit runs `git
+// add` + `git commit` on the file in the workspace repo -- never a push --
+// and the daemon refuses it outright for any other tier, workspace not in
+// git, or nothing to commit, so those cases just don't get a button.
+export function CommitButton({ id, shipped, onCommitted }: { id: string; shipped?: ShipStatus; onCommitted: () => void }) {
+  const [busy, setBusy] = useState(false);
+  if (shipped !== 'untracked' && shipped !== 'modified') return null;
+
+  const commit = async () => {
+    setBusy(true);
+    try {
+      await flows.commit(id);
+      pushToast('success', `committed ${id}; not pushed`);
+      onCommitted();
+    } catch (e) {
+      pushToast('error', e instanceof Error ? e.message : 'Commit failed.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      disabled={busy}
+      onClick={commit}
+      title="git add + git commit this file in the workspace repo (never pushes)"
+      className="rounded border border-slate-300 px-1.5 py-0.5 text-xs disabled:opacity-50 dark:border-slate-700"
+    >
+      {busy ? 'Committing…' : 'Commit'}
+    </button>
   );
 }

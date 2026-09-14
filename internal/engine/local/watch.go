@@ -57,6 +57,11 @@ func (l *Local) startWatch() error {
 
 	if l.gitMgr != nil {
 		go l.syncer.SyncGitPeriodically(ctx, l.gitSyncInterval)
+		// The workspace's own repository (PLAN §7b) gets the same tick, on
+		// the same ctx so restartWatch's cancel stops this goroutine too
+		// rather than doubling it, but its own timer: fetching it is
+		// unrelated to whether any service is git-sourced.
+		go l.fetchRepoPeriodically(ctx, l.gitSyncInterval)
 	}
 
 	return nil
@@ -101,6 +106,69 @@ func (l *Local) resolvePackageRootForWatch(ref domain.ServiceRef) (string, error
 	default:
 		return "", errNotFingerprintable
 	}
+}
+
+// defaultRepoFetchInterval mirrors registry.defaultGitSyncInterval for the
+// case interval <= 0, which only happens when a caller other than Open's
+// own defaulting passes one (Open always resolves gitSyncInterval from
+// config before it reaches here).
+const defaultRepoFetchInterval = 10 * time.Minute
+
+// fetchRepoPeriodically fetches the workspace's own git repository (PLAN
+// §7b) every interval, until ctx is done: the daemon's git tick for the
+// team's shared copy of the workspace tier, run alongside the per-service
+// SyncGitPeriodically this same startWatch call starts.
+//
+// It only ever fetches, never pulls. The tick is deliberately read-only for
+// the workspace: a service's managed clone is a cache nobody edits by hand,
+// so resetting it on a timer is safe, but the workspace directory is the
+// developer's own working copy -- it can hold uncommitted flows or memories
+// at any moment -- and turning "behind by N" into a pulled working tree is
+// a decision only the developer gets to make, via Pull or "Sync all", never
+// a background timer.
+func (l *Local) fetchRepoPeriodically(ctx context.Context, interval time.Duration) {
+	if interval <= 0 {
+		interval = defaultRepoFetchInterval
+	}
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	lastErr := ""
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			lastErr = l.fetchRepoTick(ctx, lastErr)
+		}
+	}
+}
+
+// fetchRepoTick runs one fetchRepoPeriodically cycle and returns the
+// fetch's error message (or "") for the next tick to compare against, so a
+// failure logs at Warn only when it first appears or its message changes,
+// never on every repeat of the same failure, and an Info line marks
+// recovery. Skips entirely when the workspace isn't inside a git
+// repository, or has no origin to fetch.
+func (l *Local) fetchRepoTick(ctx context.Context, lastErr string) string {
+	status, err := l.gitMgr.RepoStatus(ctx, l.ws.Dir)
+	if err != nil || !status.InGit || status.Remote == "" {
+		return lastErr
+	}
+
+	_, fetchErr := l.Repo().Fetch(ctx)
+	if fetchErr != nil {
+		msg := fetchErr.Error()
+		if msg != lastErr {
+			l.logger.Warn("fetching the workspace repository failed", "error", fetchErr)
+		}
+		return msg
+	}
+	if lastErr != "" {
+		l.logger.Info("fetching the workspace repository recovered")
+	}
+	return ""
 }
 
 // onWatchChange is registry.Watcher's onChange callback: it resyncs every

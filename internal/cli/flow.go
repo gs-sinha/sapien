@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -32,6 +33,7 @@ func newFlowCmd(app *App) *cobra.Command {
 		newFlowPatchCmd(app),
 		newFlowPromoteCmd(app),
 		newFlowRescopeCmd(app),
+		newFlowCommitCmd(app),
 		newFlowDeleteCmd(app),
 		newFlowReferenceCmd(app),
 		newFlowRunCmd(app),
@@ -490,6 +492,110 @@ func rescopeFlow(app *App, ctx context.Context, eng engine.Engine, flow *domain.
 	if moved.OwnerKind == domain.FlowOwnerWorkspace && !opts.Commit {
 		app.Printer.Line("%s", app.Printer.Dim(fmt.Sprintf(
 			"not committed yet: git add %s && git commit, or rerun with --commit", moved.Path)))
+	}
+	return nil
+}
+
+// newFlowCommitCmd is `sapien flow commit <id> [-m <message>]` or `sapien
+// flow commit --all`: the standalone form of promote/rescope's --commit,
+// for a flow that is already at the team tier and just needs a human
+// decision to ship it -- before this, committing meant moving it back to
+// local and promoting again with the checkbox.
+func newFlowCommitCmd(app *App) *cobra.Command {
+	var message string
+	var all bool
+	cmd := &cobra.Command{
+		Use:   "commit <id> [-m <message>]",
+		Short: "Commit a workspace-tier flow's file in the workspace repository",
+		Long: `Record a workspace-tier flow's file with one commit; never pushes. Refused
+when the flow is local or service tier, the workspace is not a git
+repository, or the file already has nothing to commit (already committed,
+pushed or not).
+
+--all commits every workspace-tier flow that is not committed or modified
+(untracked, or tracked with an uncommitted edit), one commit per flow,
+using the same message for each (or each flow's own default when -m is
+omitted); a flow already committed is left alone.`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			switch {
+			case all && len(args) == 1:
+				return errs.New(errs.Invalid, "flow commit: pass a flow id or --all, not both")
+			case !all && len(args) != 1:
+				return errs.New(errs.Invalid, "flow commit: requires a flow id, or --all")
+			}
+
+			eng, err := app.Engine()
+			if err != nil {
+				return err
+			}
+			defer eng.Close()
+
+			if !all {
+				return commitOneFlow(app, cmd.Context(), eng, args[0], message)
+			}
+			return commitAllFlows(app, cmd.Context(), eng, message)
+		},
+	}
+	cmd.Flags().StringVarP(&message, "message", "m", "", "commit message; default depends on whether the file was ever added to git")
+	cmd.Flags().BoolVar(&all, "all", false, "commit every workspace-tier flow that is not committed or modified")
+	return cmd
+}
+
+// commitOneFlow is `flow commit <id>`.
+func commitOneFlow(app *App, ctx context.Context, eng engine.Engine, id, message string) error {
+	sum, err := eng.Flows().Commit(ctx, id, message)
+	if err != nil {
+		return err
+	}
+	if app.Printer.IsJSON() {
+		return app.Printer.JSON(sum)
+	}
+	app.Printer.Line("committed %s (%s)", sum.Path, shipStateColumn(sum.Shipped))
+	return nil
+}
+
+// commitAllFlows is `flow commit --all`: every workspace-tier flow whose
+// Shipped state says it has something to commit (untracked or modified),
+// committed one at a time with the same message (id order, so output is
+// stable).
+func commitAllFlows(app *App, ctx context.Context, eng engine.Engine, message string) error {
+	flows, err := eng.Flows().List(ctx, "")
+	if err != nil {
+		return err
+	}
+	var ids []string
+	for _, f := range flows {
+		if f.OwnerKind != domain.FlowOwnerWorkspace {
+			continue
+		}
+		if f.Shipped == domain.ShipUntracked || f.Shipped == domain.ShipModified {
+			ids = append(ids, f.ID)
+		}
+	}
+	sort.Strings(ids)
+
+	if len(ids) == 0 {
+		if app.Printer.IsJSON() {
+			return app.Printer.JSON([]domain.FlowSummary{})
+		}
+		app.Printer.Line("nothing to commit")
+		return nil
+	}
+
+	results := make([]*domain.FlowSummary, 0, len(ids))
+	for _, id := range ids {
+		sum, err := eng.Flows().Commit(ctx, id, message)
+		if err != nil {
+			return err
+		}
+		results = append(results, sum)
+	}
+	if app.Printer.IsJSON() {
+		return app.Printer.JSON(results)
+	}
+	for _, sum := range results {
+		app.Printer.Line("committed %s (%s)", sum.Path, shipStateColumn(sum.Shipped))
 	}
 	return nil
 }

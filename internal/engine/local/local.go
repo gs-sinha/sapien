@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gs-sinha/sapien/internal/catalog"
@@ -106,6 +107,15 @@ type Local struct {
 	// gitSyncInterval is the period Watch mode's background
 	// registry.Syncer.SyncGitPeriodically runs on.
 	gitSyncInterval time.Duration
+
+	// repoFetchErr and repoFetchMu back Repo().Status's FetchError (PLAN
+	// §7b): the last workspace-repository fetch's failure message, cleared
+	// by the next successful fetch. A mutex because the daemon's periodic
+	// tick (watch.go's fetchRepoPeriodically) and an on-request
+	// Fetch/Pull/Sync can both write it concurrently. See repo.go's
+	// repoFetchError/setRepoFetchError.
+	repoFetchErr string
+	repoFetchMu  sync.Mutex
 
 	// semIdx is the semantic vector index (PLAN §16), or nil when semantic
 	// search is disabled (the common case: off by default). semQueue feeds

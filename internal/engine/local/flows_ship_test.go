@@ -2,6 +2,7 @@ package local
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -194,4 +195,120 @@ func TestFlows_RescopeWith_CommitRefusedWithoutGitRepo(t *testing.T) {
 	row := findFlow(t, l, "no-repo")
 	require.NotNil(t, row)
 	assert.Equal(t, domain.FlowOwnerLocal, row.OwnerKind, "refused before anything moved")
+}
+
+// TestFlows_Commit_UntrackedFileGetsDefaultMessage: a workspace-tier flow
+// promoted without --commit (so its file sits untracked in flows/) is
+// committed standalone by Commit, with the default "Add flow ..." message,
+// and the summary it returns says unpushed.
+func TestFlows_Commit_UntrackedFileGetsDefaultMessage(t *testing.T) {
+	ws, env, _ := setupGitWorkspace(t)
+	l, err := Open(ws, Options{})
+	require.NoError(t, err)
+	defer l.Close()
+	ctx := context.Background()
+
+	_, err = l.Flows().CreateIn(ctx, tierFlowYAML("standalone"), engine.CreateFlowOptions{})
+	require.NoError(t, err)
+	_, err = l.Flows().Rescope(ctx, "standalone", domain.FlowOwnerWorkspace, "")
+	require.NoError(t, err)
+
+	sum, err := l.Flows().Commit(ctx, "standalone", "")
+	require.NoError(t, err)
+	assert.Equal(t, domain.ShipUnpushed, sum.Shipped)
+
+	assert.Equal(t, "Add flow standalone to the team workspace", runGit(t, ws.Dir, env, "log", "-1", "--format=%s"))
+	assert.Equal(t, "flows/standalone.flow.yaml", runGit(t, ws.Dir, env, "log", "-1", "--name-only", "--format="),
+		"the commit's tree must contain only the promoted file")
+
+	row := findFlow(t, l, "standalone")
+	require.NotNil(t, row)
+	assert.Equal(t, domain.ShipUnpushed, row.Shipped)
+}
+
+// TestFlows_Commit_ModifiedFileCustomMessage: a flow already committed
+// once (unpushed), then edited on disk without Sapien (so it is tracked
+// with uncommitted changes -- ShipModified), is committed again with a
+// caller-supplied message, used verbatim.
+func TestFlows_Commit_ModifiedFileCustomMessage(t *testing.T) {
+	ws, env, _ := setupGitWorkspace(t)
+	l, err := Open(ws, Options{})
+	require.NoError(t, err)
+	defer l.Close()
+	ctx := context.Background()
+
+	_, err = l.Flows().CreateIn(ctx, tierFlowYAML("editme"), engine.CreateFlowOptions{})
+	require.NoError(t, err)
+	moved, err := l.Flows().Rescope(ctx, "editme", domain.FlowOwnerWorkspace, "")
+	require.NoError(t, err)
+	_, err = l.Flows().Commit(ctx, "editme", "")
+	require.NoError(t, err)
+
+	// Edited on disk without Sapien: tracked, with an uncommitted change.
+	require.NoError(t, os.WriteFile(moved.Path, []byte(tierFlowYAML("editme")+"tags: [edited]\n"), 0o644))
+
+	sum, err := l.Flows().Commit(ctx, "editme", "Tweak the editme flow")
+	require.NoError(t, err)
+	assert.Equal(t, domain.ShipUnpushed, sum.Shipped)
+	assert.Equal(t, "Tweak the editme flow", runGit(t, ws.Dir, env, "log", "-1", "--format=%s"))
+}
+
+// TestFlows_Commit_AlreadyCommittedRefused: once a commit leaves the file
+// unpushed, Commit refuses a second call -- there is nothing left for it
+// to do, and Sapien never pushes to make "shipped" happen.
+func TestFlows_Commit_AlreadyCommittedRefused(t *testing.T) {
+	ws, _, _ := setupGitWorkspace(t)
+	l, err := Open(ws, Options{})
+	require.NoError(t, err)
+	defer l.Close()
+	ctx := context.Background()
+
+	_, err = l.Flows().CreateIn(ctx, tierFlowYAML("once"), engine.CreateFlowOptions{})
+	require.NoError(t, err)
+	_, err = l.Flows().Rescope(ctx, "once", domain.FlowOwnerWorkspace, "")
+	require.NoError(t, err)
+	_, err = l.Flows().Commit(ctx, "once", "")
+	require.NoError(t, err)
+
+	_, err = l.Flows().Commit(ctx, "once", "")
+	require.Error(t, err)
+	assert.Equal(t, errs.Invalid, errs.CodeOf(err))
+}
+
+// TestFlows_Commit_LocalOrServiceTierRefused: Commit only ever applies to
+// the workspace tier.
+func TestFlows_Commit_LocalOrServiceTierRefused(t *testing.T) {
+	ws, _, _ := setupGitWorkspace(t)
+	l, err := Open(ws, Options{})
+	require.NoError(t, err)
+	defer l.Close()
+	ctx := context.Background()
+
+	_, err = l.Flows().CreateIn(ctx, tierFlowYAML("stays-local"), engine.CreateFlowOptions{})
+	require.NoError(t, err)
+	_, err = l.Flows().Commit(ctx, "stays-local", "")
+	require.Error(t, err)
+	assert.Equal(t, errs.Invalid, errs.CodeOf(err))
+
+	_, err = l.Flows().CreateIn(ctx, tierFlowYAML("svc-flow"), engine.CreateFlowOptions{OwnerKind: domain.FlowOwnerService, OwnerID: "order-service"})
+	require.NoError(t, err)
+	_, err = l.Flows().Commit(ctx, "svc-flow", "")
+	require.Error(t, err)
+	assert.Equal(t, errs.Invalid, errs.CodeOf(err))
+}
+
+// TestFlows_Commit_NonGitWorkspaceRefused: a workspace that is not inside
+// a git repository at all has nothing Commit can do.
+func TestFlows_Commit_NonGitWorkspaceRefused(t *testing.T) {
+	ws, _ := setupWorkspace(t) // a plain temp dir, never `git init`ed
+	l, err := Open(ws, Options{})
+	require.NoError(t, err)
+	defer l.Close()
+	ctx := context.Background()
+
+	_, err = l.Flows().Create(ctx, tierFlowYAML("no-repo-commit"), "")
+	require.NoError(t, err)
+	_, err = l.Flows().Commit(ctx, "no-repo-commit", "")
+	require.Error(t, err)
+	assert.Equal(t, errs.Invalid, errs.CodeOf(err))
 }

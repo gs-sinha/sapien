@@ -136,6 +136,7 @@ func (s *serviceAPI) Sync(ctx context.Context, name string) ([]domain.Service, e
 				l.enqueueSemanticIndex(svcs[i].Name)
 			}
 		}
+		l.syncRepoBestEffort(ctx)
 		return svcs, err
 	}
 

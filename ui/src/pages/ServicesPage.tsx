@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { services } from '../api/client';
+import { repo, services } from '../api/client';
 import { EmptyState } from '../components/EmptyState';
 import { StatusPill } from '../components/StatusPill';
 import { Table } from '../components/Table';
@@ -9,6 +9,7 @@ import { useAsync } from '../lib/useAsync';
 import { AddServiceForm } from './services/AddServiceForm';
 import { driftSuffix } from './services/BindingPanel';
 import { subscribe } from '../state/events';
+import { repoClause, useRepo } from '../state/repo';
 import { pushToast } from '../state/toast';
 import type { Service } from '../api/types';
 
@@ -60,7 +61,18 @@ export default function ServicesPage() {
     setSyncingAll(true);
     try {
       await services.sync();
-      pushToast('success', 'Sync started for every service.');
+      let message = 'Sync started for every service.';
+      try {
+        // The workspace folder is itself the team's git repo; "Sync all"
+        // also syncs it (fetch, then a fast-forward pull when it's safe).
+        const status = await repo.sync();
+        useRepo.getState().setStatus(status);
+        if (status.in_git) message = `Sync started for every service; ${repoClause(status)}.`;
+      } catch {
+        // Best effort: the service sync already succeeded, so the repo
+        // clause is a bonus, not a reason to report failure.
+      }
+      pushToast('success', message);
       reload();
     } catch (e) {
       pushToast('error', e instanceof Error ? e.message : 'Sync failed.');

@@ -150,7 +150,11 @@ human can promote it later.
 Flows climb a ladder. `create_flow` writes to the local tier by default
 (`<workspace>/local/flows`, this machine only, never committed): run it
 there until it is green, then `rescope_flow` to `workspace` so the team
-gets it, or to `service` when that service is bound. Memories climb the
+gets it, or to `service` when that service is bound. A workspace-tier
+flow carries `shipped` (not committed, modified, not pushed, shipped);
+`commit_flow`, or `rescope_flow` with `commit`, records the file in the
+workspace repository when the user asks, one file per commit, never a
+push. Memories climb the
 same way with `rescope_memory`: personal (this machine) -> workspace (the
 team's repo) -> service (the owning repo). Nothing is committed or pushed
 by Sapien; what reaches the team is what the developer commits.

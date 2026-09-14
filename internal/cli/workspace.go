@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"path/filepath"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -43,6 +44,9 @@ func newWorkspaceCmd(app *App) *cobra.Command {
 		newWorkspaceUseCmd(app),
 		newWorkspaceAddCmd(app),
 		newWorkspaceForgetCmd(app),
+		newWorkspaceStatusCmd(app),
+		newWorkspacePullCmd(app),
+		newWorkspaceSyncCmd(app),
 	)
 	return cmd
 }
@@ -213,6 +217,174 @@ func newWorkspaceForgetCmd(app *App) *cobra.Command {
 			app.Printer.Line("forgot %s (the directory is untouched)", abs)
 			return nil
 		},
+	}
+}
+
+// newWorkspaceStatusCmd is `sapien workspace status`: the workspace's own
+// git repository (PLAN §7b) -- the team's shared copy of the workspace
+// tier -- read from refs already on disk, no network.
+func newWorkspaceStatusCmd(app *App) *cobra.Command {
+	return &cobra.Command{
+		Use:   "status",
+		Short: "Show the workspace's own git repository status",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			eng, err := app.Engine()
+			if err != nil {
+				return err
+			}
+			defer eng.Close()
+
+			st, err := eng.Repo().Status(cmd.Context())
+			if err != nil {
+				return err
+			}
+			if app.Printer.IsJSON() {
+				return app.Printer.JSON(st)
+			}
+			printRepoStatus(app.Printer, st)
+			return nil
+		},
+	}
+}
+
+// printRepoStatus renders one human-readable block for `workspace status`:
+// whether the workspace is in git at all; its branch and upstream; each of
+// "N commits from the team waiting" (Behind), "you have N unpushed
+// commits" (Ahead), and "N uncommitted files" (Dirty) that applies -- all
+// three can apply at once, so each gets its own line rather than picking
+// one; when the workspace was last fetched, or "never fetched"; and the
+// last fetch's error, if any.
+func printRepoStatus(p *Printer, st *domain.RepoStatus) {
+	if !st.InGit {
+		p.Line("not a git repository")
+		return
+	}
+	branch := st.Branch
+	if branch == "" {
+		branch = "(detached)"
+	}
+	if st.Upstream != "" {
+		p.Line("branch %s, tracking %s", branch, st.Upstream)
+	} else {
+		p.Line("branch %s, no upstream", branch)
+	}
+
+	noted := false
+	if st.Behind > 0 {
+		p.Line("%d commits from the team waiting", st.Behind)
+		noted = true
+	}
+	if st.Ahead > 0 {
+		p.Line("you have %d unpushed commits", st.Ahead)
+		noted = true
+	}
+	if st.Dirty > 0 {
+		p.Line("%d uncommitted files", st.Dirty)
+		noted = true
+	}
+	if !noted {
+		p.Line("up to date, nothing uncommitted")
+	}
+
+	if st.FetchedAt.IsZero() {
+		p.Line("never fetched")
+	} else {
+		p.Line("last fetched %s", relativeTime(st.FetchedAt))
+	}
+	if st.FetchError != "" {
+		p.Line("%s", p.Dim("fetch error: "+st.FetchError))
+	}
+}
+
+// relativeTime renders t as a short "ago" duration for a human status
+// line.
+func relativeTime(t time.Time) string {
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+	}
+}
+
+// newWorkspacePullCmd is `sapien workspace pull`: fast-forward the
+// workspace repository onto its upstream. The engine refuses (errs.
+// Conflict) a dirty tree, a missing upstream, or a diverged branch; that
+// error renders the way every CLI error does, through the root command's
+// own error formatting.
+func newWorkspacePullCmd(app *App) *cobra.Command {
+	return &cobra.Command{
+		Use:   "pull",
+		Short: "Fast-forward the workspace repository onto its upstream",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			eng, err := app.Engine()
+			if err != nil {
+				return err
+			}
+			defer eng.Close()
+
+			st, err := eng.Repo().Pull(cmd.Context())
+			if err != nil {
+				return err
+			}
+			if app.Printer.IsJSON() {
+				return app.Printer.JSON(st)
+			}
+			app.Printer.Line("%s", repoPullLine(st))
+			return nil
+		},
+	}
+}
+
+// newWorkspaceSyncCmd is `sapien workspace sync`: what "sync everything"
+// does for the repository alone -- fetch, then pull when the tree is
+// clean and behind. Unlike pull, this never errors just because a pull
+// was not possible; it says why instead.
+func newWorkspaceSyncCmd(app *App) *cobra.Command {
+	return &cobra.Command{
+		Use:   "sync",
+		Short: "Fetch the workspace repository, pulling fast-forward when the tree is clean",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			eng, err := app.Engine()
+			if err != nil {
+				return err
+			}
+			defer eng.Close()
+
+			st, err := eng.Repo().Sync(cmd.Context())
+			if err != nil {
+				return err
+			}
+			if app.Printer.IsJSON() {
+				return app.Printer.JSON(st)
+			}
+			app.Printer.Line("%s", repoPullLine(st))
+			return nil
+		},
+	}
+}
+
+// repoPullLine renders the outcome of a Repo().Pull or Repo().Sync call:
+// "pulled N commits", "not pulled: <skipped>" (Sync only -- Pull refuses
+// with an error instead of ever setting Skipped), or "already current".
+// Shared by `workspace pull`, `workspace sync`, and `service sync`'s
+// team-repo line.
+func repoPullLine(st *domain.RepoStatus) string {
+	switch {
+	case st.Pulled:
+		return fmt.Sprintf("pulled %d commits", st.PulledCount)
+	case st.Skipped != "":
+		return fmt.Sprintf("not pulled: %s", st.Skipped)
+	default:
+		return "already current"
 	}
 }
 

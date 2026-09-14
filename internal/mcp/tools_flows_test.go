@@ -642,6 +642,58 @@ func TestTool_RescopeFlow_MessageInput(t *testing.T) {
 	require.False(t, res.IsError, firstText(res))
 }
 
+// --- commit_flow ---
+
+// TestTool_CommitFlow_Success: committing the fixture's workspace-tier
+// flow returns a lean FlowSaveResult with Shipped set to the fake's
+// modelled post-commit state (unpushed), and the text says so.
+func TestTool_CommitFlow_Success(t *testing.T) {
+	cs := newTestSession(t, Config{Default: DefaultPermissions()}, "claude-code")
+	res := callTool(t, cs, "commit_flow", map[string]any{"id": "rider-flow", "message": "Ship it"})
+	require.False(t, res.IsError, firstText(res))
+	out := decodeStructured[FlowSaveResult](t, res.StructuredContent)
+	assert.Equal(t, "rider-flow", out.ID)
+	assert.Equal(t, domain.FlowOwnerWorkspace, out.Tier)
+	assert.Equal(t, domain.ShipUnpushed, out.Shipped)
+
+	text := firstText(res)
+	assert.Contains(t, text, "committed")
+	assert.Contains(t, text, "not pushed")
+}
+
+// TestTool_CommitFlow_NotFound.
+func TestTool_CommitFlow_NotFound(t *testing.T) {
+	cs := newTestSession(t, Config{Default: DefaultPermissions()}, "claude-code")
+	res := callTool(t, cs, "commit_flow", map[string]any{"id": "no-such-flow"})
+	require.True(t, res.IsError)
+	assert.Contains(t, firstText(res), "E_FLOW_NOT_FOUND")
+}
+
+// TestTool_CommitFlow_RefusedForNonWorkspaceTier: commit_flow only ever
+// applies to the workspace tier; a flow left at the (default) local tier
+// is refused.
+func TestTool_CommitFlow_RefusedForNonWorkspaceTier(t *testing.T) {
+	cs := newTestSession(t, Config{Default: DefaultPermissions()}, "claude-code")
+	created := callTool(t, cs, "create_flow", map[string]any{
+		"flow_yaml": "version: 1\nid: local-only\nsteps:\n  - id: a\n    call: rider-service.getRider\n",
+	})
+	require.False(t, created.IsError, firstText(created))
+
+	res := callTool(t, cs, "commit_flow", map[string]any{"id": "local-only"})
+	require.True(t, res.IsError)
+	assert.Contains(t, firstText(res), "workspace-tier flow can be committed")
+}
+
+// TestTool_CommitFlow_PermissionDenied.
+func TestTool_CommitFlow_PermissionDenied(t *testing.T) {
+	p := DefaultPermissions()
+	p.WriteFlows = false
+	cs := newTestSession(t, Config{Default: p}, "claude-code")
+	res := callTool(t, cs, "commit_flow", map[string]any{"id": "rider-flow"})
+	require.True(t, res.IsError)
+	assert.Contains(t, firstText(res), "write_flows")
+}
+
 // TestTool_CreateFlow_ShippedFieldPresent: FlowSaveResult carries a Shipped
 // field (empty here: the fake engine never populates it, matching the real
 // engine's own "empty for local/service, and for a workspace not in git"

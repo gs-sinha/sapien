@@ -9,6 +9,7 @@ import { StatusBar } from './components/StatusBar';
 import { Toasts } from './components/Toasts';
 import { useDaemon } from './state/daemon';
 import { useEvents } from './state/events';
+import { useRepo } from './state/repo';
 import { useTheme } from './state/theme';
 
 // Every page is its own lazy chunk so the first load is the app shell only
@@ -45,6 +46,7 @@ export function App() {
     // tell "replaced by an upgrade" from "not running at all".
     void useDaemon.getState().probe();
     useEvents.getState().start();
+    useRepo.getState().init();
     return () => useEvents.getState().stop();
   }, []);
 

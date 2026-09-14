@@ -1,11 +1,25 @@
 import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import ServicesPage from '../pages/ServicesPage';
 import { services } from '../api/client';
-import type { Service } from '../api/types';
+import { useRepo } from '../state/repo';
+import { useToasts } from '../state/toast';
+import type { RepoStatus, Service } from '../api/types';
+
+const repoSync = vi.fn(async (): Promise<RepoStatus> => ({ in_git: false, behind: 0, ahead: 0, dirty: 0 }));
+
+beforeEach(() => {
+  repoSync.mockClear();
+  useRepo.setState({ status: null, started: false });
+  useToasts.setState({ toasts: [] });
+});
 
 vi.mock('../api/client', () => ({
+  repo: {
+    sync: () => repoSync(),
+  },
   services: {
     list: vi.fn(async (): Promise<Service[]> => [
       {
@@ -111,5 +125,56 @@ describe('ServicesPage', () => {
 
     const row = screen.getByRole('link', { name: 'orders' }).closest('tr')!;
     expect(row).toHaveTextContent('local · feat/x · +2/-3');
+  });
+
+  describe('Sync all', () => {
+    async function syncAllAndGetToast(status: RepoStatus): Promise<string | undefined> {
+      repoSync.mockResolvedValueOnce(status);
+      const user = userEvent.setup();
+      render(
+        <MemoryRouter>
+          <ServicesPage />
+        </MemoryRouter>,
+      );
+      await waitFor(() => expect(screen.getByRole('link', { name: 'orders' })).toBeInTheDocument());
+
+      await user.click(screen.getByRole('button', { name: /sync all/i }));
+      await waitFor(() => expect(repoSync).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(useToasts.getState().toasts.length).toBeGreaterThan(0));
+      return useToasts.getState().toasts.at(-1)?.message;
+    }
+
+    it('adds "pulled N commits" when the repo sync pulled', async () => {
+      const message = await syncAllAndGetToast({ in_git: true, branch: 'main', behind: 0, ahead: 0, dirty: 0, pulled: true, pulled_count: 3 });
+      expect(message).toBe('Sync started for every service; team repo: pulled 3 commits.');
+      expect(useRepo.getState().status?.pulled_count).toBe(3);
+    });
+
+    it('adds "already current" when nothing needed doing', async () => {
+      const message = await syncAllAndGetToast({ in_git: true, branch: 'main', behind: 0, ahead: 0, dirty: 0 });
+      expect(message).toBe('Sync started for every service; team repo: already current.');
+    });
+
+    it('adds "not pulled (<skipped>)" when the daemon declined to pull', async () => {
+      const message = await syncAllAndGetToast({
+        in_git: true,
+        branch: 'main',
+        behind: 2,
+        ahead: 0,
+        dirty: 1,
+        skipped: 'uncommitted changes',
+      });
+      expect(message).toBe('Sync started for every service; team repo: not pulled (uncommitted changes).');
+    });
+
+    it('adds "fetch failed (<fetch_error>)" when the fetch itself failed', async () => {
+      const message = await syncAllAndGetToast({ in_git: true, branch: 'main', behind: 0, ahead: 0, dirty: 0, fetch_error: 'connection refused' });
+      expect(message).toBe('Sync started for every service; team repo: fetch failed (connection refused).');
+    });
+
+    it('adds no repo clause when the workspace is not a git repository', async () => {
+      const message = await syncAllAndGetToast({ in_git: false, behind: 0, ahead: 0, dirty: 0 });
+      expect(message).toBe('Sync started for every service.');
+    });
   });
 });

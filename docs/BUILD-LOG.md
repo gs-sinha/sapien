@@ -692,3 +692,49 @@ the flow, and the flow page fetches the ship state through a second
 `list_flows` lookup because a single `Flow` does not carry it. Both are
 cheap and both would be cleaner with the sha and the state on the engine's
 own return values.
+
+### Commit without a detour, and the workspace repository joins the tick (2026-09-14, same day)
+
+Two more from using the first cut. Committing a flow that already sat at
+the team tier meant moving it back to local and promoting it again with
+the checkbox -- a workaround, not a workflow. And "does the workspace
+itself get scanned once in a while?" -- no: the tick fetched every
+service's source and never the workspace repository, so a teammate's
+pushed flow waited for someone to remember `git pull`, and nothing said
+it was waiting; the user's own team repo turned out to be four commits
+ahead of origin with nobody told.
+
+- **`Flows().Commit`**: one commit of one team-tier flow's file, refused
+  for the other tiers, for a workspace outside git, and when there is
+  nothing to commit; the summary comes back `not pushed`. `sapien flow
+  commit <id>` and `--all`, `POST /v1/flows/{id}/commit`, `commit_flow`,
+  and a Commit button beside the `not committed` and `modified` badges.
+- **`Repo()` on the engine**: Status from refs on disk (branch, upstream,
+  behind/ahead as of the last fetch, uncommitted count, when it last
+  fetched); Fetch, read-only; Pull as `merge --ff-only`, refused with the
+  reason when the tree is dirty, the branch tracks nothing, or the
+  branches diverged, and followed by a reindex of the workspace tier;
+  Sync as fetch-then-pull-when-clean that never fails for a skipped pull
+  but says why. The daemon fetches on the same tick as the services and
+  never pulls there, because the developer's uncommitted work is theirs;
+  a fetch failure is logged once per distinct message. "Sync all",
+  `sapien service sync` and `sync_service` include the repository;
+  `sapien workspace status|pull|sync` and the four `/v1/workspace/repo`
+  routes expose it; a `workspace.repo` event feeds the status bar, which
+  shows `team · main`, `↓N new`, `↑N unpushed`, `N uncommitted`, and a
+  Pull button only when the tree is clean.
+
+Verified live. On the real team workspace `sapien workspace status`
+read "you have 4 unpushed commits, 4 uncommitted files, last fetched 35m
+ago"; `sapien service sync` synced every service and ended with "team
+repo: not pulled: uncommitted changes (4 files)", after which status read
+"last fetched just now". In a throwaway shared workspace with a bare
+origin and a second clone: the teammate's pushed flow showed after
+`workspace sync` as "pulled 1 commits" and listed as `team · shipped`; a
+new file dropped into `flows/` listed `not committed`, `flow commit`
+produced "Add flow mine to the team workspace" and the listing moved to
+`not pushed` with status saying "1 unpushed commit"; a scratch file in
+the tree made `workspace sync` report "not pulled: uncommitted changes (1
+files)" and `workspace pull` refuse with E_CONFLICT and the commit-or-
+stash hint. Go suite green with `-race` (38 packages, vet clean), 174 UI
+tests, bundle 68.5 KB initial / 220.8 KB total gzipped.

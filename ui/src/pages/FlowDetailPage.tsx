@@ -9,7 +9,7 @@ import { FlowDescription } from './flows/FlowDescription';
 import { FlowStepCard } from './flows/FlowStepCard';
 import { RecentRuns } from './flows/RecentRuns';
 import { RunPanel } from './flows/RunPanel';
-import { isFlowOwnerKind, ShippedBadge, TierBadge, tierOf } from './flows/tier';
+import { CommitButton, isFlowOwnerKind, ShippedBadge, TierBadge, tierOf } from './flows/tier';
 import { TierControl } from './flows/TierControl';
 import { ValidatePanel } from './flows/ValidatePanel';
 import { YamlSourcePanel } from './flows/YamlSourcePanel';
@@ -202,7 +202,12 @@ export default function FlowDetailPage() {
         <div className="mb-1 flex flex-wrap items-center gap-2">
           <h1 className="text-lg font-semibold">{flow.name || flow.id}</h1>
           {hasTier && <TierBadge ownerKind={flow.owner_kind} ownerId={flow.owner_id} />}
-          {hasTier && tierOf(flow.owner_kind) === 'workspace' && <ShippedBadge shipped={flow.shipped} />}
+          {hasTier && tierOf(flow.owner_kind) === 'workspace' && (
+            <>
+              <ShippedBadge shipped={flow.shipped} />
+              <CommitButton id={flow.id} shipped={flow.shipped} onCommitted={reload} />
+            </>
+          )}
         </div>
         <FlowDescription text={flow.description} />
         <div className="max-w-2xl">

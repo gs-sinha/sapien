@@ -173,6 +173,53 @@ func TestTool_SyncService_All(t *testing.T) {
 	assert.Contains(t, firstText(res), "rider-service: 2 operations, status ok")
 }
 
+// TestTool_SyncService_All_ReportsTeamRepo: syncing everything also syncs
+// the workspace's own repository (PLAN §7b) when it is in git, appending a
+// `repo` field to the structured output and a matching text line.
+func TestTool_SyncService_All_ReportsTeamRepo(t *testing.T) {
+	cs, eng := newTestSessionAndEngine(t, Config{Default: DefaultPermissions()}, "claude-code")
+	eng.st.mu.Lock()
+	eng.st.repo = domain.RepoStatus{InGit: true, Branch: "main", Upstream: "origin/main", Behind: 2}
+	eng.st.mu.Unlock()
+
+	res := callTool(t, cs, "sync_service", map[string]any{})
+	require.False(t, res.IsError, firstText(res))
+
+	out := decodeStructured[SyncServiceOutput](t, res.StructuredContent)
+	require.NotNil(t, out.Repo)
+	assert.True(t, out.Repo.Pulled)
+	assert.Equal(t, 2, out.Repo.PulledCount)
+	assert.Contains(t, firstText(res), "team repo: pulled 2 commits")
+}
+
+// TestTool_SyncService_ByName_OmitsTeamRepo: syncing one named service
+// never touches or reports on the workspace repository.
+func TestTool_SyncService_ByName_OmitsTeamRepo(t *testing.T) {
+	cs, eng := newTestSessionAndEngine(t, Config{Default: DefaultPermissions()}, "claude-code")
+	eng.st.mu.Lock()
+	eng.st.repo = domain.RepoStatus{InGit: true, Branch: "main", Upstream: "origin/main", Behind: 2}
+	eng.st.mu.Unlock()
+
+	res := callTool(t, cs, "sync_service", map[string]any{"name": "rider-service"})
+	require.False(t, res.IsError, firstText(res))
+
+	out := decodeStructured[SyncServiceOutput](t, res.StructuredContent)
+	assert.Nil(t, out.Repo)
+	assert.NotContains(t, firstText(res), "team repo")
+}
+
+// TestTool_SyncService_All_NotInGitOmitsTeamRepo: the default fixture
+// workspace is not a git repository, so no repo line or field appears --
+// the same shape TestTool_SyncService_All already exercises without
+// checking it explicitly.
+func TestTool_SyncService_All_NotInGitOmitsTeamRepo(t *testing.T) {
+	cs := newTestSession(t, Config{Default: DefaultPermissions()}, "claude-code")
+	res := callTool(t, cs, "sync_service", map[string]any{})
+	require.False(t, res.IsError, firstText(res))
+	out := decodeStructured[SyncServiceOutput](t, res.StructuredContent)
+	assert.Nil(t, out.Repo)
+}
+
 func TestTool_SyncService_NotFound(t *testing.T) {
 	cs := newTestSession(t, Config{Default: DefaultPermissions()}, "claude-code")
 	res := callTool(t, cs, "sync_service", map[string]any{"name": "no-such-service"})

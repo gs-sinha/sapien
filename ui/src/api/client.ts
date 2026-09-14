@@ -42,6 +42,7 @@ import type {
   Operation,
   PromotionTarget,
   PurgeRunsResponse,
+  RepoStatus,
   RequestExample,
   Run,
   RunFilter,
@@ -242,6 +243,18 @@ export function getWorkspace(): Promise<Workspace> {
   return get('/v1/workspace');
 }
 
+// Read-only git status of the workspace folder (the team's git repo), and
+// the two ways to advance it: sync fetches then fast-forward-pulls only when
+// the tree is clean and behind (`skipped` says why not otherwise); pull
+// always tries to fast-forward and 409s on a dirty tree, no upstream, or a
+// diverged branch. Both, like every fetch, also fire a `workspace.repo`
+// event (state/repo.ts keeps a store fed by it, no polling).
+export const repo = {
+  status: (): Promise<RepoStatus> => get('/v1/workspace/repo'),
+  sync: (): Promise<RepoStatus> => post('/v1/workspace/repo/sync'),
+  pull: (): Promise<RepoStatus> => post('/v1/workspace/repo/pull'),
+};
+
 // ---- services ----
 
 // A GET/POST whose entire response body is a list has no object key for
@@ -396,6 +409,12 @@ export const flows = {
       ...(opts?.commit ? { commit: true } : {}),
       ...(opts?.message ? { message: opts.message } : {}),
     }),
+  // git add + git commit a workspace-tier flow's file in the workspace repo
+  // (never a push); answers the updated summary, whose `shipped` becomes
+  // "unpushed". The daemon refuses this for local/service tiers, a
+  // workspace not under git, or nothing to commit.
+  commit: (id: string, message?: string): Promise<FlowSummary> =>
+    post(`/v1/flows/${encodeURIComponent(id)}/commit`, { ...(message ? { message } : {}) }),
 };
 
 // ---- runs ----

@@ -24,7 +24,7 @@ import (
 // fakeState is the shared, mutex-protected in-memory store behind every
 // fakeEngine sub-API.
 type fakeState struct {
-	repo domain.RepoStatus
+	repo     domain.RepoStatus
 	mu       sync.Mutex
 	ws       domain.Workspace
 	services []domain.Service
@@ -1350,7 +1350,9 @@ func (a fakeRepo) Status(context.Context) (*domain.RepoStatus, error) {
 	return &c, nil
 }
 
-func (a fakeRepo) Fetch(context.Context) (*domain.RepoStatus, error) { return a.Status(context.Background()) }
+func (a fakeRepo) Fetch(context.Context) (*domain.RepoStatus, error) {
+	return a.Status(context.Background())
+}
 
 func (a fakeRepo) Pull(context.Context) (*domain.RepoStatus, error) {
 	a.st.mu.Lock()

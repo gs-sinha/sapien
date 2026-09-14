@@ -567,6 +567,69 @@ func (s *server) rescopeFlow(ctx context.Context, req *sdkmcp.CallToolRequest, i
 	return result(text, out), nil, nil
 }
 
+// --- commit_flow -----------------------------------------------------
+//
+// commit_flow is the standalone form of rescope_flow's Commit option (PLAN
+// §7b): before this, committing a flow already at the team tier meant
+// rescoping it back to local and promoting again with the commit checkbox.
+
+// CommitFlowInput is commit_flow's arguments.
+type CommitFlowInput struct {
+	ID string `json:"id" jsonschema:"flow id; must already be at the workspace tier"`
+	// Message overrides the engine's own default: "Add flow <id> to the
+	// team workspace" for a file never added to git, "Update flow <id>"
+	// for one with an uncommitted edit.
+	Message string `json:"message,omitempty" jsonschema:"commit message; default depends on whether the file was ever added to git"`
+}
+
+// commitFlow commits a workspace-tier flow's file in the workspace
+// repository: one commit of that file, never a push. Refused by the
+// engine for the local and service tiers, a workspace not in git, and a
+// file with nothing to commit (already unpushed or shipped).
+func (s *server) commitFlow(ctx context.Context, req *sdkmcp.CallToolRequest, in CommitFlowInput) (*sdkmcp.CallToolResult, any, error) {
+	if _, _, denied := s.checkPermission(req.Session, classWriteFlows); denied != nil {
+		return denied, nil, nil
+	}
+	sum, err := s.engine().Flows().Commit(ctx, in.ID, in.Message)
+	if err != nil {
+		return errResult(err), nil, nil
+	}
+	out := buildFlowSaveResultFromSummary(sum, s.workspaceDir())
+
+	// Commit always leaves the file unpushed (Sapien never pushes); the
+	// other branches are defensive, not expected in practice.
+	note := "not pushed"
+	if out.Shipped != domain.ShipUnpushed {
+		if txt := shipStateText(out.Shipped); txt != "" {
+			note = txt
+		} else {
+			note = "committed"
+		}
+	}
+	text := fmt.Sprintf("committed %s; %s\n", out.Path, note)
+	return result(text, out), nil, nil
+}
+
+// buildFlowSaveResultFromSummary reduces a FlowSummary -- what Commit
+// returns, since committing never touches the document itself -- to the
+// same lean FlowSaveResult shape buildFlowSaveResult produces from a full
+// *domain.Flow. SetupSteps, TeardownSteps, Diagnostics and Bytes stay
+// zero: a FlowSummary carries none of them.
+func buildFlowSaveResultFromSummary(sum *domain.FlowSummary, wsDir string) FlowSaveResult {
+	out := FlowSaveResult{
+		ID:         sum.ID,
+		Path:       displayFlowPath(wsDir, sum.Path),
+		Tier:       sum.OwnerKind,
+		Steps:      sum.StepCount,
+		Operations: sum.Operations,
+		Shipped:    sum.Shipped,
+	}
+	if sum.OwnerKind == domain.FlowOwnerService {
+		out.Service = sum.OwnerID
+	}
+	return out
+}
+
 // --- update_flow -----------------------------------------------------
 
 // UpdateFlowInput is update_flow's arguments: exactly one of FlowYAML or

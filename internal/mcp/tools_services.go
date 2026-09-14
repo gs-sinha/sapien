@@ -394,20 +394,65 @@ type SyncServiceInput struct {
 	Name string `json:"name,omitempty" jsonschema:"service name; omit to sync every registered service"`
 }
 
-// SyncServiceOutput is sync_service's structured output.
+// SyncServiceOutput is sync_service's structured output. Repo is set only
+// when name was empty (every service) and the workspace is inside a git
+// repository: syncing everything also syncs the workspace's own
+// repository (PLAN §7b).
 type SyncServiceOutput struct {
-	Services []domain.Service `json:"services"`
+	Services []domain.Service   `json:"services"`
+	Repo     *domain.RepoStatus `json:"repo,omitempty"`
 }
 
 func (s *server) syncService(ctx context.Context, req *sdkmcp.CallToolRequest, in SyncServiceInput) (*sdkmcp.CallToolResult, any, error) {
 	if _, _, denied := s.checkPermission(req.Session, classWriteServices); denied != nil {
 		return denied, nil, nil
 	}
-	svcs, err := s.engine().Services().Sync(ctx, strings.TrimSpace(in.Name))
+	name := strings.TrimSpace(in.Name)
+	svcs, err := s.engine().Services().Sync(ctx, name)
 	if err != nil {
 		return errResult(err), nil, nil
 	}
-	return result(renderServicesSynced(s.engine().Workspace(), svcs), SyncServiceOutput{Services: svcs}), nil, nil
+	out := SyncServiceOutput{Services: svcs}
+	text := renderServicesSynced(s.engine().Workspace(), svcs)
+	if name == "" {
+		if repo, line := syncTeamRepo(ctx, s.engine()); line != "" {
+			out.Repo = repo
+			text += line
+		}
+	}
+	return result(text, out), nil, nil
+}
+
+// syncTeamRepo syncs the workspace's own repository after sync_service
+// (no name) already synced every service's -- the local engine's
+// Services().Sync("") does this too, so this is a second, idempotent
+// pass, worth making explicitly because Repo().Status alone never carries
+// a reason a pull did not happen (Skipped). Returns a nil status and ""
+// when the workspace is not inside a git repository, or checking it
+// failed; syncing services must never fail for the repo's sake.
+func syncTeamRepo(ctx context.Context, eng engine.Engine) (*domain.RepoStatus, string) {
+	st, err := eng.Repo().Status(ctx)
+	if err != nil || !st.InGit {
+		return nil, ""
+	}
+	synced, err := eng.Repo().Sync(ctx)
+	if err != nil {
+		return nil, fmt.Sprintf("team repo: sync failed: %v\n", err)
+	}
+	return synced, "team repo: " + repoPullLine(synced) + "\n"
+}
+
+// repoPullLine renders the outcome of a Repo().Sync call: "pulled N
+// commits", "not pulled: <skipped>", or "already current".
+func repoPullLine(st *domain.RepoStatus) string {
+	switch {
+	case st.Pulled:
+		return fmt.Sprintf("pulled %d commits", st.PulledCount)
+	case st.Skipped != "":
+		return fmt.Sprintf("not pulled: %s", st.Skipped)
+	default:
+		return "already current"
+	}
 }
 
 // renderServicesSynced joins renderServiceSummary's block for each synced

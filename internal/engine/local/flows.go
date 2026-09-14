@@ -966,7 +966,90 @@ other change; nothing here writes it automatically. Once applied, mark
 the memory ` + "`status: promoted`" + `.
 `
 
-// Commit: Phase 0 stub, filled in by the shipping work.
+// Commit records a workspace-tier flow's file in the workspace repository
+// with one commit (PLAN §7b): the standalone form of RescopeWith's Commit
+// option, for a flow that is already at the workspace tier and just needs
+// a human decision to ship it -- without this, committing meant rescoping
+// back to local and promoting again with the checkbox.
+//
+// Refused with errs.Invalid for the local and service tiers (a service
+// repository is the developer's own, not Sapien's to commit into), for a
+// workspace not inside a git repository, and when the file has nothing to
+// commit: FileStates already says ShipUnpushed (committed here, just not
+// pushed) or ShipShipped (on the upstream already), and Sapien never
+// pushes, so there is nothing left for a commit to do. message "" picks a
+// default: "Add flow <id> to the team workspace" for a file that was never
+// added to git (ShipUntracked), "Update flow <id>" otherwise (ShipModified,
+// or a state FileStates could not classify).
+//
+// The returned summary's Shipped is always ShipUnpushed after a successful
+// commit -- nothing here ever pushes -- so it is set directly rather than
+// re-read through git a second time.
 func (f *flowAPI) Commit(ctx context.Context, id, message string) (*domain.FlowSummary, error) {
-	return nil, errs.New(errs.NotImplemented, "committing a flow is not available yet")
+	l := f.l
+	existing, err := l.cat.GetFlowSummary(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if existing == nil {
+		return nil, errs.New(errs.FlowNotFound, "flow %q not found", id)
+	}
+	if existing.OwnerKind != "" && existing.OwnerKind != domain.FlowOwnerWorkspace {
+		return nil, errs.New(errs.Invalid, "only a workspace-tier flow can be committed; %q is %s", id, describeFlowOwner(existing.OwnerKind, existing.OwnerID)).
+			WithHint("promote it to the workspace tier first: `sapien flow promote " + id + "`")
+	}
+	if _, ok := l.gitMgr.RepoRoot(ctx, l.ws.Dir); !ok {
+		return nil, errs.New(errs.Invalid, "workspace %s is not in a git repository", l.ws.Dir)
+	}
+
+	path, err := l.resolveFlowPath(ctx, existing)
+	if err != nil {
+		return nil, err
+	}
+	states, err := l.gitMgr.FileStates(ctx, l.ws.Dir, []string{path})
+	if err != nil {
+		return nil, errs.Wrap(errs.Internal, err, "checking the git state of %s", path)
+	}
+	state := states[path]
+	if sentence := shipStateNothingToCommit(state); sentence != "" {
+		return nil, errs.New(errs.Invalid, "flow %q has nothing to commit: %s", id, sentence)
+	}
+
+	if message == "" {
+		if state == domain.ShipUntracked {
+			message = fmt.Sprintf("Add flow %s to the team workspace", id)
+		} else {
+			message = fmt.Sprintf("Update flow %s", id)
+		}
+	}
+	if _, err := l.gitMgr.CommitPaths(ctx, l.ws.Dir, []string{path}, message); err != nil {
+		return nil, err
+	}
+
+	sum, err := l.cat.GetFlowSummary(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if sum == nil {
+		return nil, errs.New(errs.FlowNotFound, "flow %q not found after commit", id)
+	}
+	sum.Shipped = domain.ShipUnpushed
+	l.emit(domain.EventFlowChanged, *sum)
+	return sum, nil
+}
+
+// shipStateNothingToCommit explains why state leaves nothing for Commit to
+// do -- ShipUnpushed and ShipShipped, the two states a commit could not
+// possibly improve on since Sapien never pushes -- or "" when a commit is
+// exactly what state calls for (ShipUntracked, ShipModified, or anything
+// FileStates could not classify).
+func shipStateNothingToCommit(state string) string {
+	switch state {
+	case domain.ShipUnpushed:
+		return "it is committed here already, just not pushed"
+	case domain.ShipShipped:
+		return "it is already committed and pushed"
+	default:
+		return ""
+	}
 }

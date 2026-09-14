@@ -71,6 +71,15 @@ const flowsRescope = vi.fn(async (id: string, ownerKind: string, ownerId?: strin
 // looks it up via a second, best-effort flows.list(id) call. Empty by
 // default so the default page has no ship badge to account for.
 const flowsList = vi.fn(async (_q?: string): Promise<FlowSummary[]> => []);
+const flowsCommit = vi.fn(async (_id: string, _message?: string): Promise<FlowSummary> => ({
+  id: 'qcom-order',
+  path: 'flows/qcom-order.flow.yaml',
+  owner_kind: 'workspace',
+  step_count: 1,
+  hash: 'h',
+  updated: '2026-01-05T00:00:00Z',
+  shipped: 'unpushed',
+}));
 // No service is bound to a checkout unless a test says so, so the default
 // page has exactly one <select> (the environment picker).
 const servicesList = vi.fn(async (): Promise<Service[]> => []);
@@ -99,6 +108,7 @@ vi.mock('../api/client', () => ({
   flows: {
     get: (id: string) => flowsGet(id),
     list: (q?: string) => flowsList(q),
+    commit: (id: string, message?: string) => flowsCommit(id, message),
     update: (id: string, req: { yaml: string }) => flowsUpdate(id, req),
     run: (id: string, opts: unknown) => flowsRun(id, opts),
     // Forwards a 4th arg only when the caller passed one, so a plain
@@ -159,6 +169,7 @@ afterEach(() => {
   flowsRescope.mockClear();
   flowsList.mockClear();
   flowsList.mockImplementation(async () => []);
+  flowsCommit.mockClear();
   servicesList.mockClear();
   servicesList.mockImplementation(async () => []);
   runsRunSource.mockClear();
@@ -450,6 +461,79 @@ describe('FlowDetailPage', () => {
     for (const text of ['not committed', 'modified', 'committed, not pushed', 'shipped']) {
       expect(screen.queryByText(text)).not.toBeInTheDocument();
     }
+  });
+
+  it('shows a header Commit button for untracked/modified, and clicking it commits and refreshes the badge', async () => {
+    const user = userEvent.setup();
+    flowsList.mockImplementationOnce(
+      async (): Promise<FlowSummary[]> => [
+        {
+          id: 'qcom-order',
+          path: 'flows/qcom-order.flow.yaml',
+          owner_kind: 'workspace',
+          step_count: 1,
+          hash: 'h',
+          updated: '2026-01-01T00:00:00Z',
+          shipped: 'untracked',
+        },
+      ],
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByText('QCOM order')).toBeInTheDocument());
+    const commitButton = await screen.findByRole('button', { name: 'Commit' });
+
+    // Committing reloads the flow, whose next summary lookup reports "unpushed".
+    flowsList.mockImplementationOnce(
+      async (): Promise<FlowSummary[]> => [
+        {
+          id: 'qcom-order',
+          path: 'flows/qcom-order.flow.yaml',
+          owner_kind: 'workspace',
+          step_count: 1,
+          hash: 'h',
+          updated: '2026-01-01T00:00:00Z',
+          shipped: 'unpushed',
+        },
+      ],
+    );
+    await user.click(commitButton);
+
+    await waitFor(() => expect(flowsCommit).toHaveBeenCalledWith('qcom-order', undefined));
+    await waitFor(() => expect(screen.getByText('committed, not pushed')).toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: 'Commit' })).not.toBeInTheDocument();
+    expect(useToasts.getState().toasts.some((t) => t.kind === 'success' && t.message === 'committed qcom-order; not pushed')).toBe(true);
+  });
+
+  it('shows no Commit button once a flow is already shipped or merely unpushed', async () => {
+    flowsList.mockImplementationOnce(
+      async (): Promise<FlowSummary[]> => [
+        { id: 'qcom-order', path: 'flows/qcom-order.flow.yaml', owner_kind: 'workspace', step_count: 1, hash: 'h', updated: '2026-01-01T00:00:00Z', shipped: 'shipped' },
+      ],
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByText('QCOM order')).toBeInTheDocument());
+
+    expect(await screen.findByText('shipped')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Commit' })).not.toBeInTheDocument();
+  });
+
+  it('shows an error toast when the commit fails, leaving the badge untouched', async () => {
+    const user = userEvent.setup();
+    flowsList.mockImplementationOnce(
+      async (): Promise<FlowSummary[]> => [
+        { id: 'qcom-order', path: 'flows/qcom-order.flow.yaml', owner_kind: 'workspace', step_count: 1, hash: 'h', updated: '2026-01-01T00:00:00Z', shipped: 'modified' },
+      ],
+    );
+    flowsCommit.mockRejectedValueOnce(new Error('nothing to commit'));
+    renderPage();
+    await waitFor(() => expect(screen.getByText('QCOM order')).toBeInTheDocument());
+
+    await user.click(await screen.findByRole('button', { name: 'Commit' }));
+
+    await waitFor(() =>
+      expect(useToasts.getState().toasts.some((t) => t.kind === 'error' && t.message === 'nothing to commit')).toBe(true),
+    );
+    expect(screen.getByText('modified')).toBeInTheDocument();
   });
 
   it('a team flow: offers local, and the service tier only for a called service bound to a checkout', async () => {

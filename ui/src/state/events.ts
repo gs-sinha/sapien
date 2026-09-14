@@ -10,7 +10,7 @@ import { create } from 'zustand';
 import { getRecentEvents } from '../api/client';
 import { useDaemon } from './daemon';
 import { currentWorkspace } from './workspace';
-import type { Event, EventType } from '../api/types';
+import type { Event, EventType, RepoStatus } from '../api/types';
 
 export type ConnectionStatus = 'connecting' | 'open' | 'closed';
 
@@ -23,6 +23,11 @@ export interface StoredEvent {
   // subscriber can follow a run's progress without re-parsing the summary
   // line. Undefined for every other event type.
   status?: string;
+  // The full RepoStatus payload of a workspace.repo event: state/repo.ts's
+  // store is fed straight from this rather than from a fresh GET, so it
+  // needs the payload itself, not just a summary line. Undefined for every
+  // other event type.
+  repo?: RepoStatus;
   ids: {
     run_id?: string;
     step_id?: string;
@@ -40,6 +45,33 @@ function asRecord(v: unknown): Record<string, unknown> | undefined {
 function str(v: unknown): string | undefined {
   return typeof v === 'string' ? v : undefined;
 }
+function num(v: unknown): number {
+  return typeof v === 'number' ? v : 0;
+}
+function bool(v: unknown): boolean {
+  return v === true;
+}
+
+// asRepoStatus rebuilds the typed RepoStatus a workspace.repo event carries
+// as its raw (untyped) payload, the same fields GET /v1/workspace/repo
+// answers.
+function asRepoStatus(p: Record<string, unknown>): RepoStatus {
+  return {
+    in_git: bool(p.in_git),
+    root: str(p.root),
+    branch: str(p.branch),
+    remote: str(p.remote),
+    upstream: str(p.upstream),
+    behind: num(p.behind),
+    ahead: num(p.ahead),
+    dirty: num(p.dirty),
+    fetched_at: str(p.fetched_at),
+    fetch_error: str(p.fetch_error),
+    pulled: typeof p.pulled === 'boolean' ? p.pulled : undefined,
+    pulled_count: typeof p.pulled_count === 'number' ? p.pulled_count : undefined,
+    skipped: str(p.skipped),
+  };
+}
 
 // summarize reduces one raw domain.Event to a StoredEvent, matching the
 // payload shapes actually emitted (internal/runner, internal/registry/sync.go,
@@ -49,6 +81,7 @@ export function summarize(ev: Event): StoredEvent {
   const ids: StoredEvent['ids'] = {};
   let summary: string = ev.type;
   let eventStatus: string | undefined;
+  let eventRepo: RepoStatus | undefined;
 
   switch (ev.type) {
     case 'run.started':
@@ -100,11 +133,21 @@ export function summarize(ev: Event): StoredEvent {
       summary = `${ids.service ?? 'service'} sync failed: ${str(p.error) ?? ''}`.trim();
       break;
     }
+    case 'workspace.repo': {
+      const r = asRepoStatus(p);
+      eventRepo = r;
+      summary = r.fetch_error
+        ? `team repo: fetch failed (${r.fetch_error})`
+        : r.pulled
+          ? `team repo: pulled ${r.pulled_count ?? 0} commits`
+          : `team repo: ↓${r.behind} ↑${r.ahead}${r.dirty ? ` (${r.dirty} uncommitted)` : ''}`;
+      break;
+    }
     default:
       summary = ev.type;
   }
 
-  return { type: ev.type, time: ev.time, summary, status: eventStatus, ids };
+  return { type: ev.type, time: ev.time, summary, status: eventStatus, repo: eventRepo, ids };
 }
 
 type Listener = (e: StoredEvent) => void;

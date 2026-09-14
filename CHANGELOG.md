@@ -40,6 +40,22 @@ and phase numbers refer to PLAN.md §34's roadmap.
   --commit` (and the "and commit" checkbox, and `rescope_flow` with
   `commit`) also commits the moved file in the workspace repository;
   opt-in, never a push, never a service repository.
+- **A team-tier flow can be committed on its own.** `sapien flow commit
+  <id>` (`--all` for every uncommitted one), `POST /v1/flows/{id}/commit`,
+  the `commit_flow` MCP tool and a Commit button beside the `not
+  committed` / `modified` badge record the file in the workspace
+  repository without moving it, so nobody has to demote and re-promote a
+  flow to commit it. Same rules: one file per commit, never a push.
+- **The workspace repository is fetched on the tick and pulled on request.**
+  The daemon's git tick now also runs `git fetch` on the workspace's own
+  repository, read-only. The status bar shows the branch, how many team
+  commits are waiting, how many of yours are unpushed, and uncommitted
+  files; a Pull button appears when the tree is clean and the branch is
+  behind (`merge --ff-only`, then the workspace tier is reindexed). "Sync
+  all", `sapien service sync` and `sapien workspace sync` also sync the
+  repository: fetch, then pull when clean and behind, otherwise say why
+  not. `sapien workspace status` and `GET /v1/workspace/repo` report it.
+  Never a push.
 - **Flow tiers.** A new flow lands in `local/flows` (this machine, ignored
   by git) by default; `sapien flow promote`, the `rescope_flow` MCP tool and
   the flow page move it to the team's `flows/` and, when the owning service

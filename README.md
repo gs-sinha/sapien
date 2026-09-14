@@ -170,6 +170,7 @@ ignored by git. Run it until it is green, then promote it:
 ```sh
 sapien flow promote order-cancel            # local -> flows/ (the team repo)
 sapien flow promote order-cancel --commit   # same, and commit the moved file
+sapien flow commit order-cancel             # commit a flow already in flows/
 sapien flow promote order-cancel --to service --service rider-service
 ```
 
@@ -178,6 +179,11 @@ team repo) -> service (the owning repo), with `sapien memory rescope`.
 A promoted flow shows whether it has shipped: not committed, committed but
 not pushed, or shipped. Sapien never pushes; what reaches the team is what
 you push.
+
+The workspace repository is fetched on the same ten-minute tick as the
+services, read-only. The status bar says when teammates' commits are
+waiting and offers Pull when your tree is clean (fast-forward only); Sync
+all does the same. `sapien workspace status` prints it in the terminal.
 
 Onboarding a new service from a shared workspace is one command from the
 checkout: `sapien service add .` commits the checkout's origin as the

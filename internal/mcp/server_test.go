@@ -12,7 +12,7 @@ import (
 var wantToolNames = []string{
 	"list_services", "get_service", "search_apis", "get_api", "get_dsl_reference",
 	"get_context", "execute_api", "list_flows", "get_flow", "search_docs", "get_doc",
-	"get_schema", "validate_flow", "create_flow", "update_flow", "patch_flow", "rescope_flow", "run_flow", "get_run",
+	"get_schema", "validate_flow", "create_flow", "update_flow", "patch_flow", "rescope_flow", "commit_flow", "run_flow", "get_run",
 	"search_memories", "get_relevant_memories", "create_memory", "get_promotion_target",
 	"add_service", "sync_service", "rescope_memory",
 	"list_examples", "get_example", "create_example", "rescope_example", "delete_example",

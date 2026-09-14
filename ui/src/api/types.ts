@@ -722,7 +722,8 @@ export type EventType =
   | 'run.finished'
   | 'memory.created'
   | 'memory.changed'
-  | 'flow.changed';
+  | 'flow.changed'
+  | 'workspace.repo';
 
 export interface Event {
   type: EventType;
@@ -864,6 +865,30 @@ export interface Workspace {
   default_environment?: string;
   dir: string;
   file: string;
+}
+
+/**
+ * GET /v1/workspace/repo, and the answer to /sync and /pull: read-only git
+ * status of the workspace folder itself (the team's git repository), plus
+ * what the last fetch/pull did. `in_git` false means the workspace isn't a
+ * git checkout at all, in which case every other field is meaningless.
+ */
+export interface RepoStatus {
+  in_git: boolean;
+  root?: string;
+  branch?: string;
+  remote?: string;
+  upstream?: string;
+  behind: number;
+  ahead: number;
+  dirty: number;
+  fetched_at?: string;
+  fetch_error?: string;
+  /** Set by /sync and /pull: whether a fast-forward pull actually ran. */
+  pulled?: boolean;
+  pulled_count?: number;
+  /** Why /sync didn't pull despite being behind (e.g. a dirty tree). */
+  skipped?: string;
 }
 
 // ---- engine.go wire shapes (internal/server/wire.go, internal/engine/engine.go) ----

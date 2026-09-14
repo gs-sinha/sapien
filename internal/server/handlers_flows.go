@@ -96,6 +96,28 @@ func (s *Server) handleFlowRescope(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+// commitFlowRequest is POST /v1/flows/{id}/commit's body (the client-side
+// twin, internal/engine/remote/flows.go's commitFlowRequest, sends the
+// same shape): message "" picks the engine's own default.
+type commitFlowRequest struct {
+	Message string `json:"message,omitempty"`
+}
+
+func (s *Server) handleFlowCommit(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var req commitFlowRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, err)
+		return
+	}
+	out, err := engineFrom(r.Context()).Flows().Commit(r.Context(), id, req.Message)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 func (s *Server) handleFlowGet(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	out, err := engineFrom(r.Context()).Flows().Get(r.Context(), id)

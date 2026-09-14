@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"strconv"
@@ -460,12 +461,46 @@ func newServiceSyncCmd(app *App) *cobra.Command {
 				}
 				printMissingEnvHint(app, &svc)
 			}
+			// Syncing every service also syncs the workspace's own repository
+			// (PLAN §7b); say what happened to it too, after the table.
+			if name == "" {
+				printTeamRepoSyncLine(app, cmd.Context(), eng)
+			}
 			return syncErr
 		},
 	}
 
 	cmd.Flags().BoolVar(&showAccepted, "show-accepted", false, "also print each accepted warning and the reason it was accepted")
 	return cmd
+}
+
+// printTeamRepoSyncLine appends `service sync`'s (no name) one-line report
+// of the workspace repository. The local engine's Services().Sync("")
+// already syncs the repo as part of that call, so this Repo().Sync() is a
+// second, idempotent pass -- cheap, and it is still worth making
+// explicitly rather than settling for a plain Repo().Status() read: Status
+// never carries a reason a pull did not happen (Skipped), while a second
+// Sync does, so a dirty tree or a missing upstream still gets reported
+// here even though the services sync already tried and skipped it.
+//
+// A repo problem is printed as a warning and never turns an otherwise
+// successful services sync into a failure -- that is what the services
+// themselves already report via the command's own exit code.
+func printTeamRepoSyncLine(app *App, ctx context.Context, eng engine.Engine) {
+	st, err := eng.Repo().Status(ctx)
+	if err != nil {
+		app.Printer.Line("%s", app.Printer.Dim("warning: checking the team repo failed: "+err.Error()))
+		return
+	}
+	if !st.InGit {
+		return
+	}
+	synced, err := eng.Repo().Sync(ctx)
+	if err != nil {
+		app.Printer.Line("%s", app.Printer.Dim("warning: syncing the team repo failed: "+err.Error()))
+		return
+	}
+	app.Printer.Line("team repo: %s", repoPullLine(synced))
 }
 
 func newServiceBindCmd(app *App) *cobra.Command {

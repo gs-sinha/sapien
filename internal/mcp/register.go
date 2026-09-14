@@ -48,7 +48,7 @@ func (srv *server) registerTools(s *sdkmcp.Server) {
 
 	sdkmcp.AddTool(s, &sdkmcp.Tool{
 		Name:        "sync_service",
-		Description: "Re-read a registered service's api/ package and reindex it (every service if name is omitted); returns status and warnings. Use after editing openapi.yaml, service.yaml, or docs, or when add_service reports the service is already registered.",
+		Description: "Re-read a registered service's api/ package and reindex it (every service if name is omitted); returns status and warnings. Use after editing openapi.yaml, service.yaml, or docs, or when add_service reports the service is already registered. Syncing everything (name omitted) also fetches the workspace's own git repository and pulls fast-forward when the tree is clean, reporting the result in `repo` and in the text.",
 	}, srv.syncService)
 
 	sdkmcp.AddTool(s, &sdkmcp.Tool{
@@ -130,6 +130,11 @@ func (srv *server) registerTools(s *sdkmcp.Server) {
 		Name:        "rescope_flow",
 		Description: "Move a flow to another tier without losing it, keeping its file name. The ladder: local is this machine only (<workspace>/local/flows, never committed); workspace is the team's git repo (<workspace>/flows, shared with everyone who clones the workspace); service is the owning service's own repo (<service>/api/flows) and needs that service bound to a local checkout here, so the flow rides your branch and PR. Promote a flow up the ladder once it has run green and others would benefit; move it down to keep experimenting privately. Returns the lean create_flow summary plus old_path and new_path. A promotion to workspace only moves the file; the result says whether it is committed. With `commit: true` (only when the user asked for it) the moved file is also committed in the workspace repository: one commit of that file, never a push, never a service repository.",
 	}, srv.rescopeFlow)
+
+	sdkmcp.AddTool(s, &sdkmcp.Tool{
+		Name:        "commit_flow",
+		Description: "Commit a team-tier flow's file in the workspace repository: one commit of that file, never a push. Only when the user asked you to commit -- a flow already promoted to the workspace tier just needs this to record it; rescope_flow's own `commit: true` does the same thing during a promotion. `message` defaults to \"Add flow <id> to the team workspace\" for a file never added to git, or \"Update flow <id>\" for one with an uncommitted edit. Refused when the flow is local or service tier, the workspace is not a git repository, or the file already has nothing to commit (already committed, pushed or not).",
+	}, srv.commitFlow)
 
 	sdkmcp.AddTool(s, &sdkmcp.Tool{
 		Name:        "report_friction",

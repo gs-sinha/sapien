@@ -6,7 +6,7 @@ import { Table } from '../components/Table';
 import { Timestamp } from '../components/Timestamp';
 import { useAsync } from '../lib/useAsync';
 import { subscribe } from '../state/events';
-import { FLOW_TIERS, ShippedBadge, TIER_NAMES, tierLabel, tierOf } from './flows/tier';
+import { CommitButton, FLOW_TIERS, ShippedBadge, TIER_NAMES, tierLabel, tierOf } from './flows/tier';
 import type { FlowOwnerKind, FlowSummary } from '../api/types';
 
 function matches(flow: FlowSummary, needle: string): boolean {
@@ -107,7 +107,12 @@ export default function FlowsPage() {
               render: (f) => (
                 <span className="flex items-center gap-1.5">
                   <span className="font-mono text-xs">{tierLabel(f.owner_kind, f.owner_id)}</span>
-                  {tierOf(f.owner_kind) === 'workspace' && <ShippedBadge shipped={f.shipped} />}
+                  {tierOf(f.owner_kind) === 'workspace' && (
+                    <>
+                      <ShippedBadge shipped={f.shipped} />
+                      <CommitButton id={f.id} shipped={f.shipped} onCommitted={reload} />
+                    </>
+                  )}
                 </span>
               ),
             },

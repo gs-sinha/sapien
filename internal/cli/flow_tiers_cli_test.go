@@ -316,3 +316,77 @@ func firstField(line string) string {
 	}
 	return line
 }
+
+// --- flow commit ---
+//
+// The fake never simulates FlowSummary.Shipped through List (only Commit's
+// own return value models the post-commit state), so `flow commit --all`'s
+// filtering can only be proven against the trivial case here (nothing
+// matches, so nothing is committed); internal/engine/local's own tests
+// (flows_ship_test.go) cover the real untracked/modified selection against
+// a real git repository.
+
+// TestFlowCommit_ByID: commits the seeded workspace-tier flow, forwarding
+// the message, and prints the ship state the fake's Commit models.
+func TestFlowCommit_ByID(t *testing.T) {
+	dir, fake := setupFakeEngine(t)
+	stdout, stderr, code := run(t, "--workspace", dir, "flow", "commit", "create-order-flow", "-m", "Ship it")
+	require.Equal(t, 0, code, "stderr: %s", stderr)
+	assert.Contains(t, stdout, "committed")
+	assert.Contains(t, stdout, "not pushed")
+
+	args := lastCall(fake, "Flows.Commit").Args.(map[string]string)
+	assert.Equal(t, "create-order-flow", args["id"])
+	assert.Equal(t, "Ship it", args["message"])
+}
+
+// TestFlowCommit_JSON: --json prints the FlowSummary the engine returned.
+func TestFlowCommit_JSON(t *testing.T) {
+	dir, _ := setupFakeEngine(t)
+	stdout, stderr, code := run(t, "--workspace", dir, "flow", "commit", "create-order-flow", "--json")
+	require.Equal(t, 0, code, "stderr: %s", stderr)
+	var got map[string]any
+	require.NoError(t, json.Unmarshal([]byte(stdout), &got))
+	assert.Equal(t, "create-order-flow", got["id"])
+	assert.Equal(t, "unpushed", got["shipped"])
+}
+
+// TestFlowCommit_RefusedForNonWorkspaceTier: a local-tier flow cannot be
+// committed standalone.
+func TestFlowCommit_RefusedForNonWorkspaceTier(t *testing.T) {
+	dir, _ := setupFakeEngine(t)
+	file := writeTemp(t, "auth-demo.flow.yaml", authoringFlow)
+	_, stderr, code := run(t, "--workspace", dir, "flow", "create", file)
+	require.Equal(t, 0, code, "stderr: %s", stderr)
+
+	_, stderr, code = run(t, "--workspace", dir, "flow", "commit", "auth-demo")
+	assert.NotEqual(t, 0, code)
+	assert.Contains(t, stderr, "workspace-tier flow can be committed")
+}
+
+// TestFlowCommit_RequiresIDOrAll: exactly one of <id> or --all.
+func TestFlowCommit_RequiresIDOrAll(t *testing.T) {
+	dir, _ := setupFakeEngine(t)
+	_, stderr, code := run(t, "--workspace", dir, "flow", "commit")
+	assert.NotEqual(t, 0, code)
+	assert.Contains(t, stderr, "--all")
+
+	_, stderr, code = run(t, "--workspace", dir, "flow", "commit", "create-order-flow", "--all")
+	assert.NotEqual(t, 0, code)
+	assert.Contains(t, stderr, "not both")
+}
+
+// TestFlowCommit_All_NothingToCommit: against the fake, no flow's Shipped
+// is ever untracked or modified (List never simulates it), so --all always
+// finds nothing to do -- and, critically, never calls Flows.Commit for a
+// flow nobody asked to commit.
+func TestFlowCommit_All_NothingToCommit(t *testing.T) {
+	dir, fake := setupFakeEngine(t)
+	before := len(fake.Calls)
+	stdout, stderr, code := run(t, "--workspace", dir, "flow", "commit", "--all")
+	require.Equal(t, 0, code, "stderr: %s", stderr)
+	assert.Contains(t, stdout, "nothing to commit")
+	for _, c := range fake.Calls[before:] {
+		assert.NotEqual(t, "Flows.Commit", c.Method)
+	}
+}
