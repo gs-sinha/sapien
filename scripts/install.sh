@@ -216,12 +216,10 @@ cat <<'EOF'
 Next:
   sapien init ~/sapien-workspace                     create a workspace
   cd ~/sapien-workspace
+  ollama pull nomic-embed-text                       recommended: semantic search (add the semantic: block from the guide)
   sapien mcp config --client claude-code --write --allow-mutations
                                                      connect your agent (or codex, cursor, cowork)
   sapien ui                                          open the inspector
-
-Recommended: semantic search with a local embedding model
-  ollama pull nomic-embed-text                       then add the semantic: block from the guide
 
 Guide: https://gs-sinha.github.io/sapien/
 EOF

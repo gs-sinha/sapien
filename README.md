@@ -122,7 +122,8 @@ call, and onboard your services.
    request so flows, other agents, and the UI reuse it. See
    [`docs/examples.md`](docs/examples.md).
 
-Recommended once it works: turn on [semantic search](#optional-semantic-search)
+Recommended, right after step 2 and before connecting an agent, so the
+first daemon starts with it: turn on [semantic search](#optional-semantic-search)
 with a local Ollama model, so search also matches operations described in
 other words. It takes an `ollama pull` and a config block, and nothing leaves
 the machine.
