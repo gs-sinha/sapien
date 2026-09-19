@@ -35,7 +35,12 @@ function RepoSegment() {
     flagged = true;
   }
   if (status.dirty > 0) {
-    parts.push(`${status.dirty} uncommitted`);
+    // PLAN §34f item 1: links straight to the Changes page's commit tree.
+    parts.push(
+      <Link key="dirty" to="/ui/changes" className="hover:underline">
+        {status.dirty} uncommitted
+      </Link>,
+    );
     flagged = true;
   }
   if (status.fetch_error) {

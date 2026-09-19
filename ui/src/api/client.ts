@@ -45,6 +45,9 @@ import type {
   OllamaPullRequest,
   PromotionTarget,
   PurgeRunsResponse,
+  RepoChanges,
+  RepoCommitResult,
+  RepoDiff,
   RepoStatus,
   RequestExample,
   Run,
@@ -584,4 +587,27 @@ export const serviceRefs = {
   branches: (id: string): Promise<ServiceBranches> => get(`/v1/services/${encodeURIComponent(id)}/branches`),
   set: (id: string, req: SetServiceRefRequest): Promise<Service> => put(`/v1/services/${encodeURIComponent(id)}/ref`, req),
   clear: (id: string): Promise<Service> => del(`/v1/services/${encodeURIComponent(id)}/ref`),
+};
+
+// ---- PLAN §34f item 1: the Changes page ----
+
+export const repoChanges = {
+  get: (): Promise<RepoChanges> => get('/v1/workspace/repo/changes'),
+  diff: (path: string): Promise<RepoDiff> => get(`/v1/workspace/repo/diff${buildQuery({ path })}`),
+  commit: (paths: string[], message: string): Promise<RepoCommitResult> => post('/v1/workspace/repo/commit', { paths, message }),
+};
+
+// ---- PLAN §34f item 6: folders ----
+//
+// POST /v1/{flows|memories|examples}/{id}/move {folder}. For memories and
+// examples this is the same route as memories.move/examples.move above
+// (POST .../move), which already moves a file between local/workspace
+// tiers with {tier}; the body now optionally carries `folder` instead, so
+// one route serves both kinds of move rather than adding a second one.
+// flows.move is new: a flow's tier move goes through /rescope, so this
+// path was unused until folders existed.
+export const folders = {
+  moveFlow: (id: string, folder: string): Promise<FlowSummary> => post(`/v1/flows/${encodeURIComponent(id)}/move`, { folder }),
+  moveMemory: (id: string, folder: string): Promise<Memory> => post(`/v1/memories/${encodeURIComponent(id)}/move`, { folder }),
+  moveExample: (id: string, folder: string): Promise<SavedExample> => post(`/v1/examples/${encodeURIComponent(id)}/move`, { folder }),
 };

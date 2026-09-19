@@ -4,17 +4,27 @@ import { MemoryRouter, useLocation } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Nav } from '../components/Nav';
 import { SearchBox } from '../components/SearchBox';
+import { useChangesCount } from '../state/changesCount';
 import { useFrictionCount } from '../state/friction';
-import type { FrictionReport } from '../api/types';
+import type { FrictionReport, RepoChanges } from '../api/types';
 
 const frictionList = vi.fn();
+const repoChangesGet = vi.fn(async (): Promise<RepoChanges> => ({
+  status: { in_git: true, behind: 0, ahead: 0, dirty: 0 },
+  files: [],
+  services: [],
+}));
 
-// Only `friction` is overridden -- WorkspacePicker (rendered by Nav) calls
-// the real `workspacesApi`, whose own client-level .catch() already
-// tolerates a daemon that isn't there in this test.
+// Only `friction` and `repoChanges` are overridden -- WorkspacePicker
+// (rendered by Nav) calls the real `workspacesApi`, whose own client-level
+// .catch() already tolerates a daemon that isn't there in this test.
 vi.mock('../api/client', async () => {
   const actual = await vi.importActual<typeof import('../api/client')>('../api/client');
-  return { ...actual, friction: { list: (...a: unknown[]) => frictionList(...a) } };
+  return {
+    ...actual,
+    friction: { list: (...a: unknown[]) => frictionList(...a) },
+    repoChanges: { get: () => repoChangesGet() },
+  };
 });
 
 function LocationProbe({ onChange }: { onChange: (path: string) => void }) {
@@ -25,7 +35,9 @@ function LocationProbe({ onChange }: { onChange: (path: string) => void }) {
 
 beforeEach(() => {
   frictionList.mockReset().mockResolvedValue([]);
+  repoChangesGet.mockReset().mockResolvedValue({ status: { in_git: true, behind: 0, ahead: 0, dirty: 0 }, files: [], services: [] });
   useFrictionCount.setState({ pending: 0 });
+  useChangesCount.setState({ count: 0, inGit: false });
 });
 
 describe('layout shell', () => {
@@ -35,9 +47,45 @@ describe('layout shell', () => {
         <Nav />
       </MemoryRouter>,
     );
-    for (const label of ['Flows', 'Runs', 'Services', 'Operations', 'Examples', 'Memories', 'Friction', 'Events']) {
+    for (const label of ['Flows', 'Runs', 'Services', 'Operations', 'Examples', 'Memories', 'Friction', 'Events', 'Agent', 'Changes']) {
       expect(screen.getByRole('link', { name: label })).toBeInTheDocument();
     }
+  });
+
+  it('badges the Changes link with the number of changed files, hidden when 0 or not in git (PLAN §34f item 1)', async () => {
+    repoChangesGet.mockResolvedValue({
+      status: { in_git: true, behind: 0, ahead: 0, dirty: 3 },
+      files: [
+        { path: 'a', state: 'modified', kind: 'other' },
+        { path: 'b', state: 'modified', kind: 'other' },
+      ],
+      services: [],
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/ui/flows']}>
+        <Nav />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(screen.getByRole('link', { name: 'Changes 2' })).toBeInTheDocument());
+  });
+
+  it('hides the Changes badge when the workspace is not in git, even if files is non-empty', async () => {
+    repoChangesGet.mockResolvedValue({
+      status: { in_git: false, behind: 0, ahead: 0, dirty: 0 },
+      files: [{ path: 'a', state: 'modified', kind: 'other' }],
+      services: [],
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/ui/flows']}>
+        <Nav />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(repoChangesGet).toHaveBeenCalled());
+    expect(screen.getByRole('link', { name: 'Changes' })).toBeInTheDocument();
   });
 
   it('badges the Friction link with the pending-report count', async () => {

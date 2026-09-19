@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { examples } from '../api/client';
+import { examples, folders as foldersApi } from '../api/client';
+import { FolderMovePopover } from '../components/FolderMovePopover';
 import { JsonView } from '../components/JsonView';
 import { KeyValue } from '../components/KeyValue';
 import { Timestamp } from '../components/Timestamp';
 import { CommitButton, ItemTierBadge, MoveTierControl, PushButton, ShippedBadge } from '../components/tiers';
 import { YamlView } from '../components/YamlView';
+import { distinctFolders } from '../lib/folders';
 import { useAsync } from '../lib/useAsync';
 import { dumpYaml } from '../lib/yaml';
 import { pushToast } from '../state/toast';
@@ -117,6 +119,13 @@ export default function ExampleDetailPage() {
           {deleting ? 'Deleting…' : 'Delete'}
         </button>
         <MoveTierControl tier={ex.tier} onMove={(target) => examples.move(ex.id, target)} onMoved={reload} />
+        <span className="text-xs text-slate-500">{ex.folder || '(root)'}</span>
+        <FolderMovePopover
+          currentFolder={ex.folder}
+          loadFolders={() => examples.list().then(distinctFolders)}
+          onMove={(next) => foldersApi.moveExample(ex.id, next)}
+          onMoved={reload}
+        />
       </div>
       <p className="mb-3 text-xs text-slate-400">
         Scope says which catalog the example is filed under; tier says where its file is: local until you move it to the team.

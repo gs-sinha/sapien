@@ -141,9 +141,11 @@ describe('MemoriesPage tier column', () => {
 
     expect(within(rowOf('mem_local')).getByRole('button', { name: 'Move to team' })).toBeInTheDocument();
     expect(within(rowOf('mem_unpushed')).getByRole('button', { name: 'Move to local' })).toBeInTheDocument();
-    // A personal memory and a service-tier one offer no move control at all.
-    expect(within(rowOf('mem_personal')).queryByRole('button', { name: /Move to/ })).not.toBeInTheDocument();
-    expect(within(rowOf('mem_service')).queryByRole('button', { name: /Move to/ })).not.toBeInTheDocument();
+    // A personal memory and a service-tier one offer no tier-move control at
+    // all; the folder-move popover ("Move to folder…") is unrelated to tier
+    // and always present, so only the tier-specific labels are checked here.
+    expect(within(rowOf('mem_personal')).queryByRole('button', { name: /^Move to (team|local)$/ })).not.toBeInTheDocument();
+    expect(within(rowOf('mem_service')).queryByRole('button', { name: /^Move to (team|local)$/ })).not.toBeInTheDocument();
 
     await user.click(within(rowOf('mem_local')).getByRole('button', { name: 'Move to team' }));
     await waitFor(() => expect(memoriesMove).toHaveBeenCalledWith('mem_local', 'workspace'));
