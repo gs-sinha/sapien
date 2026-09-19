@@ -123,7 +123,7 @@ func (srv *server) registerTools(s *sdkmcp.Server) {
 
 	sdkmcp.AddTool(s, &sdkmcp.Tool{
 		Name:        "patch_flow",
-		Description: "Apply targeted edits to one saved flow's steps, inputs, or metadata (set_step, merge_step, add_step, remove_step, set_inputs, set_meta) without resending the whole document; validates the result and returns the same lean summary as create_flow/update_flow. Cheaper than update_flow for a one-line change to a large flow.",
+		Description: "Apply targeted edits to one saved flow's steps, inputs, or metadata (set_step, merge_step, add_step, remove_step, set_inputs, set_meta) without resending the whole document; validates the result and returns the same lean summary as create_flow/update_flow, plus `notes` for any step comment the patch dropped or left over changed content. Cheaper than update_flow for a one-line change to a large flow, and layout-preserving: an untouched step keeps its own key order, comments, and indent width; a step Apply writes itself (set_step, add_step, a merge_step's new field) uses the flow DSL's conventional key order, never alphabetical. Blank lines between steps are not preserved.",
 	}, srv.patchFlow)
 
 	sdkmcp.AddTool(s, &sdkmcp.Tool{

@@ -486,6 +486,49 @@ func TestTool_PatchFlow(t *testing.T) {
 	assert.Contains(t, gotOut.YAML, "call: rider-service.getRider", "untouched fields must survive the patch")
 }
 
+// TestTool_PatchFlow_NotesSurfaceCommentHandling confirms flowpatch's Notes
+// (a step's leading comment kept over changed content, or dropped along
+// with a replaced/removed step) reach both FlowSaveResult.Notes and the
+// tool's text.
+func TestTool_PatchFlow_NotesSurfaceCommentHandling(t *testing.T) {
+	cs := newTestSession(t, Config{Default: DefaultPermissions()}, "claude-code")
+	created := callTool(t, cs, "create_flow", map[string]any{
+		"flow_yaml": "version: 1\nid: commented-flow\nsteps:\n  # fetches the rider\n  - id: get\n    call: rider-service.getRider\n",
+	})
+	require.False(t, created.IsError, firstText(created))
+
+	res := callTool(t, cs, "patch_flow", map[string]any{
+		"id": "commented-flow",
+		"ops": []map[string]any{
+			{"kind": "merge_step", "id": "get", "fields": map[string]any{"until": "status == 200"}},
+		},
+	})
+	require.False(t, res.IsError, firstText(res))
+	out := decodeStructured[FlowSaveResult](t, res.StructuredContent)
+	require.Len(t, out.Notes, 1)
+	assert.Equal(t, "step `get` kept its comment; check it still describes the step", out.Notes[0])
+	assert.Contains(t, firstText(res), out.Notes[0], "the note must also appear in the tool's text output")
+
+	// remove_step's own Notes phrasing ("removed with the step") on a
+	// second, freshly-created flow -- see
+	// internal/engine/local/flows_patch_test.go for the real-engine test of
+	// an invalid patch leaving the saved file untouched (this test's fake
+	// engine doesn't run schema validation, only its own marker strings).
+	created2 := callTool(t, cs, "create_flow", map[string]any{
+		"flow_yaml": "version: 1\nid: commented-flow-2\nsteps:\n  # fetches the rider\n  - id: get\n    call: rider-service.getRider\n  - id: check\n    call: rider-service.getRider\n",
+	})
+	require.False(t, created2.IsError, firstText(created2))
+	res = callTool(t, cs, "patch_flow", map[string]any{
+		"id":  "commented-flow-2",
+		"ops": []map[string]any{{"kind": "remove_step", "id": "get"}},
+	})
+	require.False(t, res.IsError, firstText(res))
+	out2 := decodeStructured[FlowSaveResult](t, res.StructuredContent)
+	require.Len(t, out2.Notes, 1)
+	assert.Equal(t, "step `get` had a comment above it; it was removed with the step", out2.Notes[0])
+	assert.Contains(t, firstText(res), out2.Notes[0])
+}
+
 func TestTool_PatchFlow_NoOps(t *testing.T) {
 	cs := newTestSession(t, Config{Default: DefaultPermissions()}, "claude-code")
 	res := callTool(t, cs, "patch_flow", map[string]any{"id": "rider-flow", "ops": []map[string]any{}})

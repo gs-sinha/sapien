@@ -27,6 +27,9 @@ type flowSaveSummary struct {
 	SetupSteps    int      `json:"setup_steps"`
 	TeardownSteps int      `json:"teardown_steps"`
 	Operations    []string `json:"operations"`
+	// Notes carries `flow patch`'s comment-handling notes (see
+	// flowpatch.Result.Notes); always empty for `flow update`.
+	Notes []string `json:"notes,omitempty"`
 }
 
 func summarizeFlow(f *domain.Flow) flowSaveSummary {
@@ -47,8 +50,13 @@ func summarizeFlow(f *domain.Flow) flowSaveSummary {
 	return sum
 }
 
-func printFlowSaved(app *App, verb string, f *domain.Flow) error {
+// printFlowSaved prints the lean summary every authoring command ends
+// with. notes (only ever non-empty from `flow patch`, see flowpatch.Result)
+// are attached to the summary in JSON mode and printed one per line
+// otherwise.
+func printFlowSaved(app *App, verb string, f *domain.Flow, notes ...string) error {
 	sum := summarizeFlow(f)
+	sum.Notes = notes
 	if app.Printer.IsJSON() {
 		return app.Printer.JSON(sum)
 	}
@@ -61,6 +69,9 @@ func printFlowSaved(app *App, verb string, f *domain.Flow) error {
 		where = " at " + sum.Path
 	}
 	app.Printer.Line("%s flow %s%s [%s], %d steps%s", verb, sum.ID, where, flowTier(f.OwnerKind, f.OwnerID), sum.Steps, extra)
+	for _, n := range notes {
+		app.Printer.Line("note: %s", n)
+	}
 	return nil
 }
 
@@ -116,7 +127,18 @@ func newFlowPatchCmd(app *App) *cobra.Command {
   --merge-step <id>=<yaml>  set some keys of one step, e.g. 'rider={assert: [status == 200]}'
   --remove-step <id>        drop a step
 
-The result is validated before it is saved; an invalid patch changes nothing.`,
+The result is validated before it is saved; an invalid patch changes nothing.
+
+This is layout-preserving, not lossless: a step the patch doesn't touch keeps
+its own comments, key order, and indent width (2 or 4 spaces, matched from the
+file); a step the patch writes (set_step, add_step, a merge_step's newly-added
+field) uses the flow DSL's own conventional key order, never alphabetical.
+add_step's --ops before/after infers which phase (and, nested inside a loop
+block, which block) to insert into from the named step, wherever it actually
+is; an explicit phase/into that disagrees with it is rejected, naming where
+that step really is. A step's own leading comment survives merge_step (noted,
+since what's under it just changed) but not set_step or remove_step (also
+noted); blank lines between steps are never preserved.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var ops []flowpatch.Op
@@ -159,15 +181,15 @@ The result is validated before it is saved; an invalid patch changes nothing.`,
 			if f.Source == "" {
 				return errs.New(errs.Internal, "flow %s has no YAML source to patch", f.ID)
 			}
-			patched, err := flowpatch.Apply(f.Source, ops)
+			patchResult, err := flowpatch.Apply(f.Source, ops)
 			if err != nil {
 				return err
 			}
-			updated, err := eng.Flows().Update(cmd.Context(), f.ID, patched)
+			updated, err := eng.Flows().Update(cmd.Context(), f.ID, patchResult.YAML)
 			if err != nil {
 				return err
 			}
-			return printFlowSaved(app, "patched", updated)
+			return printFlowSaved(app, "patched", updated, patchResult.Notes...)
 		},
 	}
 	cmd.Flags().StringVar(&opsFile, "ops", "", "operations as JSON: inline, or @file")

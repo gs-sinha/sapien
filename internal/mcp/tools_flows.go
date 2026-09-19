@@ -293,6 +293,13 @@ type FlowSaveResult struct {
 	// buildFlowSaveResult, since it needs a List call the *domain.Flow
 	// buildFlowSaveResult is given does not carry.
 	Shipped string `json:"shipped,omitempty"`
+	// Notes carries non-error, worth-a-look observations about the write.
+	// Currently populated only by patch_flow, from flowpatch.Result.Notes:
+	// one entry per step whose own comment was dropped (set_step,
+	// remove_step) or left in place over changed content (merge_step) --
+	// see internal/flowpatch's package doc for exactly what a patch can and
+	// cannot preserve.
+	Notes []string `json:"notes,omitempty"`
 }
 
 // buildFlowSaveResult reduces a saved flow (plus the ValidationResult from
@@ -790,7 +797,7 @@ func resolveUpdateSource(wsDir string, in UpdateFlowInput) (string, error) {
 // update_flow... Accept a file path, or a step-level patch").
 type PatchFlowInput struct {
 	ID  string         `json:"id" jsonschema:"flow id"`
-	Ops []flowpatch.Op `json:"ops" jsonschema:"operations to apply in order: set_step{id,step} (a step or a loop block, by id, nested or not), merge_step{id,fields} (fields include when and, on a loop block, foreach/repeat/max/break_when/on_error -- not steps: edit nested steps individually or set_step the whole block), add_step{step,phase?,after?,before?} for a top-level step, or add_step{step,into,after?,before?} to add inside a loop block's own nested steps (after/before then name a sibling inside that block), remove_step{id} (removing a block's id removes its nested steps too), set_inputs{inputs}, set_meta{meta:{name?,description?,tags?}}"`
+	Ops []flowpatch.Op `json:"ops" jsonschema:"operations to apply in order: set_step{id,step} (a step or a loop block, by id, nested or not), merge_step{id,fields} (fields include when and, on a loop block, foreach/repeat/max/break_when/on_error -- not steps: edit nested steps individually or set_step the whole block), add_step{step,phase?,after?,before?} for a top-level step, or add_step{step,into,after?,before?} to add inside a loop block's own nested steps (after/before then name a sibling inside that block); with after/before, phase/into are inferred from wherever that anchor step actually lives -- passing them anyway is checked, not used, and a value that disagrees with the anchor is rejected with an error naming where the anchor really is, remove_step{id} (removing a block's id removes its nested steps too), set_inputs{inputs}, set_meta{meta:{name?,description?,tags?}}. Edits are layout-preserving: a step this doesn't touch keeps its own comments, key order, and indent width; a step this writes (set_step, add_step, a merge_step's newly-added field) uses the flow DSL's own conventional key order. A step's own leading comment survives merge_step (the result's notes field flags it, since the step's content just changed under it) but not set_step or remove_step (also flagged in notes); blank lines between steps are never preserved."`
 }
 
 func (s *server) patchFlow(ctx context.Context, req *sdkmcp.CallToolRequest, in PatchFlowInput) (*sdkmcp.CallToolResult, any, error) {
@@ -804,7 +811,7 @@ func (s *server) patchFlow(ctx context.Context, req *sdkmcp.CallToolRequest, in 
 	if err != nil {
 		return errResult(err), nil, nil
 	}
-	patched, perr := flowpatch.Apply(existing.Source, in.Ops)
+	patchResult, perr := flowpatch.Apply(existing.Source, in.Ops)
 	if perr != nil {
 		// errs.New, not errs.Wrap: errResult's text rendering shows only
 		// Code and Message, not a wrapped Cause, and flowpatch's own error
@@ -812,14 +819,18 @@ func (s *server) patchFlow(ctx context.Context, req *sdkmcp.CallToolRequest, in 
 		// agent needs to see to retry.
 		return errResult(errs.New(errs.Invalid, "applying patch to flow %q: %v", in.ID, perr)), nil, nil
 	}
-	valResult, _ := s.engine().Flows().Validate(ctx, patched)
-	flow, err := s.engine().Flows().Update(ctx, in.ID, patched)
+	valResult, _ := s.engine().Flows().Validate(ctx, patchResult.YAML)
+	flow, err := s.engine().Flows().Update(ctx, in.ID, patchResult.YAML)
 	if err != nil {
 		return errResult(err), nil, nil
 	}
 	out := buildFlowSaveResult(flow, s.workspaceDir(), valResult)
 	out.Shipped = shippedStateFor(ctx, s.engine().Flows(), flow.ID)
+	out.Notes = patchResult.Notes
 	text := fmt.Sprintf("patched flow %s at %s, %d steps\n", out.ID, out.Path, out.Steps)
+	for _, n := range out.Notes {
+		text += n + "\n"
+	}
 	return result(text, out), nil, nil
 }
 
