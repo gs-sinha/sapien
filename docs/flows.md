@@ -136,11 +136,23 @@ resolved request.
 
 ## Expressions
 
-Flow expressions are CEL. `assert`, `extract`, and `until` are bare CEL;
-`${...}` inside any other string interpolates a CEL expression (a value
-that is *exactly* one `${...}` keeps its native type instead of becoming
-a string). The full reference, including every structured-assertion
-compilation and the "missing key is an error, not null" rule, is:
+Flow expressions are CEL. `when`, `assert`, `extract`, `until`, and a loop
+block's `foreach`/`break_when`/`repeat.until`/`repeat.while` are bare CEL;
+`${...}` inside any other string (`input`, `body`, `headers`, a structured
+assertion's `eq`/`neq`/`contains`/`matches`/`lt`/`lte`/`gt`/`gte`)
+interpolates a CEL expression (a value that is *exactly* one `${...}` keeps
+its native type instead of becoming a string). `${...}` also works inside
+every bare-CEL field above, by rewriting the template into the expression
+before it compiles instead of interpolating a value: `"${e}"`/`'${e}'` (the
+template is the WHOLE string literal) becomes `(e)`, keeping e's native
+type -- so `'body.orderId != "${steps.create.out.orderId}"'` compares the
+actual order id, not the literal text `${steps.create.out.orderId}`;
+`"pre-${e}-post"` becomes `("pre-" + string(e) + "-post")`; and `${e}`
+outside any string becomes `(e)` in place. A `${` that survives (an
+unterminated template, or one left inside a string that never closes) is a
+validator error, `TEMPLATE_IN_EXPR`. The full reference, including every
+structured-assertion compilation and the "missing key is an error, not
+null" rule, is:
 
 ```sh
 sapien flow reference expressions
@@ -154,9 +166,18 @@ Structured assertions are shorthand for common comparisons:
 | `latency_ms: {lt: 2000}` | Response latency under 2000ms. |
 | `{path: body.riderId, eq: "r1"}` | `body.riderId == "r1"`. |
 | `{path: body.riderId, exists: true}` | The field is present. |
+| `{path: body.n, lt: 10}` | `body.n < 10` (also `lte`, `gt`, `gte`; each accepts `${...}` like `eq`). |
 | `schema: contract` | Validate the body against the response schema. |
 
 Add `message:` to a structured assertion to name it in a failure report.
+
+`out.<name>` (an earlier `extract:` entry from the SAME step) is available
+in that step's own `assert` and `until`: extraction runs before assertions,
+and once per poll attempt before `until`, tolerantly -- one entry failing
+doesn't block another or the step's own assertions, but a reference to an
+`out.<name>` whose extract failed says so ("was not extracted") rather than
+a bare "no such key", and `sapien flow validate` rejects `out.<name>`
+naming an entry the step doesn't `extract` at all (`UNKNOWN_OUT`).
 
 ## Assertions and polling
 

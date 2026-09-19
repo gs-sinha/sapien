@@ -236,7 +236,7 @@ func (v *Validator) validateMaterialized(ctx context.Context, f *domain.Flow) (*
 			// foreach like `when` above, the other three with sameBlock
 			// access to the block's own children plus `loop`.
 			if st.When != "" {
-				diags = append(diags, vd.checkExprText(st.When, st, nil, i, false, false, false, st.Line, fs.Parent)...)
+				diags = append(diags, vd.checkExprText(st.When, "when", st, nil, i, false, false, false, st.Line, fs.Parent)...)
 			}
 			diags = append(diags, vd.checkBlockFields(st, i)...)
 		}
@@ -244,6 +244,8 @@ func (v *Validator) validateMaterialized(ctx context.Context, f *domain.Flow) (*
 	}
 
 	diags = append(diags, findDuplicateExtracts(f)...)
+
+	diags = dedupeDiagnostics(diags)
 
 	valid := true
 	for _, d := range diags {
@@ -761,12 +763,12 @@ func (vd *validation) checkExpressionsForStep(st domain.Step, idx int, blockCtx 
 	op := vd.opByStepID[st.ID]
 	var diags []domain.Diagnostic
 
-	add := func(text string, hasCurrent, secretAllowed bool, line int) {
-		diags = append(diags, vd.checkExprText(text, st, op, idx, hasCurrent, secretAllowed, hasIter, line, blockCtx)...)
+	add := func(text, field string, hasCurrent, secretAllowed bool, line int) {
+		diags = append(diags, vd.checkExprText(text, field, st, op, idx, hasCurrent, secretAllowed, hasIter, line, blockCtx)...)
 	}
-	walk := func(v any, secretAllowed bool) {
+	walk := func(v any, secretAllowed bool, field string) {
 		for _, t := range collectTemplates(v) {
-			add(t, false, secretAllowed, st.Line)
+			add(t, field, false, secretAllowed, st.Line)
 		}
 	}
 
@@ -774,20 +776,20 @@ func (vd *validation) checkExpressionsForStep(st domain.Step, idx int, blockCtx 
 	// built, so it sees the same roots as input/body/headers (no current
 	// step context) and is checked here first.
 	if st.When != "" {
-		add(st.When, false, false, st.Line)
+		add(st.When, "when", false, false, st.Line)
 	}
 
-	walk(st.Input, false)
+	walk(st.Input, false, "input")
 	if st.Params != nil {
-		walk(st.Params.Path, false)
-		walk(st.Params.Query, false)
-		walk(stringMapToAny(st.Params.Headers), true)
+		walk(st.Params.Path, false, "params.path")
+		walk(st.Params.Query, false, "params.query")
+		walk(stringMapToAny(st.Params.Headers), true, "params.headers")
 	}
-	walk(st.Body, false)
-	walk(stringMapToAny(st.Headers), true)
+	walk(st.Body, false, "body")
+	walk(stringMapToAny(st.Headers), true, "headers")
 
 	if st.Until != "" {
-		add(st.Until, true, false, st.Line)
+		add(st.Until, "until", true, false, st.Line)
 	}
 	if len(st.Extract) > 0 {
 		names := make([]string, 0, len(st.Extract))
@@ -796,16 +798,16 @@ func (vd *validation) checkExpressionsForStep(st domain.Step, idx int, blockCtx 
 		}
 		sort.Strings(names)
 		for _, name := range names {
-			add(st.Extract[name], true, false, st.Line)
+			add(st.Extract[name], "extract."+name, true, false, st.Line)
 		}
 	}
 	for _, a := range st.Assert {
 		if a.Expr != "" {
-			add(a.Expr, true, false, a.Line)
+			add(a.Expr, "assert", true, false, a.Line)
 			continue
 		}
 		for _, t := range assertionTemplates(a) {
-			add(t, true, false, a.Line)
+			add(t, "assert", true, false, a.Line)
 		}
 		compiled, err := expr.CompileAssertion(a)
 		if err != nil {
@@ -816,7 +818,7 @@ func (vd *validation) checkExpressionsForStep(st domain.Step, idx int, blockCtx 
 			continue
 		}
 		if compiled.Kind == "cel" {
-			add(compiled.Expr, true, false, a.Line)
+			add(compiled.Expr, "assert", true, false, a.Line)
 		}
 	}
 	return diags
@@ -831,23 +833,49 @@ func (vd *validation) checkExpressionsForStep(st domain.Step, idx int, blockCtx 
 func (vd *validation) checkBlockFields(st domain.Step, idx int) []domain.Diagnostic {
 	var diags []domain.Diagnostic
 	if st.Foreach != "" {
-		diags = append(diags, vd.checkExprText(st.Foreach, st, nil, idx, false, false, false, st.Line, vd.blockOf[st.ID])...)
+		diags = append(diags, vd.checkExprText(st.Foreach, "foreach", st, nil, idx, false, false, false, st.Line, vd.blockOf[st.ID])...)
 	}
 	if st.Repeat != nil {
 		if st.Repeat.Until != "" {
-			diags = append(diags, vd.checkExprText(st.Repeat.Until, st, nil, idx, false, false, true, st.Line, st.ID)...)
+			diags = append(diags, vd.checkExprText(st.Repeat.Until, "repeat.until", st, nil, idx, false, false, true, st.Line, st.ID)...)
 		}
 		if st.Repeat.While != "" {
-			diags = append(diags, vd.checkExprText(st.Repeat.While, st, nil, idx, false, false, true, st.Line, st.ID)...)
+			diags = append(diags, vd.checkExprText(st.Repeat.While, "repeat.while", st, nil, idx, false, false, true, st.Line, st.ID)...)
 		}
 	}
 	if st.BreakWhen != "" {
-		diags = append(diags, vd.checkExprText(st.BreakWhen, st, nil, idx, false, false, true, st.Line, st.ID)...)
+		diags = append(diags, vd.checkExprText(st.BreakWhen, "break_when", st, nil, idx, false, false, true, st.Line, st.ID)...)
 	}
 	return diags
 }
 
-func (vd *validation) checkExprText(text string, st domain.Step, op *domain.Operation, idx int, hasCurrent, secretAllowed, hasIter bool, line int, blockCtx string) []domain.Diagnostic {
+// checkExprText checks one CEL-typed field's raw text (field names it, for
+// diagnostics, e.g. "when", "until", "extract.tid", "foreach"): first that
+// any `${...}` template in it -- bare, or inside a string literal --
+// expands cleanly (expr.ExpandTemplates; a `${` that survives, unterminated
+// or left behind by a string literal that never closes, is
+// CodeTemplateInExpr, not the generic syntax error below, since nothing
+// downstream would otherwise explain it), then the usual syntax
+// (expr.Parse) and static-reference (expr.Roots/checkRef) checks -- which
+// see the SAME expanded source internally, so a reference that was only
+// visible inside a template gets STEP_ORDER/UNKNOWN_STEP/MAYBE_SKIPPED/etc
+// exactly like one written as bare CEL.
+func (vd *validation) checkExprText(text, field string, st domain.Step, op *domain.Operation, idx int, hasCurrent, secretAllowed, hasIter bool, line int, blockCtx string) []domain.Diagnostic {
+	templateDiag := func(msg string) []domain.Diagnostic {
+		return []domain.Diagnostic{{
+			Code: CodeTemplateInExpr, Severity: domain.SeverityError,
+			Message: fmt.Sprintf("step `%s`'s `%s` %s", st.ID, field, msg),
+			Line:    line, StepID: st.ID,
+		}}
+	}
+	expanded, xerr := expr.ExpandTemplates(text)
+	if xerr != nil {
+		return templateDiag(fmt.Sprintf("has a malformed `${...}` template: %s", xerr.Error()))
+	}
+	if strings.Contains(expanded, "${") {
+		return templateDiag("has a `${...}` template that could not be expanded here; check for an unterminated string around it")
+	}
+
 	if err := expr.Parse(text); err != nil {
 		return []domain.Diagnostic{{
 			Code: CodeExprSyntax, Severity: domain.SeverityError,
@@ -899,14 +927,76 @@ func (vd *validation) checkRef(r expr.Ref, st domain.Step, op *domain.Operation,
 			return vd.checkFieldPath(op, r.Path, st, line)
 		}
 		return nil
-	case "status", "headers", "latency_ms", "request", "out":
+	case "status", "headers", "latency_ms", "request":
 		if !hasCurrent {
 			return contextRootDiag(r.Root, st, line)
 		}
 		return nil
+	case "out":
+		if !hasCurrent {
+			return contextRootDiag("out", st, line)
+		}
+		return vd.checkOutRef(r, st, line)
 	default:
 		return nil
 	}
+}
+
+// checkOutRef validates an `out.<name>` reference (assert/until/extract, all
+// of which reach here with hasCurrent true) against st's own `extract:`:
+// `<name>` must be a key that step declares, since `out` only ever holds
+// this step's own extracted values (PLAN's doc promise for both assert and
+// until -- see internal/runner/step.go's extract-before-assert ordering).
+// A reference with no path segment at all (bare `out`, e.g. `size(out) == 0`
+// or `has(out.tid)`'s own `out` operand handled elsewhere) needs no name
+// check.
+func (vd *validation) checkOutRef(r expr.Ref, st domain.Step, line int) []domain.Diagnostic {
+	if len(r.Path) == 0 {
+		return nil
+	}
+	name := r.Path[0]
+	if _, ok := st.Extract[name]; ok {
+		return nil
+	}
+	names := make([]string, 0, len(st.Extract))
+	for n := range st.Extract {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return []domain.Diagnostic{{
+		Code: CodeUnknownOut, Severity: domain.SeverityError,
+		Message:     fmt.Sprintf("out.%s is not extracted by step `%s`; add it to `extract:` or fix the name", name, st.ID),
+		Line:        line,
+		StepID:      st.ID,
+		Suggestions: names,
+	}}
+}
+
+// dedupeDiagnostics drops an exact repeat of an earlier diagnostic (same
+// code, severity, message, line, column, step, and suggestions).
+// checkExpressionsForStep checks a structured assertion's `eq`/`neq`/etc.
+// value for step/input/field references twice -- once via its own
+// extracted `${...}` text, once via the compiled CEL text the last `add`
+// call always checks (needed for the assertion's `path` itself) -- and
+// since ExpandTemplates now lets that second pass see through into the same
+// template the first pass already checked (e.g. a `steps.<id>` inside a
+// templated `eq`), a single reference could otherwise be reported twice.
+func dedupeDiagnostics(diags []domain.Diagnostic) []domain.Diagnostic {
+	seen := make(map[string]bool, len(diags))
+	out := make([]domain.Diagnostic, 0, len(diags))
+	for _, d := range diags {
+		key := strings.Join([]string{
+			d.Code, string(d.Severity), d.Message,
+			strconv.Itoa(d.Line), strconv.Itoa(d.Column), d.StepID,
+			strings.Join(d.Suggestions, "\x1f"),
+		}, "\x00")
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, d)
+	}
+	return out
 }
 
 func contextRootDiag(root string, st domain.Step, line int) []domain.Diagnostic {

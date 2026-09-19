@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -227,6 +228,10 @@ func (r *Runner) executeStep(ctx context.Context, ec *execCtx, step domain.Step,
 	deadline := ec.now().Add(pollTimeout)
 	lastStatus := 0
 
+	var current expr.StepValue
+	var extractErrs map[string]error
+	scope := expr.Scope{Inputs: ec.run.Inputs, Env: ec.envVars, Steps: stepsSoFar, Iter: ec.iter}
+
 	for {
 		attempts++
 		r.emitStep(ec, step.ID, domain.StepRequesting, attempts)
@@ -251,14 +256,27 @@ func (r *Runner) executeStep(ctx context.Context, ec *execCtx, step domain.Step,
 		}
 
 		lastStatus = resp.Status
+
+		// Extract runs against this attempt's response before `until` (and,
+		// once the loop ends, before `assert`) sees it -- `out` is
+		// documented as available in both (internal/expr/reference.go), and
+		// a poll condition or assertion often depends on a value that same
+		// response's own `extract:` derives (e.g. `until: out.done`).
+		// Tolerant: a failing entry doesn't stop the others or the step: it
+		// is remembered in extractErrs (keyed by name) so a reference to
+		// out.<name> can say it wasn't extracted, and so the step still
+		// errors afterward if extraction never succeeds despite assertions
+		// passing (unchanged outcome, just decided after assert now).
+		current = stepValueFromResponse(req, resp)
+		current.Out = outMap
+		scope.Current = &current
+		extractErrs = runExtract(ec.eval, step.Extract, &current, scope)
+
 		if step.Until == "" {
 			break
 		}
 
-		current := stepValueFromResponse(req, resp)
-		ok, evalErr := ec.eval.EvalBool(step.Until, expr.Scope{
-			Inputs: ec.run.Inputs, Env: ec.envVars, Steps: stepsSoFar, Current: &current, Iter: ec.iter,
-		})
+		ok, evalErr := ec.eval.EvalBool(step.Until, scope)
 		if evalErr == nil && ok {
 			break
 		}
@@ -271,15 +289,13 @@ func (r *Runner) executeStep(ctx context.Context, ec *execCtx, step domain.Step,
 		}
 	}
 
-	// Asserting.
+	// Asserting: out.<name> is populated above, from the same response
+	// assert itself sees, exactly as internal/expr/reference.go documents.
 	r.emitStep(ec, step.ID, domain.StepAsserting, attempts)
-	current := stepValueFromResponse(req, resp)
-	scope := expr.Scope{Inputs: ec.run.Inputs, Env: ec.envVars, Steps: stepsSoFar, Current: &current, Iter: ec.iter}
-
 	for _, a := range step.Assert {
 		ia, ierr := interpolateAssertion(ec.eval, a, scope)
 		if ierr != nil {
-			assertions = append(assertions, domain.AssertionResult{Expr: a.Expr, Passed: false, Error: ierr.Error(), Soft: a.Soft})
+			assertions = append(assertions, domain.AssertionResult{Expr: a.Expr, Passed: false, Error: annotateOutErr(ierr, extractErrs).Error(), Soft: a.Soft})
 			continue
 		}
 		compiled, cerr := expr.CompileAssertion(ia)
@@ -287,33 +303,17 @@ func (r *Runner) executeStep(ctx context.Context, ec *execCtx, step domain.Step,
 			assertions = append(assertions, domain.AssertionResult{Expr: a.Expr, Passed: false, Error: cerr.Error(), Soft: a.Soft})
 			continue
 		}
-		res := evalAssertion(ec.eval, compiled, scope, op)
+		res := evalAssertion(ec.eval, compiled, scope, op, extractErrs)
 		res.Soft = a.Soft
 		assertions = append(assertions, res)
 	}
 
-	// Extract, in a deterministic (sorted) order so a later expression in
-	// the same step may reference an earlier one's output via `out`.
-	if len(step.Extract) > 0 {
-		names := make([]string, 0, len(step.Extract))
-		for name := range step.Extract {
-			names = append(names, name)
-		}
-		sort.Strings(names)
-		for _, name := range names {
-			current.Out = outMap
-			scope.Current = &current
-			v, eerr := ec.eval.Eval(step.Extract[name], scope)
-			if eerr != nil {
-				e := errs.As(eerr).WithDetail("extract", name)
-				return fail(domain.StepErrored, e)
-			}
-			outMap[name] = v
-		}
-	}
-
 	// A soft assertion that did not hold is a warning on the step, never a
-	// failure (PLAN §34d follow-up from the 58-step field report).
+	// failure (PLAN §34d follow-up from the 58-step field report). A hard
+	// assertion failure is always the step's primary outcome; an extract
+	// error alongside it is only ever secondary detail (a Warnings note),
+	// never what decides the step's status -- that's still `failed`, same
+	// as when there's no extract at all.
 	anyFailed := false
 	for _, a := range assertions {
 		if !a.Passed && !a.Soft {
@@ -322,9 +322,119 @@ func (r *Runner) executeStep(ctx context.Context, ec *execCtx, step domain.Step,
 		}
 	}
 	if anyFailed {
+		if len(extractErrs) > 0 {
+			result.Warnings = append(result.Warnings, extractWarnings(extractErrs)...)
+		}
 		return fail(domain.StepFailed, nil)
 	}
+	if len(extractErrs) > 0 {
+		return fail(domain.StepErrored, firstExtractErr(extractErrs))
+	}
 	return fail(domain.StepPassed, nil)
+}
+
+// runExtract evaluates every entry of extract, in the existing deterministic
+// (sorted) order, against scope (whose Current must already be current, with
+// Current.Out pointing at the same map outMap-derived callers keep across
+// poll attempts): a later entry may reference an earlier one's success via
+// `out.<name>`, exactly as a later step references an earlier one's
+// steps.<id>.out. An entry that fails doesn't stop the rest -- its error is
+// recorded in the returned map (keyed by extract name, annotated via
+// annotateOutErr so a failed entry that itself referenced another failed
+// one's out.<name> says so too) and any stale value that name held from an
+// earlier poll attempt is dropped, so out.<name> and "was it extracted"
+// agree with each other.
+func runExtract(eval *expr.Evaluator, extract map[string]string, current *expr.StepValue, scope expr.Scope) map[string]error {
+	if len(extract) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(extract))
+	for name := range extract {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	outMap := current.Out
+	if outMap == nil {
+		outMap = map[string]any{}
+		current.Out = outMap
+	}
+
+	var extractErrs map[string]error
+	for _, name := range names {
+		v, err := eval.Eval(extract[name], scope)
+		if err != nil {
+			if extractErrs == nil {
+				extractErrs = map[string]error{}
+			}
+			extractErrs[name] = annotateOutErr(err, extractErrs)
+			delete(outMap, name)
+			continue
+		}
+		outMap[name] = v
+	}
+	return extractErrs
+}
+
+// outKeyRe matches friendlyEvalErr's "no such key `name` in out" message
+// (internal/expr/errors.go) so a reference to out.<name> that names a
+// failed extract can say why, instead of the generic "no such key".
+var outKeyRe = regexp.MustCompile("^no such key `([^`]+)` in out$")
+
+// annotateOutErr rewrites err, if its message is exactly the shape
+// friendlyEvalErr produces for a missing `out.<name>`, into "out.<name> was
+// not extracted: <the extract's own error>" when name is one of this step's
+// failed extracts (extractErrs) -- otherwise err is returned unchanged
+// (including when name isn't in extractErrs at all: an out.<name> that was
+// never declared as an extract gets the validator's UNKNOWN_OUT instead,
+// and this generic message is the right one at run time for a flow that
+// bypassed validation).
+func annotateOutErr(err error, extractErrs map[string]error) error {
+	if err == nil || len(extractErrs) == 0 {
+		return err
+	}
+	e := errs.As(err)
+	m := outKeyRe.FindStringSubmatch(e.Message)
+	if m == nil {
+		return err
+	}
+	name := m[1]
+	xerr, ok := extractErrs[name]
+	if !ok {
+		return err
+	}
+	return errs.New(errs.Expr, "out.%s was not extracted: %s", name, xerr.Error()).WithDetail("expr", e.Details["expr"])
+}
+
+// firstExtractErr picks extractErrs' alphabetically-first entry (matching
+// extract's own evaluation order) as the step's overall error when every
+// assertion passed (or there were none) but at least one extract failed --
+// the step still errors exactly as it always has for an extract failure,
+// just decided after assert now instead of short-circuiting before it.
+func firstExtractErr(extractErrs map[string]error) error {
+	names := make([]string, 0, len(extractErrs))
+	for name := range extractErrs {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	name := names[0]
+	return errs.As(extractErrs[name]).WithDetail("extract", name)
+}
+
+// extractWarnings renders extractErrs (alphabetical by name, matching
+// extract's own evaluation order) as StepResult.Warnings lines: secondary
+// detail on a step a hard assertion failure already decided.
+func extractWarnings(extractErrs map[string]error) []string {
+	names := make([]string, 0, len(extractErrs))
+	for name := range extractErrs {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	out := make([]string, 0, len(names))
+	for _, name := range names {
+		out = append(out, fmt.Sprintf("extract %q also failed: %s", name, extractErrs[name].Error()))
+	}
+	return out
 }
 
 // assembleStep builds the final StepResult/StepValue pair for any exit path
@@ -454,14 +564,15 @@ func pickResponseSchema(op *domain.Operation, status int) (*domain.Schema, bool)
 }
 
 // interpolateAssertion returns a copy of a with any `${...}` templates in
-// its structured comparison values -- eq, neq, contains, and matches (when
-// matches is itself a template) -- interpolated against scope, before the
-// assertion is compiled to CEL (PLAN §8). This is what makes
-// `eq: "${steps.allocate.out.riderId}"` compare against the value that step
-// produced rather than the literal template text. A value that is exactly
-// one ${expr} keeps its native type, so a templated `eq` against a number
-// stays numeric rather than becoming a string. scope must not allow
-// secrets: secret.* is never permitted in an assertion value.
+// its structured comparison values -- eq, neq, contains, matches (when
+// matches is itself a template), and lt/lte/gt/gte -- interpolated against
+// scope, before the assertion is compiled to CEL (PLAN §8). This is what
+// makes `eq: "${steps.allocate.out.riderId}"` compare against the value
+// that step produced rather than the literal template text. A value that is
+// exactly one ${expr} keeps its native type, so a templated `eq` (or
+// `gt`/...) against a number stays numeric rather than becoming a string.
+// scope must not allow secrets: secret.* is never permitted in an assertion
+// value.
 func interpolateAssertion(eval *expr.Evaluator, a domain.Assertion, scope expr.Scope) (domain.Assertion, error) {
 	var err error
 	if a.Eq != nil {
@@ -486,6 +597,26 @@ func interpolateAssertion(eval *expr.Evaluator, a domain.Assertion, scope expr.S
 		}
 		a.Matches = matchesString(v)
 	}
+	if a.Lt != nil {
+		if a.Lt, _, err = eval.InterpolateValue(a.Lt, scope); err != nil {
+			return a, err
+		}
+	}
+	if a.Lte != nil {
+		if a.Lte, _, err = eval.InterpolateValue(a.Lte, scope); err != nil {
+			return a, err
+		}
+	}
+	if a.Gt != nil {
+		if a.Gt, _, err = eval.InterpolateValue(a.Gt, scope); err != nil {
+			return a, err
+		}
+	}
+	if a.Gte != nil {
+		if a.Gte, _, err = eval.InterpolateValue(a.Gte, scope); err != nil {
+			return a, err
+		}
+	}
 	return a, nil
 }
 
@@ -500,7 +631,7 @@ func matchesString(v any) string {
 	return fmt.Sprintf("%v", v)
 }
 
-func evalAssertion(eval *expr.Evaluator, compiled expr.Compiled, scope expr.Scope, op *domain.Operation) domain.AssertionResult {
+func evalAssertion(eval *expr.Evaluator, compiled expr.Compiled, scope expr.Scope, op *domain.Operation, extractErrs map[string]error) domain.AssertionResult {
 	ar := domain.AssertionResult{Expr: compiled.Expr, Message: compiled.Message}
 
 	if compiled.Kind == "schema" {
@@ -531,7 +662,7 @@ func evalAssertion(eval *expr.Evaluator, compiled expr.Compiled, scope expr.Scop
 
 	ok, err := eval.EvalBool(compiled.Expr, scope)
 	if err != nil {
-		ar.Error = err.Error()
+		ar.Error = annotateOutErr(err, extractErrs).Error()
 		return ar
 	}
 	ar.Passed = ok

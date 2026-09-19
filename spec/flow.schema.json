@@ -348,6 +348,18 @@
           "minLength": 1
         },
         "contains": {},
+        "lt": {
+          "description": "path < this value (interpolated like eq; numeric or string/timestamp ordering as CEL defines it)."
+        },
+        "lte": {
+          "description": "path <= this value (interpolated like eq)."
+        },
+        "gt": {
+          "description": "path > this value (interpolated like eq)."
+        },
+        "gte": {
+          "description": "path >= this value (interpolated like eq)."
+        },
         "message": {
           "type": "string"
         },

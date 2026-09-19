@@ -11,8 +11,16 @@ import (
 
 // Parse checks expr for syntax errors only; it does not require roots to be
 // declared or resolvable (that is Eval/EvalBool's job, against a Scope).
+// expr is expanded through ExpandTemplates first, so a `${...}` template
+// anywhere in it (bare, or inside a string literal) is checked as the CEL
+// it rewrites to; any error still quotes expr's own original text, not the
+// expanded form.
 func Parse(expr string) error {
-	_, iss := sharedEnv.Parse(expr)
+	expanded, xerr := ExpandTemplates(expr)
+	if xerr != nil {
+		return xerr
+	}
+	_, iss := sharedEnv.Parse(expanded)
 	if iss != nil && len(iss.Errors()) > 0 {
 		return parseIssueErr(expr, iss.Errors()[0])
 	}
@@ -39,10 +47,18 @@ type Ref struct {
 	StepID string
 }
 
-// Roots returns the set of static root references used in expr. It is
-// best-effort: a syntactically invalid expression yields nil.
+// Roots returns the set of static root references used in expr, expanded
+// through ExpandTemplates first (see Parse) so a reference that was only
+// visible inside a `${...}` template -- e.g. the `steps.a` in
+// `body.x != "${steps.a.out.id}"` -- is found exactly like one written as
+// bare CEL. It is best-effort: a syntactically invalid expression (or one
+// ExpandTemplates itself rejects, e.g. an unterminated `${`) yields nil.
 func Roots(expr string) []Ref {
-	ast, iss := sharedEnv.Parse(expr)
+	expanded, xerr := ExpandTemplates(expr)
+	if xerr != nil {
+		return nil
+	}
+	ast, iss := sharedEnv.Parse(expanded)
 	if iss != nil && len(iss.Errors()) > 0 {
 		return nil
 	}

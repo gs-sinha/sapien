@@ -114,13 +114,25 @@ func compilePathAssertion(a domain.Assertion) (string, error) {
 	if a.Contains != nil {
 		ops++
 	}
+	if a.Lt != nil {
+		ops++
+	}
+	if a.Lte != nil {
+		ops++
+	}
+	if a.Gt != nil {
+		ops++
+	}
+	if a.Gte != nil {
+		ops++
+	}
 	if ops == 0 {
 		return "", errs.New(errs.FlowInvalid,
-			"assertion for path `%s` needs one of eq, neq, exists, matches, contains", a.Path)
+			"assertion for path `%s` needs one of eq, neq, exists, matches, contains, lt, lte, gt, gte", a.Path)
 	}
 	if ops > 1 {
 		return "", errs.New(errs.FlowInvalid,
-			"assertion for path `%s` is ambiguous: specify exactly one of eq, neq, exists, matches, contains", a.Path)
+			"assertion for path `%s` is ambiguous: specify exactly one of eq, neq, exists, matches, contains, lt, lte, gt, gte", a.Path)
 	}
 
 	switch {
@@ -140,6 +152,30 @@ func compilePathAssertion(a domain.Assertion) (string, error) {
 		return compileExists(a.Path, *a.Exists)
 	case a.Matches != "":
 		return fmt.Sprintf("%s.matches(%s)", a.Path, celStringLiteral(a.Matches)), nil
+	case a.Lt != nil:
+		lit, err := celLiteral(a.Lt)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s < %s", a.Path, lit), nil
+	case a.Lte != nil:
+		lit, err := celLiteral(a.Lte)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s <= %s", a.Path, lit), nil
+	case a.Gt != nil:
+		lit, err := celLiteral(a.Gt)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s > %s", a.Path, lit), nil
+	case a.Gte != nil:
+		lit, err := celLiteral(a.Gte)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s >= %s", a.Path, lit), nil
 	default: // a.Contains != nil
 		if str, ok := a.Contains.(string); ok {
 			return fmt.Sprintf("%s.contains(%s)", a.Path, celStringLiteral(str)), nil

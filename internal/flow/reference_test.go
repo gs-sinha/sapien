@@ -85,8 +85,8 @@ func TestReference_HasTitleAndDiagnosticSection(t *testing.T) {
 		CodeFlowVersion, CodeNoSteps, CodeReservedKey, CodeUnknownKey, CodeSchema,
 		CodeStepIDDuplicate, CodeStepIDInvalid, CodeUnknownOperation, CodeDeprecatedOperation,
 		CodeUnknownInputName, CodeMissingRequiredParam, CodeMissingBody, CodeUnexpectedBody,
-		CodeUnknownBodyField, CodeExprSyntax, CodeUnknownStep, CodeStepOrder,
-		CodeUnknownFlowInput, CodeContextRoot, CodeSecretContext, CodeUnknownField,
+		CodeUnknownBodyField, CodeExprSyntax, CodeTemplateInExpr, CodeUnknownStep, CodeStepOrder,
+		CodeUnknownFlowInput, CodeContextRoot, CodeSecretContext, CodeUnknownField, CodeUnknownOut,
 		CodeAssertionInvalid, CodeDuplicateExtract, CodeInvalidDuration,
 		CodeUnknownExample, CodeExampleOperationMismatch,
 	} {
