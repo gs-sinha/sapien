@@ -12,13 +12,23 @@ import (
 )
 
 // isLocalHostname reports whether h (already stripped of any port and
-// brackets) is a loopback hostname.
+// brackets) is a loopback hostname: the classic "localhost"/"127.0.0.1"/
+// "::1" trio, plus any hostname equal to "localhost" or ending in
+// ".localhost" (case-insensitive, one trailing dot tolerated, as a
+// hostname's own trailing "." is). ".localhost" is reserved by RFC 6761
+// section 6.3 and cannot be served by public DNS, so "sapien.localhost"
+// (PLAN §34f item 3: `sapien ui` opens http://sapien.localhost:<port> by
+// default, since Chrome and Firefox already resolve it to 127.0.0.1 with no
+// /etc/hosts entry) is exactly as safe a Host/Origin as "localhost" itself
+// -- unlike an attacker-registered name such as "evil-localhost" or
+// "localhost.evil.com", which this deliberately still rejects.
 func isLocalHostname(h string) bool {
+	h = strings.ToLower(strings.TrimSuffix(h, "."))
 	switch h {
 	case "localhost", "127.0.0.1", "::1":
 		return true
 	}
-	return false
+	return strings.HasSuffix(h, ".localhost")
 }
 
 // hostnameOf extracts the hostname from a Host header value, which may or
