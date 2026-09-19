@@ -118,7 +118,7 @@ func (s *Syncer) Remove(ctx context.Context, name string) error {
 	}
 
 	if hadSource && s.git != nil && src.Kind == domain.SourceGit && src.URL != "" && !s.urlStillInUse(src.URL, name) {
-		_ = s.git.Remove(src.URL) // best effort: an orphaned clone costs disk, not correctness
+		_ = s.git.Remove(src) // best effort: an orphaned clone costs disk, not correctness
 	}
 
 	return nil
@@ -227,6 +227,11 @@ const (
 // there is no clone yet. It always returns a usable Service record; the
 // error return is nil only on full success.
 func (s *Syncer) syncRef(ctx context.Context, ref domain.ServiceRef, fetch bool) (domain.Service, error) {
+	// EffectiveSource flags a machine-local ref override (PLAN §34f item 2)
+	// so every gitsrc call below -- and whatever Remove later remembers via
+	// rememberSource -- resolves the override's own managed-clone directory
+	// instead of the one every other ref of this URL shares.
+	ref.Source = ref.EffectiveSource()
 	s.rememberSource(ref.Name, ref.Source)
 
 	b := NewBuilder(s.ws).withIngestCache(s.cache)

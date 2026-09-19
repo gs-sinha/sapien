@@ -243,7 +243,7 @@ func (l *Local) computeFingerprint(ctx context.Context, ref domain.ServiceRef) (
 		if l.gitMgr == nil {
 			return "", errNotFingerprintable
 		}
-		checkout, err := l.gitMgr.Ensure(ctx, ref.Source)
+		checkout, err := l.gitMgr.Ensure(ctx, ref.EffectiveSource())
 		if err != nil {
 			return "", err
 		}

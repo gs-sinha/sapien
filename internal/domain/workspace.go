@@ -9,6 +9,27 @@ type ServiceRef struct {
 	// machine; nil when Source is the committed one. Save writes Team back,
 	// so an override never leaks into the committed file.
 	Team *Source `yaml:"-" json:"team,omitempty"`
+	// LocalRef is this machine's ref override (sapien.workspace.local.yaml's
+	// `ref:`, PLAN §34f item 2): "" when this machine sets none. It is kept
+	// even while a path override (Source.Kind == SourceLocal) is also
+	// active -- the checkout wins for reading, but unbinding the checkout
+	// falls back to LocalRef rather than straight to the committed ref.
+	LocalRef string `yaml:"-" json:"-"`
+}
+
+// EffectiveSource returns ref.Source with RefOverridden set when LocalRef is
+// what makes it differ from the committed source (PLAN §34f item 2): a
+// git-sourced ref with a local ref override and no path override. Callers
+// pass this, not ref.Source directly, to anything that resolves a managed
+// clone (gitsrc.Manager.Ensure/Sync/DirFor), so an overridden ref gets its
+// own cache directory instead of thrashing the one every other ref of the
+// same URL shares.
+func (ref ServiceRef) EffectiveSource() Source {
+	src := ref.Source
+	if ref.Team != nil && ref.LocalRef != "" && src.Kind == SourceGit {
+		src.RefOverridden = true
+	}
+	return src
 }
 
 // Workspace is the parsed contents of sapien.workspace.yaml plus its resolved location.

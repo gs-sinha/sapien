@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gs-sinha/sapien/internal/domain"
 	"github.com/gs-sinha/sapien/internal/errs"
 )
 
@@ -109,6 +110,28 @@ func (m *Manager) Dir(url string) string {
 	hash := hex.EncodeToString(sum[:])[:16]
 
 	slug := repoSlug(url)
+	if slug == "" {
+		slug = "repo"
+	}
+
+	return filepath.Join(m.cacheDir, hash+"-"+slug)
+}
+
+// DirFor is Dir(src.URL), except when src.RefOverridden is set (PLAN §34f
+// item 2: a machine-local `ref:` override, domain.ServiceRef.EffectiveSource)
+// -- then it hashes url+"@"+ref instead, giving the overridden ref its own
+// cache directory so it never thrashes -- or is thrashed by -- the clone
+// every other ref of the same URL shares. Ensure, Sync, and Remove all
+// resolve a clone's directory through this, not Dir, so the two stay
+// consistent for the same Source.
+func (m *Manager) DirFor(src domain.Source) string {
+	if !src.RefOverridden || src.Ref == "" {
+		return m.Dir(src.URL)
+	}
+	sum := sha1.Sum([]byte(src.URL + "@" + src.Ref)) //nolint:gosec // see the import comment above.
+	hash := hex.EncodeToString(sum[:])[:16]
+
+	slug := repoSlug(src.URL)
 	if slug == "" {
 		slug = "repo"
 	}
