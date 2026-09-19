@@ -143,11 +143,11 @@ describe('MemoryDetailPage', () => {
     expect(screen.queryByRole('button', { name: 'Commit' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Move to local' })).toBeInTheDocument();
 
-    const pushButton = screen.getByRole('button', { name: /Push 1 commits/ });
+    const pushButton = screen.getByRole('button', { name: /Push 1 commit/ });
     await user.click(pushButton);
     await waitFor(() => expect(repoPush).toHaveBeenCalledTimes(1));
     await waitFor(() =>
-      expect(useToasts.getState().toasts.some((t) => t.kind === 'success' && t.message === 'pushed 1 commits')).toBe(true),
+      expect(useToasts.getState().toasts.some((t) => t.kind === 'success' && t.message === 'pushed 1 commit')).toBe(true),
     );
   });
 

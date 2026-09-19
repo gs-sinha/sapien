@@ -203,7 +203,7 @@ export function Tree<T>({
             {Array.from({ length: node.depth }).map((_, i) => (
               <span key={i} className="inline-block h-5 w-4 shrink-0 self-stretch border-l border-slate-200 dark:border-slate-800" />
             ))}
-            {node.isFolder ? (
+            {node.isFolder && (showLeaves || node.children.some((c) => c.isFolder)) ? (
               <button
                 type="button"
                 tabIndex={-1}

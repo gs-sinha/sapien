@@ -8,6 +8,7 @@ import { repo as repoApi } from '../api/client';
 import { useRepo } from '../state/repo';
 import { pushToast } from '../state/toast';
 import type { ItemTier, ShipStatus } from '../api/types';
+import { plural } from '../lib/plural';
 
 export const ITEM_TIER_NAMES: Record<ItemTier, string> = { local: 'local', workspace: 'team', service: 'service' };
 
@@ -160,7 +161,7 @@ export function PushButton({ onPushed }: { onPushed?: () => void }) {
     try {
       const next = await repoApi.push();
       useRepo.getState().setStatus(next);
-      pushToast('success', `pushed ${next.pushed_count ?? 0} commits`);
+      pushToast('success', `pushed ${plural(next.pushed_count ?? 0, 'commit')}`);
       onPushed?.();
     } catch (e) {
       pushToast('error', e instanceof Error ? e.message : 'Push failed.');
@@ -177,7 +178,7 @@ export function PushButton({ onPushed }: { onPushed?: () => void }) {
       title="pushes every unpushed commit in the workspace repository"
       className={buttonCls}
     >
-      {busy ? 'Pushing…' : ahead ? `Push ${ahead} commits` : 'Push'}
+      {busy ? 'Pushing…' : ahead ? `Push ${plural(ahead, 'commit')}` : 'Push'}
     </button>
   );
 }

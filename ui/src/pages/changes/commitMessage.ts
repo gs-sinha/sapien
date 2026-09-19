@@ -6,9 +6,9 @@
 // the `messageEdited` flag there).
 import type { RepoChangeFile, RepoItemKind } from '../../api/types';
 
-type Bucket = 'add' | 'update' | 'remove' | 'rename';
+type Bucket = 'add' | 'update' | 'remove' | 'rename' | 'move';
 
-const VERB: Record<Bucket, string> = { add: 'Add', update: 'update', remove: 'remove', rename: 'rename' };
+const VERB: Record<Bucket, string> = { add: 'Add', update: 'update', remove: 'remove', rename: 'rename', move: 'move' };
 
 // [singular, plural]; "workspace" has effectively one file (sapien.workspace.yaml)
 // so it always reads as the bare phrase, never "1 workspace configs".
@@ -51,14 +51,36 @@ export function generateCommitMessage(files: readonly RepoChangeFile[], selected
     update: new Map(),
     remove: new Map(),
     rename: new Map(),
+    move: new Map(),
   };
+  // A file moved to another folder reaches git as a deletion plus an
+  // untracked file (git only calls it a rename once both are staged), so a
+  // deleted file and an added one of the same kind and file name are one
+  // move, not "add 11 flows; remove 11 flows".
+  const base = (p: string) => p.slice(p.lastIndexOf('/') + 1);
+  const deletedByName = new Map<string, RepoChangeFile[]>();
   for (const f of sel) {
+    if (f.state !== 'deleted') continue;
+    const key = (f.kind || 'other') + '\u0000' + base(f.path);
+    deletedByName.set(key, [...(deletedByName.get(key) || []), f]);
+  }
+  const moved = new Set<string>();
+  for (const f of sel) {
+    if (f.state !== 'untracked') continue;
+    const kind = f.kind || 'other';
+    const gone = deletedByName.get(kind + '\u0000' + base(f.path))?.pop();
+    if (!gone) continue;
+    moved.add(f.path).add(gone.path);
+    buckets.move.set(kind, (buckets.move.get(kind) || 0) + 1);
+  }
+  for (const f of sel) {
+    if (moved.has(f.path)) continue;
     const kind = f.kind || 'other';
     const bucket = bucketOf(f.state);
     buckets[bucket].set(kind, (buckets[bucket].get(kind) || 0) + 1);
   }
 
-  const clauses = (['add', 'update', 'remove', 'rename'] as const)
+  const clauses = (['add', 'update', 'remove', 'rename', 'move'] as const)
     .map((b) => clauseFor(b, buckets[b]))
     .filter((c): c is string => !!c);
   if (clauses.length === 0) return '';

@@ -215,4 +215,14 @@ func (l *Local) onWatchChange(ch registry.Change) {
 			l.logger.Debug("workspace change observed; no handler for this area", "area", area)
 		}
 	}
+
+	// Any workspace file changing moves the repository's uncommitted count,
+	// which the status bar and the Changes badge show: a local git status
+	// (no network), emitted so neither waits for the next fetch tick or a
+	// commit to catch up with a file the user just moved or an agent wrote.
+	if len(ch.Workspace) > 0 {
+		if status, err := l.Repo().Status(ctx); err == nil && status != nil && status.InGit {
+			l.emit(domain.EventWorkspaceRepo, status)
+		}
+	}
 }

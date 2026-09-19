@@ -181,7 +181,7 @@ describe('ExamplesPage', () => {
     );
     await waitFor(() => expect(screen.getByText('ex-unpushed')).toBeInTheDocument());
 
-    const pushButton = within(rowOf('ex-unpushed')).getByRole('button', { name: /Push 1 commits/ });
+    const pushButton = within(rowOf('ex-unpushed')).getByRole('button', { name: /Push 1 commit/ });
     expect(within(rowOf('ex-shipped')).queryByRole('button', { name: /Push/ })).not.toBeInTheDocument();
 
     // Pushing reloads the list (onPushed); it comes back with ex-unpushed
@@ -193,7 +193,7 @@ describe('ExamplesPage', () => {
     await user.click(pushButton);
     await waitFor(() => expect(repoPush).toHaveBeenCalledTimes(1));
     await waitFor(() =>
-      expect(useToasts.getState().toasts.some((t) => t.kind === 'success' && t.message === 'pushed 1 commits')).toBe(true),
+      expect(useToasts.getState().toasts.some((t) => t.kind === 'success' && t.message === 'pushed 1 commit')).toBe(true),
     );
 
     await user.click(within(rowOf('ex-shipped')).getByRole('button', { name: 'Move to local' }));

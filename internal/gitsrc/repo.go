@@ -54,7 +54,10 @@ func (m *Manager) RepoStatus(ctx context.Context, dir string) (*domain.RepoStatu
 		status.Behind, status.Ahead = parseBehindAhead(counts)
 	}
 
-	porcelain, err := m.run(ctx, root, "status", "--porcelain")
+	// Every untracked file counts on its own (-uall), not once per new
+	// directory: this is the number the status bar shows beside a link to
+	// the Changes page, which lists files, and the two must agree.
+	porcelain, err := m.run(ctx, root, "status", "--porcelain", "--untracked-files=all")
 	if err != nil {
 		return nil, err
 	}

@@ -107,14 +107,14 @@ describe('MemoriesPage tier column', () => {
     renderPage();
     await waitFor(() => expect(screen.getByText('mem_local')).toBeInTheDocument());
 
-    expect(within(rowOf('mem_unpushed')).getByRole('button', { name: /Push 1 commits/ })).toBeInTheDocument();
+    expect(within(rowOf('mem_unpushed')).getByRole('button', { name: /Push 1 commit/ })).toBeInTheDocument();
     expect(within(rowOf('mem_untracked')).queryByRole('button', { name: /Push/ })).not.toBeInTheDocument();
     expect(within(rowOf('mem_shipped')).queryByRole('button', { name: /Push/ })).not.toBeInTheDocument();
 
-    await user.click(within(rowOf('mem_unpushed')).getByRole('button', { name: /Push 1 commits/ }));
+    await user.click(within(rowOf('mem_unpushed')).getByRole('button', { name: /Push 1 commit/ }));
     await waitFor(() => expect(repoPush).toHaveBeenCalledTimes(1));
     await waitFor(() =>
-      expect(useToasts.getState().toasts.some((t) => t.kind === 'success' && t.message === 'pushed 1 commits')).toBe(true),
+      expect(useToasts.getState().toasts.some((t) => t.kind === 'success' && t.message === 'pushed 1 commit')).toBe(true),
     );
   });
 

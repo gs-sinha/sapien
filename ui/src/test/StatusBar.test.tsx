@@ -74,7 +74,7 @@ describe('StatusBar repo segment', () => {
     await user.click(pullButton);
 
     await waitFor(() => expect(repoPull).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(useToasts.getState().toasts.some((t) => t.kind === 'success' && t.message === 'pulled 1 commits')).toBe(true));
+    await waitFor(() => expect(useToasts.getState().toasts.some((t) => t.kind === 'success' && t.message === 'pulled 1 commit')).toBe(true));
     expect(useRepo.getState().status).toEqual({ in_git: true, branch: 'main', behind: 0, ahead: 0, dirty: 0, pulled: true, pulled_count: 1 });
   });
 

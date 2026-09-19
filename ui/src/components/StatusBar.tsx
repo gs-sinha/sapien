@@ -10,6 +10,7 @@ import { useEvents } from '../state/events';
 import { useRepo } from '../state/repo';
 import { useTheme } from '../state/theme';
 import { pushToast } from '../state/toast';
+import { plural } from '../lib/plural';
 
 function Dot({ ok }: { ok: boolean }) {
   return <span className={`inline-block h-1.5 w-1.5 rounded-full ${ok ? 'bg-emerald-500' : 'bg-slate-400'}`} />;
@@ -61,7 +62,7 @@ function RepoSegment() {
     try {
       const next = await repoApi.pull();
       useRepo.getState().setStatus(next);
-      pushToast('success', `pulled ${next.pulled_count ?? 0} commits`);
+      pushToast('success', `pulled ${plural(next.pulled_count ?? 0, 'commit')}`);
     } catch (e) {
       pushToast('error', e instanceof Error ? e.message : 'Pull failed.');
     } finally {

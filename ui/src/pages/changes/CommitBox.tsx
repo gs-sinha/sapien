@@ -9,6 +9,7 @@ import { PushButton } from '../../components/tiers';
 import { useRepo } from '../../state/repo';
 import { pushToast } from '../../state/toast';
 import type { RepoStatus } from '../../api/types';
+import { plural } from '../../lib/plural';
 
 export function CommitBox({
   status,
@@ -34,7 +35,7 @@ export function CommitBox({
     try {
       const next = await repoApi.pull();
       useRepo.getState().setStatus(next);
-      pushToast('success', `pulled ${next.pulled_count ?? 0} commits`);
+      pushToast('success', `pulled ${plural(next.pulled_count ?? 0, 'commit')}`);
     } catch (e) {
       pushToast('error', e instanceof Error ? e.message : 'Pull failed.');
     } finally {
