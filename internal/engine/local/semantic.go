@@ -20,6 +20,7 @@ package local
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/gs-sinha/sapien/internal/config"
@@ -120,8 +121,8 @@ func (l *Local) applyEmbedder(cfg config.Semantic, embedder semantic.Embedder) e
 		return nil
 	}
 
-	l.semIdx = semantic.NewIndex(l.db, embedder)
-	l.srch.WithSemantic(&semanticAdapter{idx: l.semIdx, logger: l.logger})
+	l.semIdx = semantic.NewIndex(l.db, embedder).WithPrefixes(effectivePrefixes(cfg))
+	l.srch.WithSemantic(&semanticAdapter{idx: l.semIdx, logger: l.logger, cfg: cfg})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	l.semCancel = cancel
@@ -131,6 +132,20 @@ func (l *Local) applyEmbedder(cfg config.Semantic, embedder semantic.Embedder) e
 
 	l.setSemanticState(domain.SemanticReady, "")
 	return nil
+}
+
+// effectivePrefixes returns the task prefixes cfg embeds with: each side is
+// the configured override when there is one ("" included), else what the
+// model's own documentation asks for.
+func effectivePrefixes(cfg config.Semantic) semantic.Prefixes {
+	p := semantic.DefaultPrefixes(cfg.Model)
+	if cfg.QueryPrefix != nil {
+		p.Query = *cfg.QueryPrefix
+	}
+	if cfg.DocumentPrefix != nil {
+		p.Document = *cfg.DocumentPrefix
+	}
+	return p
 }
 
 // drainSemantic stops the current worker (if any) and waits for it to
@@ -277,6 +292,11 @@ func (l *Local) indexServiceSemantics(ctx context.Context, service string) error
 		}
 	}
 
+	cfg := l.appliedSemanticConfig()
+	if !cfg.Embeds(config.SemanticKindOperations) {
+		return l.indexServiceDocs(ctx, idx, cfg, service)
+	}
+
 	ops, err := l.cat.ListOperations(ctx, service)
 	if err != nil {
 		l.logger.Warn("semantic: list operations failed", "service", service, "error", err)
@@ -302,9 +322,40 @@ func (l *Local) indexServiceSemantics(ctx context.Context, service string) error
 			}
 		}
 	}
+	// A saved example's description says, in the words of whoever made it
+	// work, what calling the operation is for ("rider accepts a push
+	// offer"); with the examples kind on, that rides in the operation's own
+	// embedded text, beside the task phrases, so an intent search that
+	// matches the example ranks the operation it calls.
+	if cfg.Embeds(config.SemanticKindExamples) {
+		exs, eerr := l.exStore.List(ctx, domain.ExampleQuery{Service: service, Limit: 100000})
+		if eerr != nil {
+			l.logger.Warn("semantic: list examples failed", "service", service, "error", eerr)
+		}
+		for _, ex := range exs {
+			if d := strings.TrimSpace(ex.Description); d != "" {
+				taskPhrases[ex.Operation] = append(taskPhrases[ex.Operation], d)
+			}
+		}
+	}
 	if _, err := idx.IndexOperationsWithTasks(ctx, ops, fields, taskPhrases); err != nil {
 		l.logger.Warn("semantic: index operations failed", "service", service, "error", err)
 		note(err)
+	}
+	note(l.indexServiceDocs(ctx, idx, cfg, service))
+	return firstErr
+}
+
+// indexServiceDocs embeds service's doc sections, when the docs kind is on.
+func (l *Local) indexServiceDocs(ctx context.Context, idx *semantic.Index, cfg config.Semantic, service string) error {
+	if !cfg.Embeds(config.SemanticKindDocs) {
+		return nil
+	}
+	var firstErr error
+	note := func(err error) {
+		if err != nil && firstErr == nil {
+			firstErr = err
+		}
 	}
 
 	docs, err := l.cat.ListDocs(ctx, service)
@@ -340,7 +391,7 @@ func (l *Local) indexServiceSemantics(ctx context.Context, service string) error
 // mems is nil.
 func (l *Local) indexMemoriesSemantics(ctx context.Context, mems []domain.Memory) error {
 	idx := l.semanticIndex()
-	if idx == nil {
+	if idx == nil || !l.appliedSemanticConfig().Embeds(config.SemanticKindMemories) {
 		return nil
 	}
 	if mems == nil {
@@ -389,13 +440,28 @@ func (l *Local) SemanticStatus(ctx context.Context) (domain.SemanticStatus, erro
 	if err != nil {
 		return domain.SemanticStatus{}, err
 	}
-	total, err := l.semanticTotal(ctx)
+	totals, err := l.semanticTotals(ctx)
 	if err != nil {
 		return domain.SemanticStatus{}, err
 	}
+	stats, err := idx.Stats(ctx)
+	if err != nil {
+		return domain.SemanticStatus{}, err
+	}
+	stored := map[string]int{
+		config.SemanticKindOperations: stats.ByKind[semantic.KindOperation],
+		config.SemanticKindDocs:       stats.ByKind[semantic.KindDoc],
+		config.SemanticKindMemories:   stats.ByKind[semantic.KindMemory],
+	}
+	total := 0
+	byKind := make(map[string]domain.SemanticKindCount, len(totals))
+	for kind, n := range totals {
+		total += n
+		byKind[kind] = domain.SemanticKindCount{Embedded: stored[kind], Total: n}
+	}
 	return domain.SemanticStatus{
 		State: state, Error: errMsg, Model: model, Dim: dim,
-		Embedded: embedded, Total: total,
+		Embedded: embedded, Total: total, ByKind: byKind,
 	}, nil
 }
 
@@ -434,15 +500,41 @@ func semanticEmbeddedCount(ctx context.Context, idx *semantic.Index, model strin
 // SemanticReindex embeds -- regardless of whether semantic search is
 // currently on.
 func (l *Local) semanticTotal(ctx context.Context) (int, error) {
+	byKind, err := l.semanticTotals(ctx)
+	if err != nil {
+		return 0, err
+	}
+	total := 0
+	for _, n := range byKind {
+		total += n
+	}
+	return total, nil
+}
+
+// semanticTotals is semanticTotal split by kind, for the kinds the applied
+// configuration embeds (config.Semantic.Kinds); "examples" has no rows of
+// its own (see indexServiceSemantics) and so no entry.
+func (l *Local) semanticTotals(ctx context.Context) (map[string]int, error) {
+	cfg := l.appliedSemanticConfig()
 	st, err := l.cat.Stats(ctx)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	mems, err := l.memStore.List(ctx, domain.MemoryQuery{Limit: 100000})
-	if err != nil {
-		return 0, err
+	out := map[string]int{}
+	if cfg.Embeds(config.SemanticKindOperations) {
+		out[config.SemanticKindOperations] = st.Operations
 	}
-	return st.Operations + st.Sections + len(mems), nil
+	if cfg.Embeds(config.SemanticKindDocs) {
+		out[config.SemanticKindDocs] = st.Sections
+	}
+	if cfg.Embeds(config.SemanticKindMemories) {
+		mems, err := l.memStore.List(ctx, domain.MemoryQuery{Limit: 100000})
+		if err != nil {
+			return nil, err
+		}
+		out[config.SemanticKindMemories] = len(mems)
+	}
+	return out, nil
 }
 
 // setSemanticState and currentSemanticState guard Local's semantic status
@@ -554,11 +646,24 @@ func (l *Local) SemanticReindex(ctx context.Context) error {
 type semanticAdapter struct {
 	idx    *semantic.Index
 	logger *slog.Logger
+	// cfg says which kinds are embedded at all: a kind that is off answers
+	// no hits rather than whatever rows a previous configuration left.
+	cfg config.Semantic
+}
+
+// adapterKindNames maps search's kind strings to config.SemanticKinds.
+var adapterKindNames = map[string]string{
+	string(semantic.KindOperation): config.SemanticKindOperations,
+	string(semantic.KindDoc):       config.SemanticKindDocs,
+	string(semantic.KindMemory):    config.SemanticKindMemories,
 }
 
 var _ search.Semantic = (*semanticAdapter)(nil)
 
 func (a *semanticAdapter) Query(ctx context.Context, kind string, text string, limit int) ([]search.SemanticHit, error) {
+	if name, ok := adapterKindNames[kind]; ok && !a.cfg.Embeds(name) {
+		return nil, nil
+	}
 	hits, err := a.idx.Query(ctx, semantic.Kind(kind), text, limit)
 	if err != nil {
 		if a.logger != nil {

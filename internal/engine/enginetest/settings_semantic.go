@@ -60,6 +60,22 @@ func (s *settingsAPI) PutSemantic(ctx context.Context, req engine.SemanticPutReq
 	if req.APIKey != nil {
 		f.semantic.APIKeySet = *req.APIKey != ""
 	}
+	if req.Kinds != nil {
+		f.semantic.Kinds = append([]string(nil), (*req.Kinds)...)
+	}
+	switch {
+	case req.ResetPrefixes:
+		f.semantic.QueryPrefix, f.semantic.DocumentPrefix = f.semantic.DefaultQueryPrefix, f.semantic.DefaultDocumentPrefix
+		f.semantic.PrefixesCustom = false
+	case req.QueryPrefix != nil || req.DocumentPrefix != nil:
+		if req.QueryPrefix != nil {
+			f.semantic.QueryPrefix = *req.QueryPrefix
+		}
+		if req.DocumentPrefix != nil {
+			f.semantic.DocumentPrefix = *req.DocumentPrefix
+		}
+		f.semantic.PrefixesCustom = true
+	}
 	scope := req.Scope
 	if scope == "" {
 		scope = "user"

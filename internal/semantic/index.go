@@ -33,8 +33,9 @@ type DocSectionInput struct {
 // (internal/store/migrations/004_vectors.sql), and answers nearest-neighbor
 // queries against them.
 type Index struct {
-	db  *store.DB
-	emb Embedder
+	db       *store.DB
+	emb      Embedder
+	prefixes Prefixes
 }
 
 // NewIndex returns an Index backed by db (which must already carry the
@@ -42,6 +43,17 @@ type Index struct {
 func NewIndex(db *store.DB, emb Embedder) *Index {
 	return &Index{db: db, emb: emb}
 }
+
+// WithPrefixes sets the task prefixes x puts in front of every document it
+// embeds and every query it answers (see Prefixes), and returns x. Call it
+// before x is shared: an Index is otherwise immutable.
+func (x *Index) WithPrefixes(p Prefixes) *Index {
+	x.prefixes = p
+	return x
+}
+
+// Prefixes returns the task prefixes x embeds with.
+func (x *Index) Prefixes() Prefixes { return x.prefixes }
 
 // Embedder returns the Embedder x embeds and queries with, so a caller that
 // only holds an *Index (internal/engine/local's status reporting, PLAN §34f
@@ -166,6 +178,9 @@ func (x *Index) upsert(ctx context.Context, kind Kind, n int, get itemText) (int
 	texts := make([]string, n)
 	for i := 0; i < n; i++ {
 		ids[i], texts[i] = get(i)
+		// Prefixed before hashing: a changed document prefix is changed
+		// content as far as the stored vector is concerned.
+		texts[i] = x.prefixes.Document + texts[i]
 	}
 
 	existing, err := x.loadExisting(ctx, kind, ids)
@@ -274,7 +289,7 @@ func (x *Index) Query(ctx context.Context, kind Kind, text string, limit int) ([
 		return nil, nil
 	}
 
-	qvecs, err := x.emb.Embed(ctx, []string{text})
+	qvecs, err := x.emb.Embed(ctx, []string{x.prefixes.Query + text})
 	if err != nil {
 		return nil, fmt.Errorf("semantic: embed query: %w", err)
 	}

@@ -34,6 +34,17 @@ type SemanticStatus struct {
 	// internal/engine/local's indexer defines them.
 	Embedded int `json:"embedded"`
 	Total    int `json:"total"`
+	// ByKind splits Embedded/Total by what is embedded ("operations",
+	// "memories", "docs"); a kind that is turned off is absent. "examples"
+	// never appears: example descriptions are embedded as part of the
+	// operation they call, not as rows of their own.
+	ByKind map[string]SemanticKindCount `json:"by_kind,omitempty"`
+}
+
+// SemanticKindCount is one kind's share of SemanticStatus's counts.
+type SemanticKindCount struct {
+	Embedded int `json:"embedded"`
+	Total    int `json:"total"`
 }
 
 // SemanticSettings is GET (and PUT's response) /v1/settings/semantic's
@@ -48,6 +59,18 @@ type SemanticSettings struct {
 	// APIKeySet reports whether an api_key is configured, without ever
 	// revealing it.
 	APIKeySet bool `json:"api_key_set"`
+	// Kinds is what gets embedded, always spelled out (config.SemanticKinds
+	// when the configuration names none).
+	Kinds []string `json:"kinds"`
+	// QueryPrefix/DocumentPrefix are the task prefixes in effect;
+	// DefaultQueryPrefix/DefaultDocumentPrefix are what Model's own
+	// documentation asks for, and PrefixesCustom says the configuration
+	// overrides them rather than following the model.
+	QueryPrefix           string `json:"query_prefix"`
+	DocumentPrefix        string `json:"document_prefix"`
+	DefaultQueryPrefix    string `json:"default_query_prefix"`
+	DefaultDocumentPrefix string `json:"default_document_prefix"`
+	PrefixesCustom        bool   `json:"prefixes_custom"`
 	// Source names which file the effective configuration came from:
 	// "user", "workspace", or "default" (neither file sets it).
 	Source string         `json:"source"`

@@ -75,6 +75,58 @@ type Semantic struct {
 	// resolves this the same way; config never resolves it itself).
 	APIKey    string `yaml:"api_key"`
 	BatchSize int    `yaml:"batch_size"`
+	// Kinds names what gets embedded: any of SemanticKinds. Empty means all
+	// of them. A kind left out is neither indexed nor queried, and the
+	// vectors it already has are dropped on the next apply.
+	Kinds []string `yaml:"kinds,omitempty"`
+	// QueryPrefix and DocumentPrefix are the task prefixes put in front of
+	// a search and of every indexed text (internal/semantic.Prefixes). nil
+	// means "what this model's documentation asks for"
+	// (semantic.DefaultPrefixes); a set value, including "", is used as is.
+	QueryPrefix    *string `yaml:"query_prefix,omitempty"`
+	DocumentPrefix *string `yaml:"document_prefix,omitempty"`
+}
+
+// The kinds semantic search can embed (Semantic.Kinds). "examples" are not
+// vectors of their own: an operation's saved examples describe real uses of
+// it in plain words, and with this kind on those descriptions are embedded
+// as part of the operation they call, which is what an intent search ranks.
+const (
+	SemanticKindOperations = "operations"
+	SemanticKindExamples   = "examples"
+	SemanticKindMemories   = "memories"
+	SemanticKindDocs       = "docs"
+)
+
+// SemanticKinds lists every valid Semantic.Kinds entry, in display order.
+var SemanticKinds = []string{SemanticKindOperations, SemanticKindExamples, SemanticKindMemories, SemanticKindDocs}
+
+// EffectiveKinds returns the kinds s embeds: Kinds as configured (unknown
+// names dropped, order normalized), or every kind when none is configured.
+func (s Semantic) EffectiveKinds() []string {
+	if len(s.Kinds) == 0 {
+		return append([]string(nil), SemanticKinds...)
+	}
+	out := make([]string, 0, len(SemanticKinds))
+	for _, k := range SemanticKinds {
+		for _, have := range s.Kinds {
+			if have == k {
+				out = append(out, k)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// Embeds reports whether s embeds kind (one of SemanticKinds).
+func (s Semantic) Embeds(kind string) bool {
+	for _, k := range s.EffectiveKinds() {
+		if k == kind {
+			return true
+		}
+	}
+	return false
 }
 
 // Git configures managed git clones (internal/gitsrc, PLAN §18).
@@ -314,12 +366,17 @@ func Load(ws *domain.Workspace) (Config, error) {
 // actually sets (mirroring internal/mcp/permissions.go's rawPermissions
 // pattern).
 type rawSemantic struct {
-	Enabled   *bool   `yaml:"enabled"`
-	Kind      *string `yaml:"kind"`
-	BaseURL   *string `yaml:"base_url"`
-	Model     *string `yaml:"model"`
-	APIKey    *string `yaml:"api_key"`
-	BatchSize *int    `yaml:"batch_size"`
+	Enabled   *bool    `yaml:"enabled"`
+	Kind      *string  `yaml:"kind"`
+	BaseURL   *string  `yaml:"base_url"`
+	Model     *string  `yaml:"model"`
+	APIKey    *string  `yaml:"api_key"`
+	BatchSize *int     `yaml:"batch_size"`
+	Kinds     []string `yaml:"kinds"`
+	// Prefixes are pointers twice over in spirit: absent keeps the lower
+	// layer's value (or the model default), present -- "" included -- wins.
+	QueryPrefix    *string `yaml:"query_prefix"`
+	DocumentPrefix *string `yaml:"document_prefix"`
 }
 
 type rawGit struct {
@@ -397,6 +454,17 @@ func applyRaw(cfg *Config, raw rawConfig) {
 	}
 	if raw.Semantic.BatchSize != nil {
 		s.BatchSize = *raw.Semantic.BatchSize
+	}
+	if raw.Semantic.Kinds != nil {
+		s.Kinds = append([]string(nil), raw.Semantic.Kinds...)
+	}
+	if raw.Semantic.QueryPrefix != nil {
+		v := *raw.Semantic.QueryPrefix
+		s.QueryPrefix = &v
+	}
+	if raw.Semantic.DocumentPrefix != nil {
+		v := *raw.Semantic.DocumentPrefix
+		s.DocumentPrefix = &v
 	}
 
 	if raw.Git.CacheDir != nil {

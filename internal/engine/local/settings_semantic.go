@@ -80,8 +80,16 @@ func (l *Local) getSemanticSettings(ctx context.Context) (*domain.SemanticSettin
 		Model:     s.Model,
 		BatchSize: s.BatchSize,
 		APIKeySet: s.APIKey != "",
-		Source:    source,
-		Status:    status,
+		Kinds:     s.EffectiveKinds(),
+
+		QueryPrefix:           effectivePrefixes(s).Query,
+		DocumentPrefix:        effectivePrefixes(s).Document,
+		DefaultQueryPrefix:    semantic.DefaultPrefixes(s.Model).Query,
+		DefaultDocumentPrefix: semantic.DefaultPrefixes(s.Model).Document,
+		PrefixesCustom:        s.QueryPrefix != nil || s.DocumentPrefix != nil,
+
+		Source: source,
+		Status: status,
 	}, nil
 }
 
@@ -129,10 +137,30 @@ func (l *Local) putSemanticSettings(ctx context.Context, req engine.SemanticPutR
 	if scope == "workspace" {
 		path = config.WorkspacePath(l.ws)
 	}
-	if err := config.WriteSemantic(path, config.SemanticWrite{
+	write := config.SemanticWrite{
 		Enabled: resolved.Enabled, Kind: resolved.Kind, BaseURL: resolved.BaseURL,
 		Model: resolved.Model, BatchSize: resolved.BatchSize, APIKey: req.APIKey,
-	}); err != nil {
+	}
+	if req.Kinds != nil {
+		kinds, err := validSemanticKinds(*req.Kinds)
+		if err != nil {
+			return nil, err
+		}
+		write.Kinds = &kinds
+	}
+	switch {
+	case req.ResetPrefixes:
+		var none *string
+		write.QueryPrefix, write.DocumentPrefix = &none, &none
+	default:
+		if req.QueryPrefix != nil {
+			write.QueryPrefix = &req.QueryPrefix
+		}
+		if req.DocumentPrefix != nil {
+			write.DocumentPrefix = &req.DocumentPrefix
+		}
+	}
+	if err := config.WriteSemantic(path, write); err != nil {
 		return nil, err
 	}
 
@@ -211,7 +239,41 @@ func semanticLiveChangeNeeded(before, after config.Semantic) bool {
 	if !before.Enabled {
 		return true
 	}
-	return before.Kind != after.Kind || before.BaseURL != after.BaseURL || before.Model != after.Model
+	if before.Kind != after.Kind || before.BaseURL != after.BaseURL || before.Model != after.Model {
+		return true
+	}
+	// What is embedded, or the words put in front of it, changed: the rows
+	// of a kind just turned off must go, a kind just turned on (examples
+	// included, which rewrite operation texts) must be embedded, and a new
+	// document prefix re-embeds everything.
+	return strings.Join(before.EffectiveKinds(), ",") != strings.Join(after.EffectiveKinds(), ",") ||
+		effectivePrefixes(before) != effectivePrefixes(after)
+}
+
+// validSemanticKinds checks a PUT's kinds against config.SemanticKinds and
+// returns them in display order. An empty list is valid (every kind);
+// "examples" without "operations" is not, since an example is embedded as
+// part of the operation it calls.
+func validSemanticKinds(kinds []string) ([]string, error) {
+	for _, k := range kinds {
+		known := false
+		for _, valid := range config.SemanticKinds {
+			known = known || k == valid
+		}
+		if !known {
+			return nil, errs.New(errs.Invalid, "settings: unknown kind %q", k).
+				WithHint("kinds are: " + strings.Join(config.SemanticKinds, ", "))
+		}
+	}
+	norm := config.Semantic{Kinds: kinds}.EffectiveKinds()
+	if len(kinds) == 0 {
+		return nil, nil
+	}
+	has := func(k string) bool { return config.Semantic{Kinds: norm}.Embeds(k) }
+	if has(config.SemanticKindExamples) && !has(config.SemanticKindOperations) {
+		return nil, errs.New(errs.Invalid, "settings: the examples kind needs operations: an example is embedded as part of the operation it calls")
+	}
+	return norm, nil
 }
 
 // spawnSemanticReindex runs a full SemanticReindex in the background,

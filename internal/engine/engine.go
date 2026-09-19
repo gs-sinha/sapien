@@ -516,6 +516,16 @@ type SemanticPutRequest struct {
 	// the scope's stored key, a pointer to "" clears it, anything else
 	// (including a verbatim "${env.NAME}" reference) sets it.
 	APIKey *string `json:"api_key,omitempty"`
+	// Kinds is what to embed (config.SemanticKinds); absent keeps the
+	// stored list, an empty list means every kind.
+	Kinds *[]string `json:"kinds,omitempty"`
+	// QueryPrefix/DocumentPrefix override the model's own task prefixes
+	// ("" is a valid override: none); absent keeps what is stored.
+	// ResetPrefixes drops both overrides so the prefixes follow the model
+	// again, and wins over the two fields.
+	QueryPrefix    *string `json:"query_prefix,omitempty"`
+	DocumentPrefix *string `json:"document_prefix,omitempty"`
+	ResetPrefixes  bool    `json:"reset_prefixes,omitempty"`
 	// Scope is "user" (the default, when empty) or "workspace".
 	Scope string `json:"scope,omitempty"`
 	// Force saves an enabled config even when the pre-save probe (the same

@@ -30,6 +30,14 @@ type SemanticWrite struct {
 	Model     string
 	BatchSize int
 	APIKey    *string
+	// Kinds replaces the `kinds:` list when non-nil; an empty list removes
+	// the key (every kind). nil leaves the file's list alone.
+	Kinds *[]string
+	// QueryPrefix/DocumentPrefix: nil leaves the key alone; a pointer to a
+	// nil *string removes it (back to the model's default); a pointer to a
+	// string, "" included, writes it.
+	QueryPrefix    **string
+	DocumentPrefix **string
 }
 
 // WriteSemantic writes w into path's top-level `semantic:` block, creating
@@ -59,6 +67,22 @@ func WriteSemantic(path string, w SemanticWrite) error {
 	yamlSetScalar(sem, "batch_size", w.BatchSize)
 	if w.APIKey != nil {
 		yamlSetScalar(sem, "api_key", *w.APIKey)
+	}
+	if w.Kinds != nil {
+		if len(*w.Kinds) == 0 {
+			yamlDeleteKey(sem, "kinds")
+		} else {
+			yamlSetScalar(sem, "kinds", *w.Kinds)
+		}
+	}
+	for key, p := range map[string]**string{"query_prefix": w.QueryPrefix, "document_prefix": w.DocumentPrefix} {
+		switch {
+		case p == nil:
+		case *p == nil:
+			yamlDeleteKey(sem, key)
+		default:
+			yamlSetScalar(sem, key, **p)
+		}
 	}
 
 	return saveYAMLDocument(path, doc)
@@ -104,7 +128,8 @@ func fileSetsSemantic(path string) (bool, error) {
 		return false, errs.Wrap(errs.Invalid, err, "config: parsing %s", path).WithDetail("file", path)
 	}
 	r := raw.Semantic
-	return r.Enabled != nil || r.Kind != nil || r.BaseURL != nil || r.Model != nil || r.APIKey != nil || r.BatchSize != nil, nil
+	return r.Enabled != nil || r.Kind != nil || r.BaseURL != nil || r.Model != nil || r.APIKey != nil || r.BatchSize != nil ||
+		r.Kinds != nil || r.QueryPrefix != nil || r.DocumentPrefix != nil, nil
 }
 
 // loadOrNewYAMLDocument reads path as a yaml.Node document, or -- when it
@@ -169,6 +194,17 @@ func yamlSetScalar(mapNode *yaml.Node, key string, value any) {
 		yamlAppendMapEntry(mapNode, key, v)
 	}
 	_ = v.Encode(value)
+}
+
+// yamlDeleteKey removes key (and its value) from mapping node mapNode; a
+// key that is not there is left not there.
+func yamlDeleteKey(mapNode *yaml.Node, key string) {
+	for i := 0; i+1 < len(mapNode.Content); i += 2 {
+		if mapNode.Content[i].Value == key {
+			mapNode.Content = append(mapNode.Content[:i], mapNode.Content[i+2:]...)
+			return
+		}
+	}
 }
 
 // saveYAMLDocument creates path's parent directory if needed and writes doc

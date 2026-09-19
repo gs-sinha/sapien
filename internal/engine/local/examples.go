@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/gs-sinha/sapien/internal/config"
 	"net/url"
 	"sort"
 	"strings"
@@ -59,7 +60,26 @@ func (e *exampleAPI) Create(ctx context.Context, ex domain.SavedExample) (*domai
 	if err := e.validate(ctx, ex); err != nil {
 		return nil, err
 	}
-	return e.l.exStore.Create(ctx, ex)
+	created, err := e.l.exStore.Create(ctx, ex)
+	if err == nil {
+		e.l.reembedForExample(created.Operation)
+	}
+	return created, err
+}
+
+// reembedForExample queues a semantic re-index of the service operation
+// belongs to, after one of its examples was written or removed: with the
+// examples kind on, an example's description is part of that operation's
+// embedded text (indexServiceSemantics), and only the operations whose text
+// actually changed are re-embedded. A no-op when semantic search, or that
+// kind, is off.
+func (l *Local) reembedForExample(operation string) {
+	if operation == "" || !l.appliedSemanticConfig().Embeds(config.SemanticKindExamples) {
+		return
+	}
+	if service, _, ok := strings.Cut(operation, "."); ok {
+		l.enqueueSemanticIndex(service)
+	}
 }
 
 // Update validates ex the same way Create does (defaulting a blank
@@ -78,11 +98,22 @@ func (e *exampleAPI) Update(ctx context.Context, ex domain.SavedExample) (*domai
 	if err := e.validate(ctx, checked); err != nil {
 		return nil, err
 	}
-	return e.l.exStore.Update(ctx, ex)
+	updated, err := e.l.exStore.Update(ctx, ex)
+	if err == nil {
+		e.l.reembedForExample(updated.Operation)
+	}
+	return updated, err
 }
 
 func (e *exampleAPI) Delete(ctx context.Context, id string) error {
-	return e.l.exStore.Delete(ctx, id)
+	existing, _ := e.l.exStore.Get(ctx, id)
+	if err := e.l.exStore.Delete(ctx, id); err != nil {
+		return err
+	}
+	if existing != nil {
+		e.l.reembedForExample(existing.Operation)
+	}
+	return nil
 }
 
 func (e *exampleAPI) ForOperations(ctx context.Context, operationIDs []string, limit int) ([]domain.SavedExample, error) {
@@ -428,7 +459,11 @@ func (e *exampleAPI) FromRun(ctx context.Context, req engine.ExampleFromRun) (*d
 		Env: run.Environment, RunID: run.ID, StepID: step.StepID, At: time.Now().UTC(), Source: source,
 	}
 
-	return l.exStore.Create(ctx, ex)
+	created, err := l.exStore.Create(ctx, ex)
+	if err == nil {
+		l.reembedForExample(created.Operation)
+	}
+	return created, err
 }
 
 // pickRunStep selects the step FromRun should save: the step named stepID,
