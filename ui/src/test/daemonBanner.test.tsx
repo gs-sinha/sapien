@@ -17,7 +17,7 @@ function nothingListening() {
 }
 
 function reset() {
-  useDaemon.setState({ state: 'unknown', loadedVersion: null, runningVersion: null, sessionStale: false });
+  useDaemon.setState({ state: 'unknown', loadedVersion: null, runningVersion: null, sessionStale: false, restarting: false });
 }
 
 beforeEach(() => {
@@ -89,6 +89,24 @@ describe('DaemonBanner', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Reload' }));
     expect(reload).toHaveBeenCalled();
+  });
+
+  // PLAN §34f items 3/4: a Settings-initiated restart/upgrade briefly makes
+  // a health probe see 'gone' while the old process exits, which must not
+  // flash the "wasn't running" banner over a restart the user just asked
+  // for -- state/daemon.ts's waitForRestart sets `restarting` for exactly
+  // this window.
+  it('suppresses the gone banner while an intentional restart is in progress', () => {
+    useDaemon.setState({ state: 'gone', loadedVersion: '1.1.0', restarting: true });
+    const { container } = render(<DaemonBanner />);
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it('shows the gone banner again once restarting clears without the daemon coming back', () => {
+    nothingListening();
+    useDaemon.setState({ state: 'gone', loadedVersion: '1.1.0', restarting: false });
+    render(<DaemonBanner />);
+    expect(screen.getByRole('status')).toHaveTextContent('30 minutes');
   });
 
   it('explains the idle exit and re-probes on demand when nothing is listening', async () => {

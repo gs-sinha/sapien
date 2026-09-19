@@ -20,6 +20,7 @@ import type {
   CreateFlowRequest,
   ContextBundle,
   ContextRequest,
+  DaemonInfo,
   DefaultEnvironmentResponse,
   DirListing,
   Doc,
@@ -40,6 +41,8 @@ import type {
   MemoryQueryParams,
   NamedSchema,
   Operation,
+  OllamaModelsResponse,
+  OllamaPullRequest,
   PromotionTarget,
   PurgeRunsResponse,
   RepoStatus,
@@ -51,9 +54,15 @@ import type {
   SavedExample,
   ScoredMemory,
   SearchResult,
+  SemanticSettings,
+  SemanticTestResult,
   Service,
+  ServiceBranches,
+  SetServiceRefRequest,
   StepResult,
   Subject,
+  UpdateInfo,
+  UpdateSemanticSettingsRequest,
   ValidationResult,
   Workspace,
 } from './types';
@@ -533,3 +542,46 @@ export const workspacesApi = {
 export function getRecentEvents(limit = 200): Promise<Event[]> {
   return orEmpty(get(`/v1/events/recent${buildQuery({ limit })}`));
 }
+
+// ---- PLAN §34f: settings (semantic search, daemon, updates) and service ref ----
+
+// Off by default, turned on from Settings, no restart required (PLAN §34f
+// item 5). `test` posts the same shape as `update` but never saves it; a
+// refused `update` (e.g. a model/dimension change that would need a full
+// reindex) is resent with `force: true` for "Save anyway".
+export const semanticSettings = {
+  get: (): Promise<SemanticSettings> => get('/v1/settings/semantic'),
+  update: (req: UpdateSemanticSettingsRequest): Promise<SemanticSettings> => put('/v1/settings/semantic', req),
+  test: (req: UpdateSemanticSettingsRequest): Promise<SemanticTestResult> => post('/v1/settings/semantic/test', req),
+  reindex: (): Promise<void> => post('/v1/settings/semantic/reindex'),
+  ollama: (baseUrl: string): Promise<OllamaModelsResponse> => get(`/v1/settings/semantic/ollama${buildQuery({ base_url: baseUrl })}`),
+  ollamaPull: (req: OllamaPullRequest): Promise<void> => post('/v1/settings/semantic/ollama/pull', req),
+};
+
+// PLAN §34f item 3: daemon control from Settings. `restart` 202s and the
+// daemon spawns a detached successor; the caller waits it out with
+// state/daemon.ts's waitForRestart before refetching.
+export const daemon = {
+  get: (): Promise<DaemonInfo> => get('/v1/daemon'),
+  restart: (force?: boolean): Promise<void> => post('/v1/daemon/restart', { force }),
+};
+
+// PLAN §34f item 4: update check/apply from Settings.
+export const updates = {
+  get: (): Promise<UpdateInfo> => get('/v1/update'),
+  check: (): Promise<UpdateInfo> => post('/v1/update/check'),
+  apply: (): Promise<void> => post('/v1/update/apply'),
+  setCheckEnabled: (check: boolean): Promise<void> => put('/v1/settings/updates', { check }),
+};
+
+// PLAN §34f item 2: the effective ref (branch/tag) a git-sourced service is
+// read at, overridable per machine (`scope: 'local'`, a `ref:` in
+// sapien.workspace.local.yaml) or for the team (`scope: 'team'`, rewrites
+// source.ref in sapien.workspace.yaml). Kept separate from the `services`
+// object above rather than added to it, so this whole §34f slice stays one
+// contiguous, easily-mergeable block.
+export const serviceRefs = {
+  branches: (id: string): Promise<ServiceBranches> => get(`/v1/services/${encodeURIComponent(id)}/branches`),
+  set: (id: string, req: SetServiceRefRequest): Promise<Service> => put(`/v1/services/${encodeURIComponent(id)}/ref`, req),
+  clear: (id: string): Promise<Service> => del(`/v1/services/${encodeURIComponent(id)}/ref`),
+};

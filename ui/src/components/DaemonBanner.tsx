@@ -11,9 +11,14 @@ export function DaemonBanner() {
   const runningVersion = useDaemon((s) => s.runningVersion);
   const sessionStale = useDaemon((s) => s.sessionStale);
   const probe = useDaemon((s) => s.probe);
+  // Set for the duration of a Settings-initiated restart/upgrade (PLAN
+  // §34f items 3/4, state/daemon.ts's waitForRestart): the old process
+  // going down makes a probe briefly see 'gone', which would otherwise
+  // flash this banner over a restart the user just asked for.
+  const restarting = useDaemon((s) => s.restarting);
 
   // A gone daemon explains a stale session too, so it is reported first.
-  if (state === 'gone') return <GoneBanner onRetry={() => void probe()} />;
+  if (state === 'gone') return restarting ? null : <GoneBanner onRetry={() => void probe()} />;
   if (state === 'replaced') {
     return <ReplacedBanner loadedVersion={loadedVersion} runningVersion={runningVersion} />;
   }

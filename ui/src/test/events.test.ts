@@ -65,6 +65,35 @@ describe('summarize', () => {
     });
   });
 
+  it('reduces semantic.index, keeping the state/embedded/total payload for a live status line', async () => {
+    const { summarize } = await freshEventsModule();
+    const s = summarize({
+      type: 'semantic.index',
+      time: 't',
+      payload: { state: 'indexing', embedded: 412, total: 1903 },
+    });
+    expect(s.summary).toBe('semantic search: indexing 412/1903');
+    expect(s.semanticIndex).toEqual({ state: 'indexing', embedded: 412, total: 1903 });
+  });
+
+  it('reduces semantic.pull, keeping the model/progress/done payload for a pull progress bar', async () => {
+    const { summarize } = await freshEventsModule();
+    const s = summarize({
+      type: 'semantic.pull',
+      time: 't',
+      payload: { model: 'nomic-embed-text', status: 'pulling', completed: 50, total: 100, done: false },
+    });
+    expect(s.summary).toBe('pull nomic-embed-text: pulling');
+    expect(s.semanticPull).toEqual({
+      model: 'nomic-embed-text',
+      status: 'pulling',
+      completed: 50,
+      total: 100,
+      done: false,
+      error: undefined,
+    });
+  });
+
   it('reduces catalog.changed with add/remove/change counts', async () => {
     const { summarize } = await freshEventsModule();
     const s = summarize({
