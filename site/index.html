@@ -91,22 +91,22 @@
       <figure class="demo" style="margin:0" aria-label="An agent in a frontend repo writes and runs a flow across three backend services with Sapien">
         <div class="demo-bar"><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>claude · ~/code/checkout-web</div>
         <div class="demo-body">
-          <div class="demo-prompt"><span class="who">›</span><span>Using Sapien, write a flow that places an order, allocates a rider and checks they're online, then cancels the order and confirms the rider is released. Run it on stage.</span></div>
-<pre><span class="tool">get_context</span>            <span class="dim">orders → allocation → riders</span>
+          <div class="demo-prompt"><span class="who">›</span><span>Using Sapien, write a flow that takes a payment, captures it and checks the ledger entry, then refunds it and confirms the entry is reversed. Run it on stage.</span></div>
+<pre><span class="tool">get_context</span>            <span class="dim">payments → ledger → refunds</span>
 <span class="tool">search_apis</span>            <span class="dim">5 operations across 3 services</span>
 <span class="tool">get_api</span>                <span class="dim">ready-to-send request bodies</span>
 <span class="tool">get_relevant_memories</span>  <span class="dim">1 invariant → assertion</span>
 <span class="tool">validate_flow</span>          <span class="ok">valid</span>
-<span class="tool">run_flow</span>               <span class="dim">cancel-releases-rider · stage</span></pre>
+<span class="tool">run_flow</span>               <span class="dim">refund-reverses-ledger · stage</span></pre>
           <div class="hr"></div>
 <pre><span class="dim">STEP      OPERATION                          HTTP  ASSERT</span>
-create    order-service.createOrder          <span class="ok">201</span>   1/1
-allocate  allocation-service.allocate        <span class="ok">201</span>   2/2
-rider     rider-service.getRider             <span class="ok">200</span>   2/2
-cancel    order-service.cancelOrder          <span class="ok">200</span>   2/2
-released  allocation-service.getAllocation   <span class="ok">200</span>   2/2
+create    payment-service.createPayment      <span class="ok">201</span>   1/1
+capture   payment-service.capturePayment     <span class="ok">200</span>   2/2
+entry     ledger-service.getEntry            <span class="ok">200</span>   2/2
+refund    refund-service.createRefund        <span class="ok">201</span>   2/2
+reversed  ledger-service.getEntry            <span class="ok">200</span>   2/2
 
-<span class="ok">passed</span> · 5/5 steps · 412 ms</pre>
+<span class="ok">passed</span> · 5/5 steps · 462 ms</pre>
         </div>
       </figure>
     </div>
@@ -146,13 +146,13 @@ released  allocation-service.getAllocation   <span class="ok">200</span>   2/2
             <p>Describe a journey in plain language. The agent finds the operations across services, reads their rules and the team's known gotchas, then writes a flow with assertions, validates it and runs it. You don't paste in context about every service. Sapien already has it.</p>
           </div>
           <div class="mini-flow" aria-hidden="true">
-            <div class="ask">“Create an order, allocate a rider, cancel the order, and check the rider is freed.”</div>
+            <div class="ask">“Take a payment, capture it, refund it, and check the ledger entry is reversed.”</div>
             <ol>
-              <li><svg class="i"><use href="#i-check"/></svg><span>order-service.createOrder</span><span class="svc">orders</span></li>
-              <li><svg class="i"><use href="#i-check"/></svg><span>allocation-service.allocate</span><span class="svc">allocation</span></li>
-              <li><svg class="i"><use href="#i-check"/></svg><span>rider-service.getRider</span><span class="svc">riders</span></li>
-              <li><svg class="i"><use href="#i-check"/></svg><span>order-service.cancelOrder</span><span class="svc">orders</span></li>
-              <li><svg class="i"><use href="#i-check"/></svg><span>allocation-service.getAllocation</span><span class="svc">allocation</span></li>
+              <li><svg class="i"><use href="#i-check"/></svg><span>payment-service.createPayment</span><span class="svc">payments</span></li>
+              <li><svg class="i"><use href="#i-check"/></svg><span>payment-service.capturePayment</span><span class="svc">payments</span></li>
+              <li><svg class="i"><use href="#i-check"/></svg><span>ledger-service.getEntry</span><span class="svc">ledger</span></li>
+              <li><svg class="i"><use href="#i-check"/></svg><span>refund-service.createRefund</span><span class="svc">refunds</span></li>
+              <li><svg class="i"><use href="#i-check"/></svg><span>ledger-service.getEntry</span><span class="svc">ledger</span></li>
             </ol>
             <div class="result"><svg class="i"><use href="#i-check-circle"/></svg>passed · 5 steps · 9 assertions</div>
           </div>
@@ -223,8 +223,8 @@ released  allocation-service.getAllocation   <span class="ok">200</span>   2/2
             <li><svg class="i" aria-hidden="true"><use href="#i-check"/></svg><span>Resume from the failed step instead of starting over, then promote the flow so the whole team gets it.</span></li>
           </ul>
           <div class="snip">
-            <pre class="code"><span class="p">$ </span>sapien flow run cancel-releases-rider --env stage
-<span class="p">$ </span>sapien flow run cancel-releases-rider --env stage \
+            <pre class="code"><span class="p">$ </span>sapien flow run refund-reverses-ledger --env stage
+<span class="p">$ </span>sapien flow run refund-reverses-ledger --env stage \
     --resume &lt;run-id&gt;        <span class="c"># from the failed step</span></pre>
           </div>
         </article>
@@ -236,13 +236,13 @@ released  allocation-service.getAllocation   <span class="ok">200</span>   2/2
           </div>
           <p class="problem"><b>The problem</b>The screen needs an endpoint. Which one, what goes in the body, and which errors should the UI handle? The answer lives in a repo you don't have checked out.</p>
           <ul class="ticks">
-            <li><svg class="i" aria-hidden="true"><use href="#i-check"/></svg><span>Search by intent in the browser (“cancel an order”) and open a ready-to-send request in Try it.</span></li>
+            <li><svg class="i" aria-hidden="true"><use href="#i-check"/></svg><span>Search by intent in the browser (“refund a payment”) and open a ready-to-send request in Try it.</span></li>
             <li><svg class="i" aria-hidden="true"><use href="#i-check"/></svg><span>Your agent in the frontend repo reads the backend's docs and payloads over MCP while it wires the screen.</span></li>
             <li><svg class="i" aria-hidden="true"><use href="#i-check"/></svg><span>Get test data from a flow instead of a Slack thread with the backend team.</span></li>
           </ul>
           <figure class="prompt snip">
             <figcaption><svg class="i" aria-hidden="true"><use href="#i-message"/></svg>Prompt</figcaption>
-            <blockquote>Using Sapien, find how to cancel an order and which errors it can return, then wire the Cancel button to it and handle each error.</blockquote>
+            <blockquote>Using Sapien, find how to refund a payment and which errors it can return, then wire the Refund button to it and handle each error.</blockquote>
           </figure>
         </article>
 
@@ -275,8 +275,8 @@ released  allocation-service.getAllocation   <span class="ok">200</span>   2/2
             <li><svg class="i" aria-hidden="true"><use href="#i-check"/></svg><span><code>execute_api</code> resolves base URLs, auth and secrets, records the run and diagnoses failures. What worked is saved with <code>create_example</code> for the next agent.</span></li>
           </ul>
           <div class="snip">
-            <pre class="code" data-nocopy><span class="k">get_context</span>(<span class="s">"refund a cancelled order"</span>)
-<span class="k">get_api</span>(<span class="s">"payments.createRefund"</span>)
+            <pre class="code" data-nocopy><span class="k">get_context</span>(<span class="s">"refund a captured payment"</span>)
+<span class="k">get_api</span>(<span class="s">"refund-service.createRefund"</span>)
 <span class="c">  → request_example, rules, normal errors</span>
 <span class="k">execute_api</span>(…, env=<span class="s">"stage"</span>)
 <span class="c">  → 201, run recorded</span>
@@ -336,6 +336,7 @@ released  allocation-service.getAllocation   <span class="ok">200</span>   2/2
             <h3>Create a workspace</h3>
             <p>A workspace is the folder that lists the services one system is made of. Start local; you can make it a team workspace later. <a href="#workspaces">Local or team?</a></p>
             <pre class="code"><span class="p">$ </span>sapien init ~/sapien-workspace &amp;&amp; cd ~/sapien-workspace</pre>
+            <p class="note"><span class="badge">Next release</span> After this first one, workspaces don't need a terminal: the inspector's workspace picker has <b>Add workspace</b>, which creates a new workspace, clones your team's workspace repo, or opens a folder you already have, then switches to it.</p>
           </div>
         </li>
 
@@ -420,12 +421,13 @@ released  allocation-service.getAllocation   <span class="ok">200</span>   2/2
             <li><div class="body">
               <h4>Create it</h4>
               <pre class="code"><span class="p">$ </span>sapien init ~/sapien-workspace &amp;&amp; cd ~/sapien-workspace</pre>
+              <p class="note"><span class="badge">Next release</span> Or in the inspector: workspace picker → <b>Add workspace</b> → <b>New</b>. Pick the parent folder in the folder browser, name it, optionally tick <i>git init</i>, and it is created, registered and opened.</p>
             </div></li>
             <li><div class="body">
               <h4>Add the services you have checked out</h4>
               <p>A service needs an <code>api/</code> package. If it doesn't have one yet, <a href="#onboard">onboard it with an agent</a> first.</p>
-              <pre class="code"><span class="p">$ </span>sapien service add ~/code/order-service
-<span class="p">$ </span>sapien service add ~/code/rider-service</pre>
+              <pre class="code"><span class="p">$ </span>sapien service add ~/code/payment-service
+<span class="p">$ </span>sapien service add ~/code/ledger-service</pre>
             </div></li>
             <li><div class="body">
               <h4>Set up environments</h4>
@@ -455,8 +457,8 @@ released  allocation-service.getAllocation   <span class="ok">200</span>   2/2
             <li><div class="body">
               <h4>Add services as git sources</h4>
               <p>Give a repo URL, or the path to a checkout: Sapien records the checkout's origin as the team's source and binds your checkout on this machine. A service shows up for teammates once its <code>api/</code> package is on the branch.</p>
-              <pre class="code"><span class="p">$ </span>sapien service add git@github.com:acme/order-service.git --ref main
-<span class="p">$ </span>sapien service add ~/code/rider-service     <span class="c"># records its origin, binds this checkout</span></pre>
+              <pre class="code"><span class="p">$ </span>sapien service add git@github.com:acme/payment-service.git --ref main
+<span class="p">$ </span>sapien service add ~/code/ledger-service     <span class="c"># records its origin, binds this checkout</span></pre>
             </div></li>
             <li><div class="body">
               <h4>Scaffold environments, point your agent here, and share</h4>
@@ -476,6 +478,7 @@ released  allocation-service.getAllocation   <span class="ok">200</span>   2/2
               <pre class="code"><span class="p">$ </span>git clone git@github.com:acme/sapien-workspace.git ~/acme-workspace
 <span class="p">$ </span>sapien workspace add ~/acme-workspace
 <span class="p">$ </span>sapien workspace use ~/acme-workspace     <span class="c"># the default outside any workspace</span></pre>
+              <p class="note"><span class="badge">Next release</span> Or without a terminal: in the inspector, workspace picker → <b>Add workspace</b> → <b>Clone</b>. Paste the repo URL, pick where it should live, and Sapien clones it, registers it and switches to it, with every service searchable as soon as it opens. <b>Existing</b> does the same for a clone you already have.</p>
             </div></li>
             <li><div class="body">
               <h4>Connect your agent and add your own secrets</h4>
@@ -486,15 +489,15 @@ released  allocation-service.getAllocation   <span class="ok">200</span>   2/2
             </div></li>
             <li><div class="body">
               <h4>Start work on a service: bind your checkout</h4>
-              <p>This machine now reads the service from your branch and re-indexes on every save. Docs, examples and flows about it are written into its <code>api/</code> folder and ship in your pull request. <code>sapien service unbind order-service</code> goes back to the team's version.</p>
-              <pre class="code"><span class="p">$ </span>cd ~/code/order-service
+              <p>This machine now reads the service from your branch and re-indexes on every save. Docs, examples and flows about it are written into its <code>api/</code> folder and ship in your pull request. <code>sapien service unbind payment-service</code> goes back to the team's version.</p>
+              <pre class="code"><span class="p">$ </span>cd ~/code/payment-service
 <span class="p">$ </span>sapien service bind .                     <span class="c"># the service is inferred from origin</span></pre>
             </div></li>
             <li><div class="body">
               <h4>Stay in sync, and share what you built</h4>
               <p>The UI's status bar shows when teammates' commits are waiting, and offers Pull and Push buttons too.</p>
               <pre class="code"><span class="p">$ </span>sapien workspace pull                             <span class="c"># fast-forward only</span>
-<span class="p">$ </span>sapien flow promote cancel-releases-rider --commit  <span class="c"># local → team, one commit</span>
+<span class="p">$ </span>sapien flow promote refund-reverses-ledger --commit  <span class="c"># local → team, one commit</span>
 <span class="p">$ </span>sapien workspace push</pre>
             </div></li>
           </ol>
@@ -541,7 +544,7 @@ released  allocation-service.getAllocation   <span class="ok">200</span>   2/2
 ├── service.yaml   <span class="c">owners, concepts, environments</span>
 └── docs/          <span class="c">overview.md + one file per area</span>
 
-<span class="b">order-service</span>: 12 operations, status <span class="ok">ok</span>
+<span class="b">payment-service</span>: 12 operations, status <span class="ok">ok</span>
 docs: <span class="ok">12/12</span> operations documented in api/docs
 examples: <span class="ok">7/7</span> bodies have a request example</pre>
         </article>
@@ -558,11 +561,11 @@ examples: <span class="ok">7/7</span> bodies have a request example</pre>
             </div>
             <div class="tabpanel" role="tabpanel" id="p-ob-cli" aria-labelledby="t-ob-cli">
               <pre class="code"><span class="c"># a checkout on this machine</span>
-<span class="p">$ </span>sapien service add ~/code/order-service
+<span class="p">$ </span>sapien service add ~/code/payment-service
 
 <span class="c"># a remote repo, no checkout needed</span>
 <span class="p">$ </span>sapien service add \
-    git@github.com:acme/order-service.git \
+    git@github.com:acme/payment-service.git \
     --ref main --subdir api
 
 <span class="c"># a contract that lives somewhere else</span>
@@ -603,11 +606,11 @@ examples: <span class="ok">7/7</span> bodies have a request example</pre>
         <div>
           <figure class="prompt hero-prompt">
             <figcaption><svg class="i" aria-hidden="true"><use href="#i-message"/></svg>Example prompt</figcaption>
-            <blockquote>Using Sapien, write a flow that places a QCOM order, allocates a rider and checks the rider is online, then cancels the order and confirms the allocation was released. Validate it and run it on stage.</blockquote>
+            <blockquote>Using Sapien, write a flow that authorizes a card payment, captures it and checks the ledger entry is posted, then refunds it and confirms the entry was reversed. Validate it and run it on stage.</blockquote>
           </figure>
 
           <ol class="trace">
-            <li><span class="n">1</span><span><code>get_context</code> and <code>search_apis</code> find five operations across the order, allocation and rider services.</span></li>
+            <li><span class="n">1</span><span><code>get_context</code> and <code>search_apis</code> find five operations across the payment, ledger and refund services.</span></li>
             <li><span class="n">2</span><span><code>get_api</code> returns a ready-to-send body for each, so nothing is assembled from a field list.</span></li>
             <li><span class="n">3</span><span><code>get_relevant_memories</code> surfaces the team's invariants and gotchas, which become assertions or polling.</span></li>
             <li><span class="n">4</span><span><code>validate_flow</code> until it's clean, then <code>create_flow</code>. New flows land in your local tier.</span></li>
@@ -618,61 +621,61 @@ examples: <span class="ok">7/7</span> bodies have a request example</pre>
           <div class="more-prompts">
             <p class="divider" style="margin-top:0">More prompts to try</p>
             <div class="prompts">
-              <figure class="prompt"><blockquote>Reproduce the bug where a cancelled order keeps its rider busy, as a flow that fails today.</blockquote></figure>
-              <figure class="prompt"><blockquote>Put five orders in ALLOCATED state on stage so I can test the dispatch screen.</blockquote></figure>
-              <figure class="prompt"><blockquote>Run cancel-releases-rider on stage and explain the failing step.</blockquote></figure>
-              <figure class="prompt"><blockquote>Add a teardown to the checkout flow that cancels the order it created.</blockquote></figure>
+              <figure class="prompt"><blockquote>Reproduce the bug where a refunded payment leaves its ledger entry posted, as a flow that fails today.</blockquote></figure>
+              <figure class="prompt"><blockquote>Put five payments in CAPTURED state on stage so I can test the settlements screen.</blockquote></figure>
+              <figure class="prompt"><blockquote>Run refund-reverses-ledger on stage and explain the failing step.</blockquote></figure>
+              <figure class="prompt"><blockquote>Add a teardown to the checkout flow that refunds the payment it created.</blockquote></figure>
             </div>
           </div>
         </div>
 
         <div class="flow-code">
-          <p class="label"><b>cancel-releases-rider.flow.yaml</b><span>written by the agent</span></p>
+          <p class="label"><b>refund-reverses-ledger.flow.yaml</b><span>written by the agent</span></p>
           <pre class="code"><span class="k">version</span>: 1
-<span class="k">id</span>: cancel-releases-rider
-<span class="k">name</span>: Cancelling an allocated order frees its rider
+<span class="k">id</span>: refund-reverses-ledger
+<span class="k">name</span>: Refunding a captured payment reverses its ledger entry
 <span class="k">inputs</span>:
   <span class="k">customerId</span>: { <span class="k">type</span>: string, <span class="k">default</span>: cust_8f21 }
 <span class="k">steps</span>:
   - <span class="k">id</span>: create
-    <span class="k">call</span>: <span class="a">order-service.createOrder</span>
+    <span class="k">call</span>: <span class="a">payment-service.createPayment</span>
     <span class="k">body</span>:
       <span class="k">customerId</span>: <span class="s">"${inputs.customerId}"</span>
-      <span class="k">type</span>: QCOM
-      <span class="k">pickup</span>: { <span class="k">lat</span>: 12.9716, <span class="k">lng</span>: 77.5946 }
-      <span class="k">drop</span>: { <span class="k">lat</span>: 12.9352, <span class="k">lng</span>: 77.6146 }
-    <span class="k">extract</span>: { <span class="k">orderId</span>: body.orderId }
-    <span class="k">assert</span>: [status == 201]
+      <span class="k">amount</span>: 49900
+      <span class="k">currency</span>: INR
+      <span class="k">method</span>: { <span class="k">type</span>: card, <span class="k">token</span>: tok_test_visa }
+    <span class="k">extract</span>: { <span class="k">paymentId</span>: body.paymentId }
+    <span class="k">assert</span>: [status == 201, body.status == <span class="s">"AUTHORIZED"</span>]
 
-  - <span class="k">id</span>: allocate
-    <span class="k">call</span>: <span class="a">allocation-service.allocate</span>
-    <span class="k">body</span>: { <span class="k">orderId</span>: <span class="s">"${steps.create.out.orderId}"</span> }
-    <span class="k">extract</span>: { <span class="k">allocationId</span>: body.allocationId, <span class="k">riderId</span>: body.riderId }
-    <span class="k">assert</span>: [status == 201, body.status == <span class="s">"ALLOCATED"</span>]
+  - <span class="k">id</span>: capture
+    <span class="k">call</span>: <span class="a">payment-service.capturePayment</span>
+    <span class="k">input</span>: { <span class="k">paymentId</span>: <span class="s">"${steps.create.out.paymentId}"</span> }
+    <span class="k">extract</span>: { <span class="k">entryId</span>: body.ledgerEntryId }
+    <span class="k">assert</span>: [status == 200, body.status == <span class="s">"CAPTURED"</span>]
 
-  - <span class="k">id</span>: rider
-    <span class="k">call</span>: <span class="a">rider-service.getRider</span>
-    <span class="k">input</span>: { <span class="k">riderId</span>: <span class="s">"${steps.allocate.out.riderId}"</span> }
-    <span class="k">assert</span>: [status == 200, body.online == true]
+  - <span class="k">id</span>: entry
+    <span class="k">call</span>: <span class="a">ledger-service.getEntry</span>
+    <span class="k">input</span>: { <span class="k">entryId</span>: <span class="s">"${steps.capture.out.entryId}"</span> }
+    <span class="k">assert</span>: [status == 200, body.state == <span class="s">"POSTED"</span>]
 
-  - <span class="k">id</span>: cancel
-    <span class="k">call</span>: <span class="a">order-service.cancelOrder</span>
-    <span class="k">input</span>: { <span class="k">orderId</span>: <span class="s">"${steps.create.out.orderId}"</span> }
-    <span class="k">assert</span>: [status == 200, body.status == <span class="s">"CANCELLED"</span>]
+  - <span class="k">id</span>: refund
+    <span class="k">call</span>: <span class="a">refund-service.createRefund</span>
+    <span class="k">body</span>: { <span class="k">paymentId</span>: <span class="s">"${steps.create.out.paymentId}"</span>, <span class="k">amount</span>: 49900 }
+    <span class="k">assert</span>: [status == 201, body.status == <span class="s">"REFUNDED"</span>]
 
-  - <span class="k">id</span>: released
-    <span class="k">call</span>: <span class="a">allocation-service.getAllocation</span>
-    <span class="k">input</span>: { <span class="k">allocationId</span>: <span class="s">"${steps.allocate.out.allocationId}"</span> }
-    <span class="k">assert</span>: [status == 200, body.status == <span class="s">"RELEASED"</span>]</pre>
-          <pre class="code run-out" data-nocopy style="margin-top:12px"><span class="p">$ </span>sapien flow run cancel-releases-rider --env stage
+  - <span class="k">id</span>: reversed
+    <span class="k">call</span>: <span class="a">ledger-service.getEntry</span>
+    <span class="k">input</span>: { <span class="k">entryId</span>: <span class="s">"${steps.capture.out.entryId}"</span> }
+    <span class="k">assert</span>: [status == 200, body.state == <span class="s">"REVERSED"</span>]</pre>
+          <pre class="code run-out" data-nocopy style="margin-top:12px"><span class="p">$ </span>sapien flow run refund-reverses-ledger --env stage
 <span class="c">STEP      OPERATION                         STATUS  HTTP  LATENCY  ASSERTIONS</span>
-create    order-service.createOrder         <span class="ok">passed</span>  201   212 ms   1/1
-allocate  allocation-service.allocate       <span class="ok">passed</span>  201   97 ms    2/2
-rider     rider-service.getRider            <span class="ok">passed</span>  200   41 ms    2/2
-cancel    order-service.cancelOrder         <span class="ok">passed</span>  200   38 ms    2/2
-released  allocation-service.getAllocation  <span class="ok">passed</span>  200   24 ms    2/2
+create    payment-service.createPayment     <span class="ok">passed</span>  201   212 ms   1/1
+capture   payment-service.capturePayment    <span class="ok">passed</span>  200   97 ms    2/2
+entry     ledger-service.getEntry           <span class="ok">passed</span>  200   41 ms    2/2
+refund    refund-service.createRefund       <span class="ok">passed</span>  201   88 ms    2/2
+reversed  ledger-service.getEntry           <span class="ok">passed</span>  200   24 ms    2/2
 
-<span class="ok">passed</span> · 5/5 steps · 412 ms</pre>
+<span class="ok">passed</span> · 5/5 steps · 462 ms</pre>
         </div>
       </div>
 
@@ -700,7 +703,7 @@ released  allocation-service.getAllocation  <span class="ok">passed</span>  200 
       <div class="grid-2 run-anywhere">
         <div>
           <p class="label"><b>In CI</b><span>exit code follows the run</span></p>
-          <pre class="code"><span class="p">$ </span>sapien flow run cancel-releases-rider --env stage \
+          <pre class="code"><span class="p">$ </span>sapien flow run refund-reverses-ledger --env stage \
     --report junit --out flow.xml</pre>
         </div>
         <div>
