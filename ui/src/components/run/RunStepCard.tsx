@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { Ref } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { rerunStepAlone } from '../../api/flowsExtra';
@@ -29,14 +29,21 @@ export function RunStepCard({
   env,
   defaultOpen = false,
   scrollRef,
+  openStepId,
 }: {
   step: StepResult;
   runId: string;
   env: string;
   defaultOpen?: boolean;
   scrollRef?: Ref<HTMLDivElement>;
+  /** Selecting a node on the flow chart (PLAN §34f item 9) names a step id here; this card opens itself when it matches. */
+  openStepId?: string;
 }) {
   const [open, setOpen] = useState(defaultOpen);
+
+  useEffect(() => {
+    if (openStepId === step.step_id) setOpen(true);
+  }, [openStepId, step.step_id]);
   const [tab, setTab] = useState<Tab>(step.error || (step.response && step.response.status >= 400) ? 'response' : 'request');
   const [rerunning, setRerunning] = useState(false);
   const [savingExample, setSavingExample] = useState(false);
@@ -46,6 +53,10 @@ export function RunStepCard({
   const hasAssertions = (step.assertions?.length || 0) > 0;
   const hasExtracted = step.out && Object.keys(step.out).length > 0;
   const hasError = !!step.error;
+  // A step skipped by `when` (or, in principle, any future skip reason)
+  // never sent a request, so there's nothing to show request/response tabs
+  // for (PLAN §34f item 9's RunStepCard bullet).
+  const isSkipped = step.status === 'skipped';
 
   const rerunAlone = async () => {
     setRerunning(true);
@@ -60,7 +71,7 @@ export function RunStepCard({
   };
 
   return (
-    <div ref={scrollRef} className="border-b border-slate-100 dark:border-slate-900">
+    <div ref={scrollRef} className="border-b border-slate-100 dark:border-slate-900" data-step-card-id={step.step_id}>
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
@@ -74,7 +85,12 @@ export function RunStepCard({
         {step.timings && <span className="text-xs text-slate-400">{Math.round(step.timings.total_ms)} ms</span>}
         <StatusPill status={step.status} />
       </button>
-      {open && (
+      {open && isSkipped && (
+        <div className="border-t border-slate-100 bg-slate-50/50 p-3 text-sm text-slate-500 dark:border-slate-900 dark:bg-slate-900/40 dark:text-slate-400">
+          {step.skip_reason === 'when' ? 'skipped: when was false' : 'skipped'}
+        </div>
+      )}
+      {open && !isSkipped && (
         <div className="border-t border-slate-100 bg-slate-50/50 p-3 dark:border-slate-900 dark:bg-slate-900/40">
           <div className="mb-2 flex flex-wrap items-center gap-2">
             <TimingRow step={step} />

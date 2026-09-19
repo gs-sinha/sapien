@@ -13,20 +13,45 @@ import type { Run } from '../../api/types';
 export interface ActiveRun {
   phase: 'running' | 'done' | 'error';
   startedAt: number;
-  steps: Record<string, string>;
+  // Keyed by iterKey(step_id, iteration) (PLAN §34f.8): a loop block's
+  // nested step id repeats once per iteration, so step_id alone would
+  // collide as a key and make progress/"current step" tracking wrong once
+  // any flow has a loop.
+  steps: Record<string, StepLiveStatus>;
   runId?: string;
   run?: Run;
   message?: string;
 }
 
+export interface StepLiveStatus {
+  stepId: string;
+  status: string;
+  // Set for a nested execution inside a loop block, mirroring the run.step
+  // event payload (internal/runner.emitStep) and StepResult.Iteration/Parent.
+  iteration?: number;
+  parent?: string;
+}
+
+/** `${stepId}` normally, `${stepId}:${iteration}` inside a loop block --
+ * the same convention RunDetailPage's React keys use, so both pages agree
+ * on how a repeated nested step id is disambiguated. */
+export function iterKey(stepId: string, iteration?: number): string {
+  return iteration != null ? `${stepId}:${iteration}` : stepId;
+}
+
 const terminal = new Set(['passed', 'failed', 'errored', 'skipped', 'cancelled']);
 
+/** Bare step id -> latest status seen for it, across every iteration
+ * (last write wins, same "steps.<id> is always the latest execution"
+ * mental model docs/flows.md uses for the DSL itself) -- what FlowStepCard's
+ * per-card overlay wants; it doesn't care which iteration a status came
+ * from, just the most recent one. */
 export function stepStatuses(active: ActiveRun): Record<string, string> {
-  if (!active.run?.steps) return active.steps;
+  const merged: Record<string, string> = {};
+  for (const key of Object.keys(active.steps)) merged[active.steps[key].stepId] = active.steps[key].status;
   // Once the run is over its own step results are authoritative (they also
   // cover steps whose events were missed while the socket was reconnecting).
-  const merged = { ...active.steps };
-  for (const s of active.run.steps) merged[s.step_id] = s.status;
+  if (active.run?.steps) for (const s of active.run.steps) merged[s.step_id] = s.status;
   return merged;
 }
 
@@ -59,11 +84,25 @@ export function ActiveRunPanel({
   const elapsed = useElapsed(active);
   const connection = useEvents((s) => s.status);
 
-  const statuses = stepStatuses(active);
-  const done = Object.values(statuses).filter((s) => terminal.has(s)).length;
-  const current = Object.entries(statuses).find(([, s]) => !terminal.has(s))?.[0];
+  const entries = Object.values(active.steps);
+  // "Known" leaf steps are this flow's top-level steps: a loop block counts
+  // as one of them (its own completion is knowable up front), but its
+  // nested, per-iteration executions are not -- a foreach/repeat's true
+  // iteration count multiplies at runtime, so counting those toward the
+  // denominator (or the numerator) would make the percentage bogus while a
+  // run is inside a block (PLAN §34f item 9's ActiveRunPanel bullet).
+  const topLevel = entries.filter((e) => !e.parent);
+  const done = topLevel.filter((e) => terminal.has(e.status)).length;
+  // A loop block's own entry stays non-terminal for its whole duration, so
+  // preferring *a* non-terminal entry in plain insertion order would show
+  // the block itself instead of whichever nested step is actually running
+  // right now; a non-terminal nested entry is always the more specific,
+  // more useful one to show when one exists.
+  const nonTerminal = entries.filter((e) => !terminal.has(e.status));
+  const current = nonTerminal.find((e) => e.parent) ?? nonTerminal[0];
   const total = active.run?.summary.steps_total || totalSteps;
   const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+  const currentLabel = current ? (current.parent && current.iteration != null ? `${current.stepId} · iteration ${current.iteration + 1}` : current.stepId) : undefined;
 
   return (
     <div className="rounded border border-slate-200 p-3 dark:border-slate-800">
@@ -75,7 +114,7 @@ export function ActiveRunPanel({
           <>
             <span className="text-slate-500">
               {done}/{total || '?'} steps
-              {active.phase === 'running' && current ? ` · ${current}` : ''}
+              {active.phase === 'running' && currentLabel ? ` · ${currentLabel}` : ''}
             </span>
             {active.run && (
               <span className="text-slate-500">

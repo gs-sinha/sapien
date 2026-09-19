@@ -647,4 +647,76 @@ describe('FlowDetailPage', () => {
 
     confirmSpy.mockRestore();
   });
+
+  it('shows a `when` line and renders a loop block as a group card with its nested steps indented', async () => {
+    flowsGet.mockImplementationOnce(async () => ({
+      version: 1,
+      id: 'qcom-order',
+      name: 'QCOM order',
+      description: '',
+      tags: [],
+      path: 'flows/qcom-order.flow.yaml',
+      owner_kind: 'workspace',
+      inputs: {},
+      steps: [
+        { id: 'create', call: 'qcom.createOrder', when: 'inputs.releaseNow' },
+        {
+          id: 'each',
+          call: '',
+          foreach: 'inputs.customerIds',
+          steps: [{ id: 'nested', call: 'qcom.createOrder' }],
+        },
+      ],
+      source: sampleSource,
+    }));
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText('QCOM order')).toBeInTheDocument());
+
+    // The `when` line, once the guarded step's card is open.
+    fireEvent.click(screen.getByText('create').closest('button')!);
+    expect(screen.getByText(/when:/)).toHaveTextContent('when: inputs.releaseNow');
+
+    // The block renders as a group card (header names it and the foreach
+    // expression) with its nested step indented inside, already open.
+    expect(screen.getByText('each')).toBeInTheDocument();
+    expect(screen.getByText(/foreach inputs.customerIds/)).toBeInTheDocument();
+    const nestedRow = screen.getByText('nested').closest('div[data-step-card-id="nested"]') as HTMLElement;
+    expect(nestedRow).toBeTruthy();
+    expect(nestedRow.style.paddingLeft).toBe('16px');
+  });
+
+  it('List|Chart toggle remembers the choice in localStorage across remounts', async () => {
+    const user = userEvent.setup();
+    localStorage.clear();
+    const { unmount } = renderPage();
+
+    await waitFor(() => expect(screen.getByText('QCOM order')).toBeInTheDocument());
+    const chartButton = screen.getByRole('button', { name: 'chart' });
+    expect(chartButton).toHaveAttribute('aria-pressed', 'false');
+
+    await user.click(chartButton);
+    expect(chartButton).toHaveAttribute('aria-pressed', 'true');
+    unmount();
+
+    renderPage();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'chart' })).toHaveAttribute('aria-pressed', 'true'));
+  });
+
+  it('selecting a chart node scrolls to and opens that step\'s card', async () => {
+    const user = userEvent.setup();
+    localStorage.clear();
+    Element.prototype.scrollIntoView = vi.fn();
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText('QCOM order')).toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: 'chart' }));
+
+    const node = await screen.findByRole('button', { name: /step create/i });
+    await user.click(node);
+
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
+    // Opening the step's card reveals its Input editor, not visible while closed.
+    await waitFor(() => expect(screen.getByText('Input')).toBeInTheDocument());
+  });
 });

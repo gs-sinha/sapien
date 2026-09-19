@@ -40,6 +40,11 @@ export interface StoredEvent {
     flow_id?: string;
     memory_id?: string;
     service?: string;
+    // Set on a run.step event for a nested execution inside a loop block
+    // (PLAN §34f.8, internal/runner.emitStep): iteration is 0-based, parent
+    // is the enclosing block's step id. Both absent for a top-level step.
+    iteration?: number;
+    parent?: string;
   };
 }
 
@@ -108,6 +113,8 @@ export function summarize(ev: Event): StoredEvent {
     case 'run.step': {
       ids.run_id = str(p.run_id);
       ids.step_id = str(p.step_id);
+      ids.iteration = typeof p.iteration === 'number' ? p.iteration : undefined;
+      ids.parent = str(p.parent);
       const status = str(p.status);
       eventStatus = status;
       summary = `run ${ids.run_id ?? ''} step ${ids.step_id ?? ''}: ${status ?? ''}`.trim();

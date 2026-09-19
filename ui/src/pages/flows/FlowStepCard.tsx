@@ -1,11 +1,22 @@
 import { useEffect, useRef, useState } from 'react';
 import { JsonView } from '../../components/JsonView';
 import { StatusPill } from '../../components/StatusPill';
+import { blockHeaderText, containsStepId, isBlockStep } from '../../lib/flowStep';
 import { KeyValueEditor, recordFromRows, rowsFromRecord } from './KeyValueEditor';
 import { SaveStepExampleDialog } from './SaveStepExampleDialog';
 import { bodyToText, isStepModified, mergedBody, mergedHeaders, mergedInput, textToBody } from './stepEdits';
-import type { StepEdit } from './stepEdits';
+import type { FlowStepEdits, StepEdit } from './stepEdits';
 import type { Operation, Step } from '../../api/types';
+
+/** A `when:` line shown on any step card (call or block) that has one (PLAN §34f.7). */
+function WhenLine({ when }: { when?: string }) {
+  if (!when) return null;
+  return (
+    <div className="text-xs text-slate-500 dark:text-slate-400">
+      when: <span className="font-mono">{when}</span>
+    </div>
+  );
+}
 
 function Section({ title, data }: { title: string; data: unknown }) {
   if (data === undefined || data === null) return null;
@@ -18,33 +29,179 @@ function Section({ title, data }: { title: string; data: unknown }) {
   );
 }
 
+/**
+ * FlowStepCard renders one step of a flow's definition -- a call/example
+ * step's editable card, or (PLAN §34f items 7/8) a `when:` line on any step
+ * and, for a loop block (`step.steps` set, no `call`/`example`), a group
+ * card whose header names the block and whose nested steps render as their
+ * own indented FlowStepCards. `edits`/`opsByCallId`/`liveStatuses` are the
+ * whole-flow maps FlowDetailPage already keeps (keyed by step id, which
+ * stays unique across the flow, blocks included), so recursing into a
+ * block's `steps` just looks itself up again -- no separate props threading
+ * per nesting level.
+ */
 export function FlowStepCard({
+  step,
+  edits,
+  opsByCallId,
+  liveStatuses,
+  onChangeEdit,
+  onReset,
+  depth = 0,
+  openStepId,
+}: {
+  step: Step;
+  // Pending edits for every step in the flow, if any (see
+  // pages/flows/stepEdits.ts). A step id's absence here means "still
+  // whatever the flow's own step declares" -- FlowStepCard never edits
+  // `step` itself.
+  edits: FlowStepEdits;
+  // The resolved operation (GET /v1/operations/{id}) for every step.call
+  // that resolved, keyed by operation id; used only to seed the Input
+  // editor's suggestion chips (declared param names, required ones marked).
+  opsByCallId: Record<string, Operation>;
+  // Every step's status in the run currently being watched on this page
+  // (pages/flows/ActiveRunPanel.tsx), fed by run.step events as they
+  // arrive, keyed by step id. A step id absent here hasn't reported yet
+  // (or no run is being watched).
+  liveStatuses: Record<string, string>;
+  onChangeEdit: (stepId: string, patch: Partial<StepEdit>) => void;
+  onReset: (stepId: string) => void;
+  /** Indentation level: 0 at the top level, 1 inside a loop block (blocks cannot nest -- PLAN §34f.8 -- so this never goes further). */
+  depth?: number;
+  /** Selecting a node on the flow chart (PLAN §34f item 9) names a step id
+   * here for one render; the matching card (or the block containing it)
+   * opens itself in response, in addition to being scrolled to (done by
+   * the page itself via `data-step-card-id`). */
+  openStepId?: string;
+}) {
+  if (isBlockStep(step)) {
+    return (
+      <FlowBlockStepCard
+        step={step}
+        edits={edits}
+        opsByCallId={opsByCallId}
+        liveStatuses={liveStatuses}
+        onChangeEdit={onChangeEdit}
+        onReset={onReset}
+        depth={depth}
+        openStepId={openStepId}
+      />
+    );
+  }
+  return (
+    <CallStepCard
+      step={step}
+      edit={edits[step.id]}
+      operation={step.call ? opsByCallId[step.call] : undefined}
+      runStatus={liveStatuses[step.id]}
+      onChangeEdit={(patch) => onChangeEdit(step.id, patch)}
+      onReset={() => onReset(step.id)}
+      depth={depth}
+      openStepId={openStepId}
+    />
+  );
+}
+
+/** A block's group card: header (id, foreach/repeat summary, live status)
+ * plus its nested steps, each its own indented FlowStepCard. */
+function FlowBlockStepCard({
+  step,
+  edits,
+  opsByCallId,
+  liveStatuses,
+  onChangeEdit,
+  onReset,
+  depth,
+  openStepId,
+}: {
+  step: Step;
+  edits: FlowStepEdits;
+  opsByCallId: Record<string, Operation>;
+  liveStatuses: Record<string, string>;
+  onChangeEdit: (stepId: string, patch: Partial<StepEdit>) => void;
+  onReset: (stepId: string) => void;
+  depth: number;
+  openStepId?: string;
+}) {
+  const [open, setOpen] = useState(true);
+  const runStatus = liveStatuses[step.id];
+  const header = blockHeaderText(step);
+
+  useEffect(() => {
+    if (openStepId && containsStepId(step, openStepId)) setOpen(true);
+  }, [openStepId, step]);
+
+  return (
+    <div className="border-b border-slate-100 dark:border-slate-900" style={{ paddingLeft: depth * 16 }} data-step-card-id={step.id}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center gap-3 bg-slate-50/60 px-3 py-2 text-left text-sm hover:bg-slate-100 dark:bg-slate-900/40 dark:hover:bg-slate-900"
+      >
+        <span className="w-4 text-slate-400">{open ? '▾' : '▸'}</span>
+        <span className="font-mono text-xs font-semibold">{step.id}</span>
+        {runStatus && <StatusPill status={runStatus} />}
+        <span className="flex-1 truncate font-mono text-xs text-slate-500" title={header.full}>
+          {header.short}
+        </span>
+        <span className="text-xs text-slate-400">{(step.steps || []).length} steps</span>
+      </button>
+      {open && (
+        <div>
+          <div className="space-y-1 border-t border-slate-100 bg-slate-50/30 px-3 py-2 dark:border-slate-900 dark:bg-slate-900/20">
+            <WhenLine when={step.when} />
+            {step.break_when && (
+              <div className="text-xs text-slate-500 dark:text-slate-400">
+                break_when: <span className="font-mono">{step.break_when}</span>
+              </div>
+            )}
+            {step.on_error === 'continue' && <div className="text-xs text-slate-500 dark:text-slate-400">on_error: continue</div>}
+          </div>
+          {(step.steps || []).map((child) => (
+            <FlowStepCard
+              key={child.id}
+              step={child}
+              edits={edits}
+              opsByCallId={opsByCallId}
+              liveStatuses={liveStatuses}
+              onChangeEdit={onChangeEdit}
+              onReset={onReset}
+              depth={depth + 1}
+              openStepId={openStepId}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CallStepCard({
   step,
   edit,
   operation,
   runStatus,
   onChangeEdit,
   onReset,
+  depth,
+  openStepId,
 }: {
   step: Step;
-  // Pending edits for this step, if any (see pages/flows/stepEdits.ts).
-  // Absence of a field here means "still whatever the flow's own step
-  // declares" -- FlowStepCard never edits `step` itself.
   edit?: StepEdit;
-  // The step's resolved operation (GET /v1/operations/{id}) when `step.call`
-  // names one and the lookup succeeded; used only to seed the Input editor's
-  // suggestion chips (declared param names, required ones marked).
-  // Undefined while loading, on lookup failure, or for an example-only step.
   operation?: Operation;
-  // This step's status in the run currently being watched on this page
-  // (pages/flows/ActiveRunPanel.tsx), fed by run.step events as they arrive.
-  // Undefined when no run is being watched, or before this step reports.
   runStatus?: string;
   onChangeEdit: (patch: Partial<StepEdit>) => void;
   onReset: () => void;
+  depth: number;
+  openStepId?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [savingExample, setSavingExample] = useState(false);
+
+  useEffect(() => {
+    if (openStepId === step.id) setOpen(true);
+  }, [openStepId, step.id]);
   const assertCount = step.assert?.length || 0;
   const modified = isStepModified(edit);
 
@@ -84,7 +241,7 @@ export function FlowStepCard({
   };
 
   return (
-    <div className="border-b border-slate-100 dark:border-slate-900">
+    <div className="border-b border-slate-100 dark:border-slate-900" style={{ paddingLeft: depth * 16 }} data-step-card-id={step.id}>
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
@@ -92,6 +249,7 @@ export function FlowStepCard({
       >
         <span className="w-4 text-slate-400">{open ? '▾' : '▸'}</span>
         <span className="font-mono text-xs">{step.id}</span>
+        {step.when && <span className="text-xs text-slate-400" title={`when: ${step.when}`}>when</span>}
         {runStatus && <StatusPill status={runStatus} />}
         {modified && (
           <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
@@ -104,6 +262,7 @@ export function FlowStepCard({
       </button>
       {open && (
         <div className="space-y-3 border-t border-slate-100 bg-slate-50/50 p-3 dark:border-slate-900 dark:bg-slate-900/40">
+          <WhenLine when={step.when} />
           <div className="flex flex-wrap items-center justify-end gap-2">
             <button
               type="button"

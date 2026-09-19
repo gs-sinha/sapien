@@ -1,11 +1,13 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { flows, folders as foldersApi, operations } from '../api/client';
 import type { FlowWithSource } from '../api/types-runs';
 import { FolderMovePopover } from '../components/FolderMovePopover';
 import { KeyValue } from '../components/KeyValue';
-import { ActiveRunPanel, stepStatuses } from './flows/ActiveRunPanel';
+import { ActiveRunPanel, iterKey, stepStatuses } from './flows/ActiveRunPanel';
 import type { ActiveRun } from './flows/ActiveRunPanel';
+import { runToChartStatuses } from '../components/flowchart/statuses';
+import type { FlowChartStatuses } from '../components/flowchart/statuses';
 import { FlowDescription } from './flows/FlowDescription';
 import { FlowStepCard } from './flows/FlowStepCard';
 import { RecentRuns } from './flows/RecentRuns';
@@ -18,9 +20,16 @@ import { applyStepEditsToYaml, hasAnyEdits, loadStepEdits, saveStepEdits } from 
 import type { FlowStepEdits, StepEdit } from './flows/stepEdits';
 import { distinctFolders } from '../lib/folders';
 import { useAsync } from '../lib/useAsync';
+import { useViewMode } from '../lib/viewMode';
 import { subscribe } from '../state/events';
 import { pushToast } from '../state/toast';
 import type { Operation, Run, ShipStatus } from '../api/types';
+
+// PLAN §34f item 9: the read-only flow chart is a dependency-free,
+// hand-rolled SVG component kept in its own lazy chunk (it must stay out of
+// the initial bundle -- see ui/scripts/size-check.mjs) via React.lazy
+// rather than a static import.
+const FlowChart = lazy(() => import('../components/flowchart/FlowChart'));
 
 // GET /v1/flows/{id} answers a domain.Flow, which carries no `shipped` (only
 // FlowSummary does): the workspace-tier ship badge shown in this page's
@@ -28,6 +37,13 @@ import type { Operation, Run, ShipStatus } from '../api/types';
 // summary. A failure there just means the badge doesn't show, not a page
 // error.
 type FlowDetail = FlowWithSource & { shipped?: ShipStatus };
+
+// A minimal, dependency-free CSS.escape (attribute-selector values only:
+// step ids are simple identifiers, but a quote/backslash is escaped rather
+// than assumed away) so onChartSelect's querySelector lookup never throws.
+function cssEscape(value: string): string {
+  return value.replace(/["\\]/g, '\\$&');
+}
 
 async function loadFlow(id: string): Promise<FlowDetail> {
   const flow = await flows.get(id);
@@ -71,6 +87,37 @@ export default function FlowDetailPage() {
   const [savingToFlow, setSavingToFlow] = useState(false);
   const [opsByCallId, setOpsByCallId] = useState<Record<string, Operation>>({});
   const [activeRun, setActiveRun] = useState<ActiveRun | null>(null);
+  // PLAN §34f item 9: List|Chart toggle, remembered per browser.
+  const [viewMode, setViewMode] = useViewMode('flow');
+  // The step a chart node click most recently named, so the matching card
+  // (List view, or the list column next to the chart) opens and scrolls to
+  // it. Cleared isn't necessary: selecting the same node again still fires
+  // the open-on-mount effect below via a fresh object identity per click.
+  const [openStepId, setOpenStepId] = useState<string | undefined>(undefined);
+
+  // The chart's own input shape (layout.ts's ChartFlow): stable across
+  // re-renders that don't change `flow` itself (edits, live run progress),
+  // since layout.ts is a pure function of the flow definition alone.
+  const chartFlow = useMemo(() => ({ setup: flow?.setup, steps: flow?.steps || [], teardown: flow?.teardown }), [flow]);
+
+  // Status overlay for the chart, while a run started from this page is
+  // active. Once it finishes, `activeRun.run.steps` is the authoritative,
+  // full StepResult list (block kind/count, per-iteration detail included);
+  // while still running, only plain step statuses are known live -- a
+  // block's own iteration detail arrives with the finished result.
+  const chartStatuses: FlowChartStatuses | undefined = useMemo(() => {
+    if (!activeRun) return undefined;
+    if (activeRun.run) return runToChartStatuses(activeRun.run.steps);
+    const steps: FlowChartStatuses['steps'] = {};
+    for (const s of Object.values(activeRun.steps)) if (!s.parent) steps[s.stepId] = { status: s.status };
+    return { steps, blocks: {} };
+  }, [activeRun]);
+
+  const onChartSelect = (stepId: string) => {
+    setOpenStepId(stepId);
+    const el = document.querySelector(`[data-step-card-id="${cssEscape(stepId)}"]`);
+    el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  };
 
   // Edits are per-flow, persisted in sessionStorage (pages/flows/stepEdits.ts)
   // so navigating to a run and back keeps them; re-seed whenever the route's
@@ -129,7 +176,11 @@ export default function FlowDetailPage() {
     const un2 = subscribe('run.step', (e) => {
       setActiveRun((prev) => {
         if (!prev || !e.ids.step_id || e.ids.run_id !== prev.runId) return prev;
-        return { ...prev, steps: { ...prev.steps, [e.ids.step_id]: e.status || 'running' } };
+        const key = iterKey(e.ids.step_id, e.ids.iteration);
+        return {
+          ...prev,
+          steps: { ...prev.steps, [key]: { stepId: e.ids.step_id, status: e.status || 'running', iteration: e.ids.iteration, parent: e.ids.parent } },
+        };
       });
     });
     return () => {
@@ -250,29 +301,58 @@ export default function FlowDetailPage() {
       <div>
         <div className="mb-2 flex items-center justify-between gap-2">
           <h2 className="text-sm font-semibold">Steps</h2>
-          <button
-            type="button"
-            onClick={saveToFlow}
-            disabled={!dirty || savingToFlow}
-            title={dirty ? undefined : 'No pending edits.'}
-            className="rounded border border-slate-300 px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700"
-          >
-            {savingToFlow ? 'Saving…' : 'Save to flow'}
-          </button>
+          <div className="flex items-center gap-2">
+            <div className="flex overflow-hidden rounded border border-slate-300 text-xs dark:border-slate-700">
+              {(['list', 'chart'] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  aria-pressed={viewMode === mode}
+                  onClick={() => setViewMode(mode)}
+                  className={`px-2 py-1 capitalize ${
+                    viewMode === mode
+                      ? 'bg-sky-600 text-white dark:bg-sky-500'
+                      : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
+                  }`}
+                >
+                  {mode}
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={saveToFlow}
+              disabled={!dirty || savingToFlow}
+              title={dirty ? undefined : 'No pending edits.'}
+              className="rounded border border-slate-300 px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700"
+            >
+              {savingToFlow ? 'Saving…' : 'Save to flow'}
+            </button>
+          </div>
         </div>
-        <div className="rounded border border-slate-200 dark:border-slate-800">
-          {(flow.steps || []).map((s) => (
-            <FlowStepCard
-              key={s.id}
-              step={s}
-              edit={edits[s.id]}
-              operation={s.call ? opsByCallId[s.call] : undefined}
-              runStatus={liveStatuses[s.id]}
-              onChangeEdit={(patch) => setStepEdit(s.id, patch)}
-              onReset={() => resetStep(s.id)}
-            />
-          ))}
-          {(!flow.steps || flow.steps.length === 0) && <div className="p-3 text-sm text-slate-400">No steps.</div>}
+        <div className={viewMode === 'chart' ? 'flex flex-col gap-4 md:flex-row md:items-start' : undefined}>
+          {viewMode === 'chart' && (
+            <div className="md:sticky md:top-0 md:w-[45%] md:shrink-0">
+              <Suspense fallback={<div className="p-3 text-sm text-slate-400">Loading chart…</div>}>
+                <FlowChart flow={chartFlow} statuses={chartStatuses} selectedId={openStepId} onSelect={onChartSelect} />
+              </Suspense>
+            </div>
+          )}
+          <div className="min-w-0 flex-1 rounded border border-slate-200 dark:border-slate-800">
+            {(flow.steps || []).map((s) => (
+              <FlowStepCard
+                key={s.id}
+                step={s}
+                edits={edits}
+                opsByCallId={opsByCallId}
+                liveStatuses={liveStatuses}
+                onChangeEdit={setStepEdit}
+                onReset={resetStep}
+                openStepId={openStepId}
+              />
+            ))}
+            {(!flow.steps || flow.steps.length === 0) && <div className="p-3 text-sm text-slate-400">No steps.</div>}
+          </div>
         </div>
       </div>
 
