@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { getWorkspace, repo as repoApi } from '../api/client';
 import { PushButton } from './tiers';
 import { relative } from './Timestamp';
+import { UpdateChip } from './UpdateChip';
 import { useDaemon } from '../state/daemon';
 import { useEvents } from '../state/events';
 import { useRepo } from '../state/repo';
@@ -149,13 +150,17 @@ export function StatusBar() {
           {unreadCount > 0 ? `${unreadCount} new event${unreadCount === 1 ? '' : 's'}` : 'no new events'}
         </Link>
       </div>
-      <button
-        type="button"
-        onClick={toggleTheme}
-        className="rounded border border-slate-300 px-2 py-0.5 dark:border-slate-700"
-      >
-        {theme === 'dark' ? 'Light' : 'Dark'}
-      </button>
+      <div className="flex items-center gap-2">
+        {/* PLAN §34f item 4: one silent GET /v1/update on mount, no polling. */}
+        <UpdateChip />
+        <button
+          type="button"
+          onClick={toggleTheme}
+          className="rounded border border-slate-300 px-2 py-0.5 dark:border-slate-700"
+        >
+          {theme === 'dark' ? 'Light' : 'Dark'}
+        </button>
+      </div>
     </div>
   );
 }

@@ -34,6 +34,8 @@ const TryIt = lazy(() => import('./pages/TryIt'));
 // state/agentTerminal.ts), so this lazy chunk is the only one that pays
 // for them.
 const AgentPage = lazy(() => import('./pages/AgentPage'));
+// PLAN §34f: semantic search, daemon and update settings, all in one chunk.
+const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 
 function PageFallback() {
   return <div className="p-6 text-sm text-slate-400">Loading…</div>;
@@ -82,6 +84,7 @@ export function App() {
                     <Route path="/ui/events" element={<EventsPage />} />
                     <Route path="/ui/try/:operationId" element={<TryIt />} />
                     <Route path="/ui/agent" element={<AgentPage />} />
+                    <Route path="/ui/settings" element={<SettingsPage />} />
                     <Route path="*" element={<NotFound />} />
                   </Routes>
                 </Suspense>
