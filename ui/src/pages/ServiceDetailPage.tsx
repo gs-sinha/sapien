@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { docs, environments, operations, services } from '../api/client';
+import { Collapsible } from '../components/Collapsible';
 import { DocViewer } from '../components/docs/DocViewer';
 import { EmptyState } from '../components/EmptyState';
 import { KeyValue } from '../components/KeyValue';
@@ -215,8 +216,7 @@ export default function ServiceDetailPage() {
       )}
 
       {(service.warnings?.length || 0) > 0 && (
-        <div className="mt-4">
-          <h2 className="mb-1 text-sm font-semibold">Warnings ({service.warnings!.length})</h2>
+        <Collapsible storageKey="service.warnings" title="Warnings" count={service.warnings!.length}>
           <ul className="space-y-1 text-sm text-amber-700 dark:text-amber-400">
             {service.warnings!.map((w, i) => (
               <li key={i}>
@@ -230,12 +230,11 @@ export default function ServiceDetailPage() {
               </li>
             ))}
           </ul>
-        </div>
+        </Collapsible>
       )}
 
       {(service.accepted_warnings?.length || 0) > 0 && (
-        <div className="mt-4">
-          <h2 className="mb-1 text-sm font-semibold">Accepted warnings ({service.accepted_warnings!.length})</h2>
+        <Collapsible storageKey="service.acceptedWarnings" title="Accepted warnings" count={service.accepted_warnings!.length}>
           <ul className="space-y-1 text-sm text-slate-500">
             {service.accepted_warnings!.map((w, i) => (
               <li key={i}>
@@ -243,7 +242,7 @@ export default function ServiceDetailPage() {
               </li>
             ))}
           </ul>
-        </div>
+        </Collapsible>
       )}
 
       <h2 className="mb-2 mt-5 text-sm font-semibold">Docs ({docList.length})</h2>

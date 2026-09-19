@@ -105,6 +105,8 @@ export interface ServiceBinding {
   team?: Source;
   local?: LocalCheckout;
   writable: boolean;
+  /** PLAN §34f item 2: a per-machine or team ref override on top of `team.ref`, when one is set. */
+  ref_override?: ServiceRefOverride;
 }
 
 export interface TaskTarget {
@@ -745,7 +747,10 @@ export type EventType =
   | 'memory.created'
   | 'memory.changed'
   | 'flow.changed'
-  | 'workspace.repo';
+  | 'workspace.repo'
+  // PLAN §34f item 5: semantic search settings/reindex progress.
+  | 'semantic.index'
+  | 'semantic.pull';
 
 export interface Event {
   type: EventType;
@@ -1084,4 +1089,156 @@ export interface ApiError {
   details?: Record<string, unknown>;
   source?: SourceLoc;
   hint?: string;
+}
+
+// ---- PLAN §34f: control from the UI (semantic search, daemon, updates, service ref) ----
+//
+// Hand-mirrored the same way as the rest of this file. The backend for this
+// section is being built in parallel from the same PLAN.md §34f contract
+// text, which gives field names but not every wire enum literal (`kind`,
+// `source` below); where the contract only names the concept, the values
+// here follow this codebase's existing snake_case convention for such
+// enums (SourceKind, BindingMode, AuthType, ...) and are called out in the
+// implementing agent's report as an assumption to verify against the
+// server package.
+
+/** GET/PUT /v1/settings/semantic: which embedding provider is configured. */
+export type SemanticProviderKind = 'ollama' | 'openai_compatible';
+
+/** Where a semantic-search or service-ref setting is/would be stored: this machine's user config, or the committed workspace. */
+export type SemanticSettingsScope = 'user' | 'workspace';
+
+export type SemanticState = 'off' | 'ready' | 'indexing' | 'error';
+
+export interface SemanticIndexStatus {
+  state: SemanticState;
+  error?: string;
+  model?: string;
+  dim?: number;
+  embedded?: number;
+  total?: number;
+}
+
+export interface SemanticSettings {
+  enabled: boolean;
+  kind: SemanticProviderKind;
+  base_url?: string;
+  model?: string;
+  batch_size?: number;
+  /** Whether an OpenAI-compatible API key is stored server-side; the key itself is never returned. */
+  api_key_set: boolean;
+  source: SemanticSettingsScope;
+  status: SemanticIndexStatus;
+}
+
+/** PUT /v1/settings/semantic and POST .../test. `api_key` absent keeps the stored key, "" clears it. */
+export interface UpdateSemanticSettingsRequest {
+  enabled: boolean;
+  kind: SemanticProviderKind;
+  base_url?: string;
+  model?: string;
+  batch_size?: number;
+  api_key?: string;
+  scope?: SemanticSettingsScope;
+  /** Resend a refused PUT with this set to bypass the refusal ("Save anyway"). */
+  force?: boolean;
+}
+
+export interface SemanticTestResult {
+  ok: boolean;
+  dim?: number;
+  latency_ms?: number;
+  error?: string;
+}
+
+export interface OllamaModel {
+  name: string;
+  size?: number;
+}
+
+/** GET /v1/settings/semantic/ollama?base_url= */
+export interface OllamaModelsResponse {
+  reachable: boolean;
+  base_url: string;
+  models: OllamaModel[];
+  error?: string;
+}
+
+/** POST /v1/settings/semantic/ollama/pull */
+export interface OllamaPullRequest {
+  model: string;
+  base_url?: string;
+}
+
+/** Payload of a `semantic.index` event (POST .../reindex progress, and any enable/model-change reindex). */
+export interface SemanticIndexEvent {
+  state: SemanticState;
+  embedded: number;
+  total: number;
+}
+
+/** Payload of a `semantic.pull` event (an Ollama model download in progress). */
+export interface SemanticPullEvent {
+  model: string;
+  status: string;
+  completed: number;
+  total: number;
+  done: boolean;
+  error?: string;
+}
+
+/** GET /v1/daemon. */
+export interface DaemonInfo {
+  version: string;
+  commit?: string;
+  /** RFC3339 start time; the panel derives "uptime" from this with the same relative() helper as everywhere else. */
+  started: string;
+  pid: number;
+  port: number;
+  executable?: string;
+  install_method?: string;
+  workspaces_open: number;
+  active_runs: number;
+  terminals: number;
+}
+
+/** GET /v1/update. */
+export interface UpdateInfo {
+  current: string;
+  latest?: string;
+  available: boolean;
+  checked_at?: string;
+  release_url?: string;
+  install_method?: string;
+  can_self_upgrade: boolean;
+  /** The command to run manually when `can_self_upgrade` is false. */
+  command?: string;
+  check_enabled: boolean;
+  error?: string;
+}
+
+/** PUT /v1/settings/updates. */
+export interface UpdateSettingsRequest {
+  check: boolean;
+}
+
+/** PUT/DELETE /v1/services/{id}/ref (PLAN §34f item 2). */
+export type ServiceRefScope = 'local' | 'team';
+
+export interface ServiceRefOverride {
+  ref: string;
+  scope: ServiceRefScope;
+}
+
+export interface SetServiceRefRequest {
+  ref: string;
+  scope: ServiceRefScope;
+}
+
+/** GET /v1/services/{id}/branches. */
+export interface ServiceBranches {
+  current?: string;
+  default?: string;
+  branches: string[];
+  tags: string[];
 }

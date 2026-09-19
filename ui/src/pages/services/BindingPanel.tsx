@@ -16,6 +16,7 @@ import { KeyValue } from '../../components/KeyValue';
 import { relative } from '../../components/Timestamp';
 import { pushToast } from '../../state/toast';
 import { CheckoutPicker } from './CheckoutPicker';
+import { ServiceRefControl } from './ServiceRefControl';
 import type { BindingInfo, LocalCheckout, Service, ServiceBinding, Source } from '../../api/types';
 
 export function shortCommit(commit?: string): string {
@@ -223,6 +224,22 @@ export function BindingPanel({ service, onChanged }: { service: Service; onChang
     );
   }
 
+  // PLAN §34f item 2: the effective ref (branch/tag) of the *team* source,
+  // shown next to the team source label regardless of which mode this
+  // machine currently reads from -- it's a property of `team`, not of
+  // `binding.mode`. Nothing to override on a local (non-git) source.
+  const refControl = team?.type === 'git' && (
+    <ServiceRefControl
+      serviceId={name}
+      team={team}
+      refOverride={binding.ref_override}
+      onChanged={() => {
+        setTick((t) => t + 1);
+        onChanged();
+      }}
+    />
+  );
+
   return (
     <section className="mb-4 rounded border border-slate-200 p-3 dark:border-slate-800">
       <h2 className="mb-2 text-sm font-semibold">Source</h2>
@@ -230,6 +247,7 @@ export function BindingPanel({ service, onChanged }: { service: Service; onChang
         pairs={[
           ['listening to', <span className="font-mono text-xs">{listening}</span>],
           ['can listen to', canListen],
+          ...(refControl ? ([['ref', refControl]] as Array<[string, ReactNode]>) : []),
         ]}
       />
       {!binding.writable && (

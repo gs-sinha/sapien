@@ -14,6 +14,8 @@ const links = [
   { to: '/ui/events', label: 'Events' },
   // Phase 7b (PLAN §34c): the agent pane (src/pages/AgentPage.tsx).
   { to: '/ui/agent', label: 'Agent' },
+  // PLAN §34f: kept last per the contract ("Settings" placed last).
+  { to: '/ui/settings', label: 'Settings' },
 ];
 
 export function Nav() {

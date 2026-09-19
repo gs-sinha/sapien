@@ -10,7 +10,7 @@ import { create } from 'zustand';
 import { getRecentEvents } from '../api/client';
 import { useDaemon } from './daemon';
 import { currentWorkspace } from './workspace';
-import type { Event, EventType, RepoStatus } from '../api/types';
+import type { Event, EventType, RepoStatus, SemanticIndexEvent, SemanticPullEvent } from '../api/types';
 
 export type ConnectionStatus = 'connecting' | 'open' | 'closed';
 
@@ -28,6 +28,12 @@ export interface StoredEvent {
   // needs the payload itself, not just a summary line. Undefined for every
   // other event type.
   repo?: RepoStatus;
+  // PLAN §34f item 5: the Settings semantic-search panel reads these two
+  // straight off the event, same reasoning as `repo` above -- a progress
+  // bar/status line needs the numbers, not a rendered summary string.
+  // Undefined for every other event type.
+  semanticIndex?: SemanticIndexEvent;
+  semanticPull?: SemanticPullEvent;
   ids: {
     run_id?: string;
     step_id?: string;
@@ -82,6 +88,8 @@ export function summarize(ev: Event): StoredEvent {
   let summary: string = ev.type;
   let eventStatus: string | undefined;
   let eventRepo: RepoStatus | undefined;
+  let eventSemanticIndex: SemanticIndexEvent | undefined;
+  let eventSemanticPull: SemanticPullEvent | undefined;
 
   switch (ev.type) {
     case 'run.started':
@@ -143,11 +151,40 @@ export function summarize(ev: Event): StoredEvent {
           : `team repo: ↓${r.behind} ↑${r.ahead}${r.dirty ? ` (${r.dirty} uncommitted)` : ''}`;
       break;
     }
+    case 'semantic.index': {
+      eventSemanticIndex = { state: (str(p.state) as SemanticIndexEvent['state']) || 'error', embedded: num(p.embedded), total: num(p.total) };
+      summary =
+        eventSemanticIndex.state === 'indexing'
+          ? `semantic search: indexing ${eventSemanticIndex.embedded}/${eventSemanticIndex.total}`
+          : `semantic search: ${eventSemanticIndex.state}`;
+      break;
+    }
+    case 'semantic.pull': {
+      eventSemanticPull = {
+        model: str(p.model) || '',
+        status: str(p.status) || '',
+        completed: num(p.completed),
+        total: num(p.total),
+        done: bool(p.done),
+        error: str(p.error),
+      };
+      summary = `pull ${eventSemanticPull.model}: ${eventSemanticPull.done ? 'done' : eventSemanticPull.status}`;
+      break;
+    }
     default:
       summary = ev.type;
   }
 
-  return { type: ev.type, time: ev.time, summary, status: eventStatus, repo: eventRepo, ids };
+  return {
+    type: ev.type,
+    time: ev.time,
+    summary,
+    status: eventStatus,
+    repo: eventRepo,
+    semanticIndex: eventSemanticIndex,
+    semanticPull: eventSemanticPull,
+    ids,
+  };
 }
 
 type Listener = (e: StoredEvent) => void;

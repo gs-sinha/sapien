@@ -66,6 +66,14 @@ interface DaemonStore {
   loadedVersion: string | null;
   /** The version answering now, when it differs from loadedVersion. */
   runningVersion: string | null;
+  /**
+   * Set for the duration of an intentional restart/upgrade kicked off from
+   * Settings (PLAN §34f items 3/4): the old daemon process going down makes
+   * probe() briefly see 'gone', which would otherwise flash DaemonBanner's
+   * GoneBanner ("wasn't running... start it again") over a restart the user
+   * just asked for. DaemonBanner checks this before rendering that banner.
+   */
+  restarting: boolean;
   probe: () => Promise<void>;
 }
 
@@ -74,6 +82,7 @@ export const useDaemon = create<DaemonStore>((set, get) => ({
   sessionStale: false,
   loadedVersion: null,
   runningVersion: null,
+  restarting: false,
 
   probe: async () => {
     const health = await probeDaemon();
@@ -99,6 +108,53 @@ export const useDaemon = create<DaemonStore>((set, get) => ({
     set({ state: 'ok', runningVersion: null });
   },
 }));
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export interface WaitForRestartOptions {
+  /** How often to poll /v1/health while waiting (ms). Default 500. */
+  pollMs?: number;
+  /** End the "wait for the old process to go down" phase once this much time has passed with no failure seen (ms). Default 1500. */
+  failTimeoutMs?: number;
+  /** Give up entirely after this much time (ms). Default 30000. */
+  totalTimeoutMs?: number;
+}
+
+/**
+ * Settings' Restart/Upgrade actions (PLAN §34f items 3/4) call this right
+ * after POST /v1/daemon/restart or /v1/update/apply return 202, both of
+ * which tear down this process and spawn a detached successor on the same
+ * port. Per the contract: "wait until health fails once or 1.5s pass, then
+ * until it succeeds" -- phase one confirms the old process actually exited
+ * (instead of racing it and declaring victory on its own still-healthy
+ * answer), phase two waits out the successor's startup. Resolves with the
+ * successor's HealthResponse, or null if it never answered within
+ * totalTimeoutMs. Sets/clears `restarting` around the whole wait so
+ * DaemonBanner's GoneBanner doesn't flash for the gap in between.
+ */
+export async function waitForRestart(opts: WaitForRestartOptions = {}): Promise<HealthResponse | null> {
+  const pollMs = opts.pollMs ?? 500;
+  const failTimeoutMs = opts.failTimeoutMs ?? 1500;
+  const totalTimeoutMs = opts.totalTimeoutMs ?? 30000;
+  useDaemon.setState({ restarting: true });
+  const start = Date.now();
+  try {
+    while (Date.now() - start < failTimeoutMs) {
+      if (!(await probeDaemon())) break;
+      await sleep(pollMs);
+    }
+    while (Date.now() - start < totalTimeoutMs) {
+      const health = await probeDaemon();
+      if (health) return health;
+      await sleep(pollMs);
+    }
+    return null;
+  } finally {
+    useDaemon.setState({ restarting: false });
+  }
+}
 
 /** Called by api/client on a 401 (set) and on any success (clear). */
 export function setSessionStale(stale: boolean): void {

@@ -1,4 +1,5 @@
 import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import OperationDetailPage from '../pages/OperationDetailPage';
@@ -100,6 +101,7 @@ describe('OperationDetailPage', () => {
     // snippet instead of throwing or showing an error line.
     vi.mocked(docs.get).mockRejectedValue(new Error('not found'));
 
+    const user = userEvent.setup();
     render(
       <MemoryRouter initialEntries={['/ui/operations/orders.createOrder']}>
         <Routes>
@@ -107,6 +109,13 @@ describe('OperationDetailPage', () => {
         </Routes>
       </MemoryRouter>,
     );
+
+    // The Docs section is a Collapsible, default collapsed (PLAN §34f item
+    // 4), with the doc's own heading shown truncated in its closed summary.
+    const docsToggle = await screen.findByRole('button', { name: 'Docs (1)' });
+    expect(docsToggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByText('Creating an order')).toBeInTheDocument();
+    await user.click(docsToggle);
 
     await waitFor(() => expect(screen.getByText(/Short token-budget-truncated snippet/)).toBeInTheDocument());
     expect(screen.getByText(/Full text unavailable/)).toBeInTheDocument();
