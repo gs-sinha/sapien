@@ -172,7 +172,7 @@ func TestAppendStep_FullRoundTrip(t *testing.T) {
 
 // TestAppendStep_SkipReasonRoundTrip covers the "when" skip reason
 // specifically (PLAN §34f.7): a skipped step's skip_reason survives a
-// round trip through the run_steps table, which is NOT NULL DEFAULT ''
+// round trip through the run_steps table, which is NOT NULL DEFAULT ”
 // (unlike the nullable *_json/operation columns), so an empty SkipReason
 // must be written as the empty string, not SQL NULL.
 func TestAppendStep_SkipReasonRoundTrip(t *testing.T) {

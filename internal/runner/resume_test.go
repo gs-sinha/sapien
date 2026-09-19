@@ -105,9 +105,9 @@ func TestRun_ResumeBlock_ReusesEveryIterationAndRebuildsScope(t *testing.T) {
 			createOrderStep(),
 			{ID: "each", Foreach: "['a', 'b', 'c']", Steps: []domain.Step{createEachStep()}},
 			{
-				ID:     "after",
-				Call:   "allocation-service.allocate",
-				Body:   map[string]any{"orderId": "${steps.create.out.orderId}"},
+				ID:   "after",
+				Call: "allocation-service.allocate",
+				Body: map[string]any{"orderId": "${steps.create.out.orderId}"},
 				Assert: []domain.Assertion{
 					{Expr: "steps.each.count == 3"},
 					{Status: intp(201)},
@@ -121,7 +121,7 @@ func TestRun_ResumeBlock_ReusesEveryIterationAndRebuildsScope(t *testing.T) {
 	require.Equal(t, domain.RunPassed, first.Status, "%+v", first.Steps)
 
 	second, err := r.Run(context.Background(), f, nil, Options{
-		Env: e,
+		Env:    e,
 		Resume: &Resume{From: first, FromStep: "after"},
 	})
 	require.NoError(t, err)
