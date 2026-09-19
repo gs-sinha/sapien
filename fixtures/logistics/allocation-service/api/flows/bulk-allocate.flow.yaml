@@ -1,0 +1,58 @@
+version: 1
+id: bulk-allocate
+name: Bulk allocate a batch of orders
+description: >
+  Demonstrates control flow (PLAN §34f.7-8): a foreach block allocates a
+  rider for each of several existing orders, a nested `when` skips any item
+  already marked done, and the step after the loop reads
+  steps.allocate_each.count/steps.allocate.out (the block's aggregate and
+  its last iteration's own extracted value) once every iteration has run.
+  This is a service-owned flow used to test service-owned flow discovery
+  (PLAN §6); it is also executed end to end, against a batch of
+  pre-existing orders, by internal/runner's fixture test.
+tags: [smoke, loops]
+
+inputs:
+  orderIds:
+    type: array
+    required: true
+    description: Existing order IDs to allocate a rider for, one per iteration.
+
+steps:
+  - id: allocate_each
+    foreach: inputs.orderIds
+    max: 20
+    steps:
+      - id: allocate
+        when: "iter.item != 'skip-me'"
+        call: allocation-service.allocate
+        body:
+          orderId: "${iter.item}"
+        extract:
+          allocationId: body.allocationId
+        assert:
+          - status == 201
+
+      - id: check
+        # Mirrors allocate's own `when` (rather than has(steps.allocate),
+        # which would still see a PASSED value from an earlier iteration
+        # where allocate did run, since steps.<id> is always the latest
+        # execution -- not necessarily this one's).
+        when: "iter.item != 'skip-me'"
+        call: allocation-service.getAllocation
+        input:
+          allocationId: "${steps.allocate.out.allocationId}"
+        assert:
+          - status == 200
+
+  - id: summary
+    call: allocation-service.getAllocation
+    input:
+      # allocate is nested in the loop block, so a reference to it from out
+      # here needs a has() guard the same way a when-skipped step does
+      # (validator: MAYBE_SKIPPED) -- even though, in this flow, it always
+      # ran by the time we get here.
+      allocationId: "${has(steps.allocate) ? steps.allocate.out.allocationId : ''}"
+    assert:
+      - status == 200
+      - "steps.allocate_each.count == inputs.orderIds.size()"
