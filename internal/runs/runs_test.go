@@ -15,6 +15,8 @@ import (
 	"github.com/gs-sinha/sapien/internal/store"
 )
 
+func intp(n int) *int { return &n }
+
 func newStore(t *testing.T) (*runs.Store, *store.DB) {
 	t.Helper()
 	db, err := store.Open(":memory:")
@@ -192,6 +194,79 @@ func TestAppendStep_SkipReasonRoundTrip(t *testing.T) {
 	require.Len(t, got.Steps, 2)
 	assert.Equal(t, "when", got.Steps[0].SkipReason)
 	assert.Empty(t, got.Steps[1].SkipReason, "a step skipped for a reason other than `when` carries no skip_reason")
+}
+
+// TestAppendStep_LoopFieldsRoundTrip covers Iteration/Parent/Kind/Count
+// (PLAN §34f.8): a block's own row and two of its nested executions.
+func TestAppendStep_LoopFieldsRoundTrip(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+
+	run := &domain.Run{Environment: "local"}
+	require.NoError(t, s.Create(ctx, run))
+
+	require.NoError(t, s.AppendStep(ctx, run.ID, domain.StepResult{
+		StepID: "each", Index: 0, Status: domain.StepPassed, Kind: "foreach", Count: 2,
+	}))
+	require.NoError(t, s.AppendStep(ctx, run.ID, domain.StepResult{
+		StepID: "create", Index: 1, Status: domain.StepPassed, Iteration: intp(0), Parent: "each",
+	}))
+	require.NoError(t, s.AppendStep(ctx, run.ID, domain.StepResult{
+		StepID: "create", Index: 2, Status: domain.StepPassed, Iteration: intp(1), Parent: "each",
+	}))
+
+	got, err := s.Get(ctx, run.ID)
+	require.NoError(t, err)
+	require.Len(t, got.Steps, 3)
+
+	block := got.Steps[0]
+	assert.Equal(t, "each", block.StepID)
+	assert.Nil(t, block.Iteration, "a block's own row is not itself inside a loop")
+	assert.Empty(t, block.Parent)
+	assert.Equal(t, "foreach", block.Kind)
+	assert.Equal(t, 2, block.Count)
+
+	nested0, nested1 := got.Steps[1], got.Steps[2]
+	require.NotNil(t, nested0.Iteration)
+	assert.Equal(t, 0, *nested0.Iteration)
+	assert.Equal(t, "each", nested0.Parent)
+	assert.Empty(t, nested0.Kind, "a nested execution is not itself a block")
+	require.NotNil(t, nested1.Iteration)
+	assert.Equal(t, 1, *nested1.Iteration)
+}
+
+// TestAppendStep_UpsertPerIteration confirms the same step id at two
+// different iterations produces two rows (not an upsert clobber), while
+// the same (step id, iteration) pair still upserts a single row -- the
+// primary key gained iteration for exactly this reason (PLAN §34f.8).
+func TestAppendStep_UpsertPerIteration(t *testing.T) {
+	s, db := newStore(t)
+	ctx := context.Background()
+
+	run := &domain.Run{Environment: "local"}
+	require.NoError(t, s.Create(ctx, run))
+
+	require.NoError(t, s.AppendStep(ctx, run.ID, domain.StepResult{
+		StepID: "create", Index: 0, Status: domain.StepRequesting, Iteration: intp(0), Parent: "each",
+	}))
+	require.NoError(t, s.AppendStep(ctx, run.ID, domain.StepResult{
+		StepID: "create", Index: 1, Status: domain.StepRequesting, Iteration: intp(1), Parent: "each",
+	}))
+	// Re-append iteration 0 with its terminal status: must update the
+	// existing row, not add a third one.
+	require.NoError(t, s.AppendStep(ctx, run.ID, domain.StepResult{
+		StepID: "create", Index: 0, Status: domain.StepPassed, Iteration: intp(0), Parent: "each",
+	}))
+
+	var count int
+	require.NoError(t, db.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM run_steps WHERE run_id = ?`, run.ID).Scan(&count))
+	assert.Equal(t, 2, count)
+
+	got, err := s.Get(ctx, run.ID)
+	require.NoError(t, err)
+	require.Len(t, got.Steps, 2)
+	assert.Equal(t, domain.StepPassed, got.Steps[0].Status)
+	assert.Equal(t, domain.StepRequesting, got.Steps[1].Status)
 }
 
 func TestAppendStep_MultipleStepsOrderedByIndex(t *testing.T) {

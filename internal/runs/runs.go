@@ -32,8 +32,12 @@ func New(db *store.DB) *Store { return &Store{db: db} }
 const runColumns = `id, flow_id, flow_snapshot_json, env, inputs_json, status, started, finished, duration_ms, summary_json, pinned, trigger, error_json, operation_hashes_json`
 
 // stepColumns is the fixed column list/order for run_steps, excluding
-// run_id (always known from the query's WHERE clause).
-const stepColumns = `step_id, idx, status, skip_reason, operation, attempts, request_json, response_json, timings_json, assertions_json, out_json, error_json, started, finished`
+// run_id (always known from the query's WHERE clause). iteration/parent/
+// kind/count are PLAN §34f.8 (loop blocks): iteration is -1 for a step
+// outside any loop (see iterationToSQL/iterationFromSQL), parent is the
+// enclosing block's step id for a nested execution, kind ("foreach"|
+// "repeat") and count (iterations run) are set on a block's own row.
+const stepColumns = `step_id, idx, status, skip_reason, operation, attempts, request_json, response_json, timings_json, assertions_json, out_json, error_json, started, finished, iteration, parent, kind, count`
 
 // Create inserts run, assigning run.ID and run.Started if unset and
 // defaulting run.Status to queued. Only the fields relevant to a freshly
@@ -134,11 +138,13 @@ func (s *Store) Update(ctx context.Context, run *domain.Run) error {
 	})
 }
 
-// AppendStep upserts step by (run_id, step_id): a first call inserts the
-// row (recording step.Index as idx); a later call with the same step_id
-// updates every column except idx, which is preserved from the original
-// insert. Returns errs.RunNotFound if runID does not reference an existing
-// run.
+// AppendStep upserts step by (run_id, step_id, iteration) (PLAN §34f.8: a
+// nested execution repeats step_id once per iteration, so iteration joins
+// the key -- -1 for a step outside any loop, unchanged from before loop
+// blocks existed): a first call inserts the row (recording step.Index as
+// idx); a later call with the same key updates every column except idx,
+// which is preserved from the original insert. Returns errs.RunNotFound if
+// runID does not reference an existing run.
 func (s *Store) AppendStep(ctx context.Context, runID string, step domain.StepResult) error {
 	requestJSON, err := marshalPtrJSON(step.Request)
 	if err != nil {
@@ -178,8 +184,8 @@ func (s *Store) AppendStep(ctx context.Context, runID string, step domain.StepRe
 	return s.db.Write(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, `
 			INSERT INTO run_steps (run_id, `+stepColumns+`)
-			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-			ON CONFLICT(run_id, step_id) DO UPDATE SET
+			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+			ON CONFLICT(run_id, step_id, iteration) DO UPDATE SET
 				status          = excluded.status,
 				skip_reason     = excluded.skip_reason,
 				operation       = excluded.operation,
@@ -191,7 +197,10 @@ func (s *Store) AppendStep(ctx context.Context, runID string, step domain.StepRe
 				out_json        = excluded.out_json,
 				error_json      = excluded.error_json,
 				started         = excluded.started,
-				finished        = excluded.finished
+				finished        = excluded.finished,
+				parent          = excluded.parent,
+				kind            = excluded.kind,
+				count           = excluded.count
 		`,
 			runID,
 			step.StepID,
@@ -208,6 +217,10 @@ func (s *Store) AppendStep(ctx context.Context, runID string, step domain.StepRe
 			errorJSON,
 			timeToNull(step.Started),
 			timeToNull(step.Finished),
+			iterationToSQL(step.Iteration),
+			step.Parent, // NOT NULL DEFAULT '', like skip_reason
+			step.Kind,   // NOT NULL DEFAULT '', like skip_reason
+			step.Count,
 		)
 		if err != nil {
 			if strings.Contains(err.Error(), "FOREIGN KEY constraint failed") {
@@ -522,7 +535,11 @@ func scanRun(sc rowScanner) (*domain.Run, error) {
 }
 
 func loadSteps(ctx context.Context, conn *sql.Conn, runID string) ([]domain.StepResult, error) {
-	rows, err := conn.QueryContext(ctx, `SELECT `+stepColumns+` FROM run_steps WHERE run_id = ? ORDER BY idx ASC, step_id ASC`, runID)
+	// idx alone is already unique per run (the runner assigns it from one
+	// monotonic counter across every phase and every loop iteration), but
+	// iteration is kept as the documented, defensive tiebreaker (PLAN
+	// §34f.8: "reads order by idx then iteration").
+	rows, err := conn.QueryContext(ctx, `SELECT `+stepColumns+` FROM run_steps WHERE run_id = ? ORDER BY idx ASC, iteration ASC`, runID)
 	if err != nil {
 		return nil, err
 	}
@@ -539,6 +556,25 @@ func loadSteps(ctx context.Context, conn *sql.Conn, runID string) ([]domain.Step
 	return steps, rows.Err()
 }
 
+// iterationToSQL/iterationFromSQL convert between domain.StepResult's
+// *int Iteration (nil = not in a loop) and run_steps.iteration's NOT NULL
+// INTEGER column (-1 = the same "not in a loop", PLAN §34f.8) -- -1 rather
+// than NULL so it can join the primary key.
+func iterationToSQL(it *int) int {
+	if it == nil {
+		return -1
+	}
+	return *it
+}
+
+func iterationFromSQL(n int) *int {
+	if n < 0 {
+		return nil
+	}
+	v := n
+	return &v
+}
+
 func scanStep(sc rowScanner) (domain.StepResult, error) {
 	var (
 		stepID                                                                     string
@@ -547,8 +583,10 @@ func scanStep(sc rowScanner) (domain.StepResult, error) {
 		operation                                                                  sql.NullString
 		requestJSON, responseJSON, timingsJSON, assertionsJSON, outJSON, errorJSON sql.NullString
 		started, finished                                                          sql.NullString
+		iteration, count                                                           int
+		parent, kind                                                               string
 	)
-	if err := sc.Scan(&stepID, &idx, &status, &skipReason, &operation, &attempts, &requestJSON, &responseJSON, &timingsJSON, &assertionsJSON, &outJSON, &errorJSON, &started, &finished); err != nil {
+	if err := sc.Scan(&stepID, &idx, &status, &skipReason, &operation, &attempts, &requestJSON, &responseJSON, &timingsJSON, &assertionsJSON, &outJSON, &errorJSON, &started, &finished, &iteration, &parent, &kind, &count); err != nil {
 		return domain.StepResult{}, err
 	}
 
@@ -559,6 +597,10 @@ func scanStep(sc rowScanner) (domain.StepResult, error) {
 		Status:     domain.StepStatus(status),
 		SkipReason: skipReason,
 		Attempts:   attempts,
+		Iteration:  iterationFromSQL(iteration),
+		Parent:     parent,
+		Kind:       kind,
+		Count:      count,
 	}
 
 	var err error
