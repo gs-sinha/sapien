@@ -1,0 +1,2 @@
+import{j as e}from"./index-e489d76e.js";function d({title:s,hint:t,action:r}){return e.jsxs("div",{className:"flex flex-col items-center justify-center gap-2 rounded border border-dashed border-slate-300 p-10 text-center text-slate-500 dark:border-slate-700",children:[e.jsx("div",{className:"text-sm font-medium text-slate-700 dark:text-slate-300",children:s}),t&&e.jsx("div",{className:"max-w-md text-xs",children:t}),r]})}export{d as E};
+//# sourceMappingURL=EmptyState-81568bc1.js.map

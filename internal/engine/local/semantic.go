@@ -202,6 +202,19 @@ func (l *Local) semanticIndex() *semantic.Index {
 // concurrent swap replaces it lands in the outgoing (abandoned) queue and
 // is silently dropped -- the same "best effort, a later sync or explicit
 // reindex catches it" contract enqueueSemanticIndex/
+// enqueueSemanticCatchUp queues every registered service and the memories
+// for indexing. upsert skips a row whose prefixed text hashes the same under
+// the same model, so on an index that is already current this embeds nothing.
+func (l *Local) enqueueSemanticCatchUp() {
+	if l.semanticQueue() == nil {
+		return
+	}
+	for _, ref := range l.ws.Services {
+		l.enqueueSemanticIndex(ref.Name)
+	}
+	l.enqueueSemanticMemoryIndex(nil)
+}
+
 // enqueueSemanticMemoryIndex already documented before hot-swap existed.
 func (l *Local) semanticQueue() chan semanticJob {
 	l.semMu.RLock()
@@ -598,6 +611,9 @@ func (l *Local) publishSemanticIndexEvent(ctx context.Context) {
 // (semanticEventThrottle), and at the end. A no-op returning nil when
 // semantic search is disabled.
 func (l *Local) SemanticReindex(ctx context.Context) error {
+	l.semReindexMu.Lock()
+	defer l.semReindexMu.Unlock()
+
 	idx := l.semanticIndex()
 	if idx == nil {
 		return nil

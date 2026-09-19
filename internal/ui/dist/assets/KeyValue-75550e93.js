@@ -1,2 +1,0 @@
-import{j as e}from"./index-f7e0532b.js";function n({pairs:s}){return s.length===0?null:e.jsx("dl",{className:"grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 text-sm",children:s.map(([t,a])=>e.jsxs("div",{className:"contents",children:[e.jsx("dt",{className:"text-slate-500",children:t}),e.jsx("dd",{className:"break-all",children:a})]},t))})}export{n as K};
-//# sourceMappingURL=KeyValue-75550e93.js.map

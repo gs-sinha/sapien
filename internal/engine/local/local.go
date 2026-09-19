@@ -126,6 +126,11 @@ type Local struct {
 	// write lock across that wait would deadlock the very job the drain
 	// is waiting to finish.
 	semSwapMu sync.Mutex
+	// semReindexMu lets one full SemanticReindex run at a time: two settings
+	// changes in quick succession each spawn one, and the earlier one -- part
+	// way through a service under the configuration it started with -- must
+	// not write rows back after the later one has cleared the table.
+	semReindexMu sync.Mutex
 	// semMu guards every field below it against a concurrent
 	// ApplySemantic hot-swap: every reader (search, via search.Searcher's
 	// own lock on the adapter it was handed; the indexing helpers in
@@ -313,6 +318,13 @@ func Open(ws *domain.Workspace, opts Options) (*Local, error) {
 			_ = db.Close()
 			return nil, err
 		}
+		// A long-lived engine (the daemon) catches the vector index up with
+		// how texts are built NOW: an upgrade can change that without any
+		// file changing -- task prefixes arriving, example descriptions
+		// joining their operation -- and the stale check above only looks at
+		// content fingerprints. Unchanged rows cost a hash compare, no
+		// embedding call. One-shot commands skip it: they would wait on it.
+		l.enqueueSemanticCatchUp()
 	}
 
 	return l, nil

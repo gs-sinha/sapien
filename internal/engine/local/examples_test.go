@@ -548,12 +548,12 @@ func TestExamples_FromRun_LoopBlockDefaultsToLatestIteration(t *testing.T) {
 	run := seedRun(t, l, "stage",
 		domain.StepResult{
 			StepID: "fetch", Iteration: iter(0), Parent: "each", Operation: "rider-service.getRider", Status: domain.StepPassed,
-			Request: &domain.RequestRecord{Method: "GET", URL: "http://localhost:8083/v1/riders/R1"},
+			Request:  &domain.RequestRecord{Method: "GET", URL: "http://localhost:8083/v1/riders/R1"},
 			Response: &domain.ResponseRecord{Status: 200, Body: map[string]any{"riderId": "R1"}},
 		},
 		domain.StepResult{
 			StepID: "fetch", Iteration: iter(1), Parent: "each", Operation: "rider-service.getRider", Status: domain.StepPassed,
-			Request: &domain.RequestRecord{Method: "GET", URL: "http://localhost:8083/v1/riders/R2"},
+			Request:  &domain.RequestRecord{Method: "GET", URL: "http://localhost:8083/v1/riders/R2"},
 			Response: &domain.ResponseRecord{Status: 200, Body: map[string]any{"riderId": "R2"}},
 		},
 	)
