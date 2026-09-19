@@ -263,7 +263,7 @@ func TestNewHTTPEmbedder_DefaultBatchSizeAndTimeout(t *testing.T) {
 		Kind:    "openai",
 		BaseURL: srv.URL,
 		Model:   "m",
-		// BatchSize and Timeout left zero: defaults (32, 30s) apply.
+		// BatchSize and Timeout left zero: defaults (32, 120s) apply.
 	})
 	require.NoError(t, err)
 	_, err = emb.Embed(context.Background(), []string{"a"})

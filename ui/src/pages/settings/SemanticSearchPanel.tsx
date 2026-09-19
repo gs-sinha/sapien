@@ -272,6 +272,12 @@ function SemanticForm({ initial, onSaved }: { initial: SemanticSettings; onSaved
         )}
       </div>
 
+      {(saving || testing) && kind === 'ollama' && (
+        <p className="text-xs text-slate-500">
+          Trying the model. The first request to a model Ollama has not loaded yet waits for it to load, which can take up to a minute.
+        </p>
+      )}
+
       {saveError && (
         <div className="rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300">
           <p>{saveError}</p>

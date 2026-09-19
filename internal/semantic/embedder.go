@@ -41,13 +41,14 @@ type HTTPConfig struct {
 	// larger input into sequential batches of this size. Default 32.
 	BatchSize int
 
-	// Timeout bounds each HTTP request. Default 30s.
+	// Timeout bounds each HTTP request. Default 120s: the first batch after
+	// a model switch also pays the provider's cold load of that model.
 	Timeout time.Duration
 }
 
 const (
 	defaultBatchSize = 32
-	defaultTimeout   = 30 * time.Second
+	defaultTimeout   = 120 * time.Second
 )
 
 // httpEmbedder implements Embedder against an OpenAI-compatible ("openai")

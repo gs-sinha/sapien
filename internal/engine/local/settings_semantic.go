@@ -264,10 +264,14 @@ func (l *Local) ReloadSemantic(ctx context.Context) error {
 }
 
 // semanticProbeText/semanticProbeTimeout bound POST .../test's (and PUT's
-// pre-save validation's) one-off embed call.
+// pre-save validation's) one-off embed call. The bound is generous on
+// purpose: the first embed against a model Ollama has not loaded yet waits
+// for the load (measured at 13s for a 570M-parameter model on an idle
+// laptop, longer under memory pressure), and a probe that gives up inside
+// that window refuses exactly the save that just pulled a new model.
 const (
 	semanticProbeText    = "sapien semantic search connectivity check"
-	semanticProbeTimeout = 10 * time.Second
+	semanticProbeTimeout = 90 * time.Second
 )
 
 // probeSemantic embeds one short string with req's config without saving
