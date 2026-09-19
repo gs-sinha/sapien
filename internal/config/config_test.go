@@ -284,6 +284,77 @@ friction:
 	assert.Equal(t, "General", cfg.Friction.Category) // untouched default
 }
 
+// --- Updates (PLAN §34f item 4) ---
+
+func TestUpdates_Enabled_DefaultsTrue(t *testing.T) {
+	assert.True(t, config.Updates{}.Enabled(), "a config that never mentions updates: must default to checking")
+}
+
+func TestUpdates_Enabled_ExplicitFalse(t *testing.T) {
+	f := false
+	assert.False(t, config.Updates{Check: &f}.Enabled())
+}
+
+func TestUpdates_Enabled_ExplicitTrue(t *testing.T) {
+	tr := true
+	assert.True(t, config.Updates{Check: &tr}.Enabled())
+}
+
+func TestUpdates_Enabled_EnvOverridesConfigTrue(t *testing.T) {
+	t.Setenv("SAPIEN_NO_UPDATE_CHECK", "1")
+	tr := true
+	assert.False(t, config.Updates{Check: &tr}.Enabled(), "the env escape hatch must win even over an explicit check: true")
+}
+
+func TestLoad_Updates_Default_IsEnabled(t *testing.T) {
+	isolateUserConfig(t, "")
+	cfg, err := config.Load(nil)
+	require.NoError(t, err)
+	assert.True(t, cfg.Updates.Enabled())
+}
+
+func TestLoad_Updates_CheckFalse(t *testing.T) {
+	isolateUserConfig(t, `
+updates:
+  check: false
+`)
+	cfg, err := config.Load(nil)
+	require.NoError(t, err)
+	assert.False(t, cfg.Updates.Enabled())
+}
+
+func TestLoad_Updates_WorkspaceOverridesUser(t *testing.T) {
+	isolateUserConfig(t, `
+updates:
+  check: false
+`)
+	ws := newTestWorkspace(t)
+	require.NoError(t, os.MkdirAll(filepath.Join(ws.Dir, domain.WorkspaceStateDir), 0o755))
+	require.NoError(t, os.WriteFile(config.WorkspacePath(ws), []byte(`
+updates:
+  check: true
+`), 0o644))
+
+	cfg, err := config.Load(ws)
+	require.NoError(t, err)
+	assert.True(t, cfg.Updates.Enabled())
+}
+
+// --- UserDir ---
+
+func TestUserDir_UnderHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	assert.Equal(t, filepath.Join(home, ".sapien"), config.UserDir())
+}
+
+func TestUserDir_IgnoresSAPIEN_CONFIG(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("SAPIEN_CONFIG", "/custom/path/config.yaml")
+	assert.Equal(t, filepath.Join(home, ".sapien"), config.UserDir(), "UserDir must not follow SAPIEN_CONFIG, which only relocates config.yaml itself")
+}
+
 func TestLoad_Friction_WorkspaceOverridesUser(t *testing.T) {
 	isolateUserConfig(t, `
 friction:
