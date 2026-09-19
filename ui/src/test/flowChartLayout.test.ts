@@ -164,12 +164,13 @@ describe('layoutFlow: a loop block', () => {
     expect(after).toBeDefined();
   });
 
-  it('carries a break_when label onto the back edge when set', () => {
+  it('carries break_when on the container (its footer), and not a second time on the back edge', () => {
     const withBreak: ChartFlow = { steps: [{ ...block, break_when: 'iter.index > 3' }] };
     const l = layoutFlow(withBreak);
+    const container = l.nodes.find((n) => n.breakWhen);
+    expect(container!.breakWhen).toBe('iter.index > 3');
     const back = l.edges.find((e) => e.kind === 'back');
-    expect(back!.label).toContain('break:');
-    expect(back!.label).toContain('iter.index > 3');
+    expect(back!.label).toBeUndefined();
   });
 });
 

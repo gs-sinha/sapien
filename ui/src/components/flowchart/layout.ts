@@ -227,7 +227,8 @@ function place(list: Measured[], centerX: number, startY: number, phase: Phase, 
           to: inner.entryNode.id,
           stepId: step.id,
           points: backEdgePoints(inner.lastMainNode, inner.entryNode, container),
-          label: step.break_when ? `break: ${truncateExprLocal(step.break_when)}` : undefined,
+          // No label here: the container's footer already carries
+          // break_when, and a second copy on the back edge sat on top of it.
         });
       }
 
