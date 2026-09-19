@@ -37,6 +37,11 @@ func (a *settingsAPI) PutSemantic(ctx context.Context, req engine.SemanticPutReq
 }
 
 func (a *settingsAPI) TestSemantic(ctx context.Context, req domain.SemanticProbe) (*domain.SemanticTestResult, error) {
+	// The same defaults a save applies, so "Test connection" on a form that
+	// leaves the Ollama base URL blank tries what Save would write.
+	if strings.EqualFold(strings.TrimSpace(req.Kind), "ollama") && strings.TrimSpace(req.BaseURL) == "" {
+		req.BaseURL = ollamaDefaultBaseURL
+	}
 	return probeSemantic(ctx, req), nil
 }
 

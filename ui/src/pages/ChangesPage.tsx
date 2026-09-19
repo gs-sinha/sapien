@@ -96,7 +96,8 @@ function ServiceRow({ service }: { service: RepoServiceChange }) {
     );
   }
 
-  const tree = buildTree(service.files, (f) => f.path);
+  const files = service.files || [];
+  const tree = buildTree(files, (f) => f.path);
   return (
     <div className="py-1">
       <div
@@ -105,7 +106,7 @@ function ServiceRow({ service }: { service: RepoServiceChange }) {
       >
         <span aria-hidden>🔒</span>
         <span>
-          {service.name} · {service.branch || '?'} · {service.files.length} changed
+          {service.name} · {service.branch || '?'} · {files.length} changed
         </span>
       </div>
       {tree.length > 0 && (

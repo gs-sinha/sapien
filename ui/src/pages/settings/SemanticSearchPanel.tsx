@@ -74,7 +74,7 @@ function SemanticForm({ initial, onSaved }: { initial: SemanticSettings; onSaved
   const [kind, setKind] = useState<SemanticProviderKind>(initial.kind || 'ollama');
   const [baseUrl, setBaseUrl] = useState(initial.base_url || DEFAULT_BASE_URL[initial.kind || 'ollama']);
   const [model, setModel] = useState(initial.model || '');
-  const [scope, setScope] = useState<SemanticSettingsScope>(initial.source || 'user');
+  const [scope, setScope] = useState<SemanticSettingsScope>(initial.source === 'workspace' ? 'workspace' : 'user');
   const [apiKey, setApiKey] = useState('');
   const [apiKeyTouched, setApiKeyTouched] = useState(false);
   const [apiKeySet, setApiKeySet] = useState(initial.api_key_set);

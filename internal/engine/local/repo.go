@@ -307,7 +307,7 @@ func (r *repoAPI) Changes(ctx context.Context) (*domain.RepoChanges, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := &domain.RepoChanges{Status: *status, Files: []domain.RepoFileChange{}}
+	out := &domain.RepoChanges{Status: *status, Files: []domain.RepoFileChange{}, Services: []domain.RepoServiceChanges{}}
 	if !status.InGit {
 		return out, nil
 	}
@@ -333,8 +333,17 @@ func (r *repoAPI) Changes(ctx context.Context) (*domain.RepoChanges, error) {
 	for i := range raw {
 		classifyPath(&raw[i], idx, strings.TrimPrefix(raw[i].Path, wsRelPrefix))
 	}
-	out.Files = raw
-	out.Services = r.serviceChanges(ctx)
+	if raw != nil {
+		out.Files = raw
+	}
+	// Both lists, and every service's own, are arrays on the wire even when
+	// empty: the Changes page builds a tree from each without a nil check.
+	for _, sc := range r.serviceChanges(ctx) {
+		if sc.Files == nil {
+			sc.Files = []domain.RepoFileChange{}
+		}
+		out.Services = append(out.Services, sc)
+	}
 	return out, nil
 }
 
@@ -492,6 +501,15 @@ func classifyPath(c *domain.RepoFileChange, idx map[string]catalogPathEntry, wor
 		c.Kind = domain.RepoKindWorkspace
 	case strings.HasPrefix(workspaceRel, domain.EnvironmentsDir+"/"):
 		c.Kind = domain.RepoKindEnvironment
+	// A file the catalog does not know -- one that does not parse yet, or a
+	// deletion, whose row is already gone -- is still named for what it is
+	// by where it sits, just without an id or a title.
+	case strings.HasPrefix(workspaceRel, domain.FlowsDir+"/") && strings.HasSuffix(workspaceRel, domain.FlowFileSuffix):
+		c.Kind = domain.RepoKindFlow
+	case strings.HasPrefix(workspaceRel, domain.MemoriesDir+"/") && strings.HasSuffix(workspaceRel, ".md"):
+		c.Kind = domain.RepoKindMemory
+	case strings.HasPrefix(workspaceRel, "examples/") && strings.HasSuffix(workspaceRel, ".example.yaml"):
+		c.Kind = domain.RepoKindExample
 	default:
 		c.Kind = domain.RepoKindOther
 	}

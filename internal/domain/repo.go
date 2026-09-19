@@ -96,7 +96,7 @@ type RepoServiceChanges struct {
 	Branch string           `json:"branch,omitempty"`
 	Ref    string           `json:"ref,omitempty"`
 	Dirty  bool             `json:"dirty"`
-	Files  []RepoFileChange `json:"files,omitempty"`
+	Files  []RepoFileChange `json:"files"`
 }
 
 // RepoChanges is engine.RepoAPI.Changes' answer (PLAN §34f item 1): the
@@ -105,7 +105,7 @@ type RepoServiceChanges struct {
 type RepoChanges struct {
 	Status   RepoStatus           `json:"status"`
 	Files    []RepoFileChange     `json:"files"`
-	Services []RepoServiceChanges `json:"services,omitempty"`
+	Services []RepoServiceChanges `json:"services"`
 }
 
 // RepoDiff is engine.RepoAPI.Diff's answer (PLAN §34f item 1): a tracked
