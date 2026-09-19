@@ -32,11 +32,43 @@ type Options struct {
 	// Version is reported by /v1/health, used by daemon clients to detect a
 	// version mismatch (PLAN §4).
 	Version string
-	Logger  *slog.Logger
+	// Commit is reported alongside Version by GET /v1/daemon.
+	Commit string
+	Logger *slog.Logger
 	// IdleTimeout, when positive, calls OnIdle after this long with no HTTP
 	// requests and no open WebSocket connections.
 	IdleTimeout time.Duration
 	OnIdle      func()
+
+	// Port and Started are reported by GET /v1/daemon (PLAN §34f item 3).
+	// Both are injected rather than derived: serve.go binds the listener
+	// itself, before wrapping Handler() in its own mux alongside /mcp
+	// (Server.ListenAndServe is not the caller there), so Server never
+	// otherwise learns its own port, and Started is when serve.go actually
+	// started serving, not the (slightly earlier) moment New is called.
+	Port    int
+	Started time.Time
+
+	// UpdateBaseURL overrides internal/selfupdate's default GitHub Releases
+	// root ("https://github.com/gs-sinha/sapien") for every call
+	// handleUpdateCheck/handleUpdateApply make. Empty means the real one;
+	// a test points this at an httptest.Server serving a fake redirect,
+	// tarball, and checksums.txt.
+	UpdateBaseURL string
+
+	// RestartHook, when set, is called by POST /v1/daemon/restart once its
+	// 202 response has been flushed, and by POST /v1/update/apply once it
+	// has replaced the binary on disk: it should spawn a detached successor
+	// daemon and return without waiting for it, since the successor's own
+	// `--restart` startup stops this process as a side effect (serve.go's
+	// refuseIfDaemonAlive). internal/server cannot import internal/cli
+	// (which imports internal/server) to build this itself, hence the
+	// injection; serve.go supplies a closure that already knows this
+	// daemon's port, idle-timeout flag, and primary workspace directory.
+	// Nil (the zero value) means "this Server cannot restart itself" --
+	// true for a server embedded in a test or a one-shot CLI command --
+	// and both handlers report errs.NotImplemented instead of calling it.
+	RestartHook func()
 }
 
 // Server is the local engine HTTP API.
@@ -45,7 +77,16 @@ type Server struct {
 	workspaces *workspaces.Manager
 	token      string
 	version    string
+	commit     string
 	logger     *slog.Logger
+
+	// port and started back GET /v1/daemon; restartHook backs POST
+	// /v1/daemon/restart and POST /v1/update/apply. See Options for why
+	// these are injected rather than derived (PLAN §34f item 3).
+	port          int
+	started       time.Time
+	restartHook   func()
+	updateBaseURL string
 
 	idle *idleTracker
 
@@ -69,16 +110,26 @@ func New(opts Options) *Server {
 		logger = slog.Default()
 	}
 
+	started := opts.Started
+	if started.IsZero() {
+		started = time.Now()
+	}
+
 	s := &Server{
 		engine:     opts.Engine,
 		workspaces: opts.Workspaces,
 
-		token:    opts.Token,
-		version:  opts.Version,
-		logger:   logger,
-		idle:     newIdleTracker(opts.IdleTimeout, opts.OnIdle),
-		recent:   newRecentEvents(),
-		terminal: terminal.NewManager(),
+		token:         opts.Token,
+		version:       opts.Version,
+		commit:        opts.Commit,
+		logger:        logger,
+		port:          opts.Port,
+		started:       started,
+		restartHook:   opts.RestartHook,
+		updateBaseURL: opts.UpdateBaseURL,
+		idle:          newIdleTracker(opts.IdleTimeout, opts.OnIdle),
+		recent:        newRecentEvents(),
+		terminal:      terminal.NewManager(),
 	}
 	s.openAPI = buildOpenAPI(routeTable)
 	s.recentCancel = subscribeRecentEvents(context.Background(), s.engine.Events(), s.recent)

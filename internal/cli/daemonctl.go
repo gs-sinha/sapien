@@ -21,15 +21,16 @@ import (
 
 func init() { Register(newDaemonCmd) }
 
-// newDaemonCmd is `sapien daemon status|stop`: small helpers so a user can
-// inspect or stop the daemon `sapien serve` or `sapien mcp` started for
-// this workspace, without needing to know where daemon.json lives.
+// newDaemonCmd is `sapien daemon status|stop|restart`: small helpers so a
+// user can inspect, stop, or restart the daemon `sapien serve` or `sapien
+// mcp` started for this workspace, without needing to know where
+// daemon.json lives.
 func newDaemonCmd(app *App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "daemon",
-		Short: "Inspect or stop the daemon for this workspace",
+		Short: "Inspect, stop, or restart the daemon for this workspace",
 	}
-	cmd.AddCommand(newDaemonStatusCmd(app), newDaemonStopCmd(app))
+	cmd.AddCommand(newDaemonStatusCmd(app), newDaemonStopCmd(app), newDaemonRestartCmd(app))
 	return cmd
 }
 
@@ -161,6 +162,88 @@ func newDaemonStopCmd(app *App) *cobra.Command {
 	}
 }
 
+// newDaemonRestartCmd is `sapien daemon restart` (PLAN §34f item 3): stop
+// whatever is currently serving this workspace, if anything, then start a
+// fresh daemon in its place. Unlike `sapien serve --restart` (which only
+// replaces a daemon it finds itself already running as), this always ends
+// with a daemon running -- "works when none is running = just start" -- so
+// it is also what the Settings page's restart button and POST
+// /v1/daemon/restart's successor-spawning both mean by "restart".
+func newDaemonRestartCmd(app *App) *cobra.Command {
+	return &cobra.Command{
+		Use:   "restart",
+		Short: "Restart the daemon for this workspace, starting one if none is running",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ws, err := app.Workspace()
+			if err != nil {
+				return err
+			}
+
+			stopped, info, err := restartDaemon(cmd.Context(), ws)
+			if err != nil {
+				return err
+			}
+
+			if app.Printer.IsJSON() {
+				return app.Printer.JSON(map[string]any{
+					"restarted": true,
+					"stopped":   stopped,
+					"pid":       info.PID,
+					"port":      info.Port,
+					"version":   info.Version,
+					"started":   info.Started,
+				})
+			}
+			for _, pid := range stopped {
+				app.Printer.Line("stopped daemon (pid %d)", pid)
+			}
+			app.Printer.Line("sapien daemon restarted: pid %d, port %d, version %s, started %s",
+				info.PID, info.Port, info.Version, info.Started.Format(time.RFC3339))
+			return nil
+		},
+	}
+}
+
+// restartDaemon stops whatever process is currently serving ws -- the one
+// daemon.json names, if daemon.Running, plus (since daemon.json is only
+// half the story; see newDaemonStopCmd above) whatever independently holds
+// the workspace lock -- and starts a fresh one via spawnDaemonFunc. It is
+// a no-op stop when nothing is running: restarting an idle workspace just
+// starts it. `sapien daemon restart` and `sapien upgrade` (once it has
+// replaced its own binary) both call this.
+func restartDaemon(ctx context.Context, ws *domain.Workspace) (stoppedPIDs []int, info *daemon.Info, err error) {
+	existing, err := daemon.Read(ws)
+	if err != nil && !errs.Is(err, errs.DaemonUnavailable) {
+		return nil, nil, err
+	}
+
+	var pids []int
+	if daemon.Running(existing) {
+		pids = append(pids, existing.PID)
+	}
+	if holder, ok := daemon.Holder(ws); ok && (existing == nil || holder != existing.PID) {
+		pids = append(pids, holder)
+	}
+	for _, pid := range pids {
+		if err := stopDaemon(&daemon.Info{PID: pid}); err != nil {
+			return pids, nil, errs.As(err).WithHint(fmt.Sprintf(
+				"daemon.json was left in place so pid %d can still be found; check `ps -p %d`", pid, pid))
+		}
+	}
+	if len(pids) > 0 {
+		if err := daemon.Remove(ws); err != nil {
+			return pids, nil, err
+		}
+	}
+
+	newInfo, err := spawnDaemonFunc(ctx, ws, Version)
+	if err != nil {
+		return pids, nil, err
+	}
+	return pids, newInfo, nil
+}
+
 // findOrStartDaemon returns the live, version-matching daemon for ws,
 // spawning one via spawnDaemon if none is running yet. `sapien mcp` (PLAN
 // §4: "always daemon-backed... starts the daemon if none is running") is
@@ -196,7 +279,7 @@ func findOrStartDaemon(ctx context.Context, ws *domain.Workspace, version string
 	case info != nil:
 		return info, nil
 	}
-	return spawnDaemon(ctx, ws, version)
+	return spawnDaemonFunc(ctx, ws, version)
 }
 
 // How hard a caller tries before giving up on a daemon whose process is
@@ -288,6 +371,16 @@ func replaceStaleDaemon(ctx context.Context, ws *domain.Workspace, version strin
 	}
 	return daemon.Remove(ws)
 }
+
+// spawnDaemonFunc indirects spawnDaemon so a test can substitute a fake
+// rather than exec a real process. spawnDaemon execs os.Executable(),
+// which under `go test` is the compiled test binary, not a built `sapien`
+// -- exactly the trap findOrStartDaemon's own tests avoid by pre-seeding
+// daemon.json rather than ever exercising this for real (see
+// SetSpawnDaemonFunc in export_test.go, and daemon_restart_test.go, which
+// uses it to test `sapien daemon restart`'s stop-then-start logic without
+// spawning anything).
+var spawnDaemonFunc = spawnDaemon
 
 // spawnDaemon starts "<self> serve --json --workspace <ws.Dir>" as a
 // detached child (a new session via Setsid, so it outlives this process

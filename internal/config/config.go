@@ -121,12 +121,39 @@ const (
 	defaultFrictionCategory = "General"
 )
 
+// Updates configures the daemon's background "is there a newer release"
+// check (PLAN §34f item 4, internal/selfupdate). Off by default is not the
+// default here -- checking IS on by default -- so Check is a *bool rather
+// than a plain bool: a config file that omits `updates:` entirely, or
+// omits `check:` within it, must be told apart from one that explicitly
+// sets `check: false`, and only a pointer can carry "not mentioned" as a
+// third state distinct from both.
+type Updates struct {
+	Check *bool `yaml:"check"`
+}
+
+// updatesCheckEnabledEnv, set to any non-empty value, disables update
+// checking regardless of config -- an escape hatch for CI and sandboxed
+// environments that should never phone home, that doesn't require editing
+// a shared config file to get.
+const updatesCheckEnabledEnv = "SAPIEN_NO_UPDATE_CHECK"
+
+// Enabled reports whether update checking is on: Check is nil (never
+// mentioned) or explicitly true, and updatesCheckEnabledEnv is unset/empty.
+func (u Updates) Enabled() bool {
+	if os.Getenv(updatesCheckEnabledEnv) != "" {
+		return false
+	}
+	return u.Check == nil || *u.Check
+}
+
 // Config is Sapien's merged engine-level configuration.
 type Config struct {
 	Semantic Semantic `yaml:"semantic"`
 	Git      Git      `yaml:"git"`
 	Daemon   Daemon   `yaml:"daemon"`
 	Friction Friction `yaml:"friction"`
+	Updates  Updates  `yaml:"updates"`
 }
 
 // Defaults returns the configuration Load would produce if neither the
@@ -224,19 +251,32 @@ func parseByteSize(s string) (int64, error) {
 	return n, nil
 }
 
+// UserDir returns the user-level state directory, "~/.sapien" (falling
+// back to a directory under os.TempDir if the home directory cannot be
+// determined, so callers always get a usable, if unwritable-in-practice,
+// path rather than an error). Unlike UserPath, this does not consult
+// $SAPIEN_CONFIG, which only relocates config.yaml itself: other files that
+// live alongside it -- the daemon's persisted bearer token
+// (internal/daemon.TokenPath), the update-check cache
+// (internal/selfupdate.CachePath) -- derive their path from this rather
+// than each re-deriving "~/.sapien" on their own. Tests isolate it the same
+// way gitsrc's own default cache dir is isolated: override $HOME.
+func UserDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return filepath.Join(os.TempDir(), domain.WorkspaceStateDir)
+	}
+	return filepath.Join(home, domain.WorkspaceStateDir)
+}
+
 // UserPath returns the user-level config file path: $SAPIEN_CONFIG if set
-// and non-empty, else "~/.sapien/config.yaml" (falling back to a temp-dir
-// path if the home directory cannot be determined, so callers always get a
-// usable, if unwritable-in-practice, path rather than an error).
+// and non-empty, else "~/.sapien/config.yaml" (UserDir, with
+// configFileName appended).
 func UserPath() string {
 	if p := os.Getenv("SAPIEN_CONFIG"); p != "" {
 		return p
 	}
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		return filepath.Join(os.TempDir(), domain.WorkspaceStateDir, configFileName)
-	}
-	return filepath.Join(home, domain.WorkspaceStateDir, configFileName)
+	return filepath.Join(UserDir(), configFileName)
 }
 
 // WorkspacePath returns ws's workspace-level config file path,
@@ -302,11 +342,18 @@ type rawFriction struct {
 // chief among them) are simply not declared here, so yaml.v3 -- which
 // ignores keys it has no destination field for, unless KnownFields(true) is
 // set (it never is, here or in internal/mcp) -- leaves them alone.
+//
+// Updates is spelled with the real Updates type here, not a raw* mirror:
+// its one field is already a *bool, so yaml.v3 leaving it nil when
+// `updates:`/`check:` is absent is already the "only override what this
+// file actually mentions" behavior applyRaw needs -- no separate raw shape
+// required.
 type rawConfig struct {
 	Semantic rawSemantic `yaml:"semantic"`
 	Git      rawGit      `yaml:"git"`
 	Daemon   rawDaemon   `yaml:"daemon"`
 	Friction rawFriction `yaml:"friction"`
+	Updates  Updates     `yaml:"updates"`
 }
 
 // mergeFile reads path (a no-op, not an error, if it does not exist) and
@@ -375,6 +422,10 @@ func applyRaw(cfg *Config, raw rawConfig) {
 	}
 	if raw.Friction.Category != nil {
 		f.Category = *raw.Friction.Category
+	}
+
+	if raw.Updates.Check != nil {
+		cfg.Updates.Check = raw.Updates.Check
 	}
 }
 

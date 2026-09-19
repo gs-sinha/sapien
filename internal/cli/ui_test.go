@@ -19,7 +19,7 @@ func TestUI_NoOpen_Human(t *testing.T) {
 	ws := loadWorkspace(t, wsDir)
 	info := startFakeDaemon(t, ws, cli.Version, 0)
 
-	wantURL := fmt.Sprintf("http://127.0.0.1:%d/ui/session?token=%s", info.Port, info.Token)
+	wantURL := fmt.Sprintf("http://sapien.localhost:%d/ui/session?token=%s", info.Port, info.Token)
 
 	stdout, stderr, code := run(t, "--workspace", wsDir, "ui", "--no-open")
 	require.Equal(t, 0, code, "stderr: %s", stderr)
@@ -32,7 +32,7 @@ func TestUI_NoOpen_JSON(t *testing.T) {
 	ws := loadWorkspace(t, wsDir)
 	info := startFakeDaemon(t, ws, cli.Version, 0)
 
-	wantURL := fmt.Sprintf("http://127.0.0.1:%d/ui/session?token=%s", info.Port, info.Token)
+	wantURL := fmt.Sprintf("http://sapien.localhost:%d/ui/session?token=%s", info.Port, info.Token)
 
 	stdout, stderr, code := run(t, "--workspace", wsDir, "ui", "--no-open", "--json")
 	require.Equal(t, 0, code, "stderr: %s", stderr)
@@ -56,7 +56,7 @@ func TestUI_MissingOpener_FallsBackToPrintingURL(t *testing.T) {
 
 	t.Setenv("PATH", t.TempDir())
 
-	wantURL := fmt.Sprintf("http://127.0.0.1:%d/ui/session?token=%s", info.Port, info.Token)
+	wantURL := fmt.Sprintf("http://sapien.localhost:%d/ui/session?token=%s", info.Port, info.Token)
 
 	stdout, stderr, code := run(t, "--workspace", wsDir, "ui")
 	require.Equal(t, 0, code, "stderr: %s", stderr)
@@ -88,12 +88,30 @@ func TestUI_OpensViaFakeOpener(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(binDir, openerName), []byte("#!/bin/sh\nexit 0\n"), 0o755))
 	t.Setenv("PATH", binDir)
 
-	wantURL := fmt.Sprintf("http://127.0.0.1:%d/ui/session?token=%s", info.Port, info.Token)
+	wantURL := fmt.Sprintf("http://sapien.localhost:%d/ui/session?token=%s", info.Port, info.Token)
 
 	stdout, stderr, code := run(t, "--workspace", wsDir, "ui")
 	require.Equal(t, 0, code, "stderr: %s", stderr)
 	assert.Contains(t, stdout, wantURL)
 	assert.Empty(t, stderr)
+}
+
+// TestUI_LoopbackIP proves --loopback-ip (PLAN §34f item 3) opts back into
+// the plain 127.0.0.1 URL, for a browser (Safari, as of this writing) that
+// won't resolve *.localhost out of the box.
+func TestUI_LoopbackIP(t *testing.T) {
+	wsDir := setupRealFixtureWorkspace(t)
+	ws := loadWorkspace(t, wsDir)
+	info := startFakeDaemon(t, ws, cli.Version, 0)
+
+	wantURL := fmt.Sprintf("http://127.0.0.1:%d/ui/session?token=%s", info.Port, info.Token)
+
+	stdout, stderr, code := run(t, "--workspace", wsDir, "ui", "--no-open", "--loopback-ip", "--json")
+	require.Equal(t, 0, code, "stderr: %s", stderr)
+
+	var got map[string]any
+	require.NoError(t, json.Unmarshal([]byte(stdout), &got))
+	assert.Equal(t, wantURL, got["url"])
 }
 
 func TestUI_NoWorkspace(t *testing.T) {

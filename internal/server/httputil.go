@@ -21,6 +21,19 @@ func writeNoContent(w http.ResponseWriter) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// flushResponse flushes w to the client immediately, if the underlying
+// ResponseWriter supports it (http.NewResponseController's Unwrap
+// convention finds the real Flusher through loggingMiddleware's
+// statusRecorder wrapper -- see its own doc comment). Used before a handler
+// goes on to do something that outlives the request, e.g. spawning a
+// successor daemon (handleDaemonRestart, handleUpdateApply) that may kill
+// this process: the client should see its response land before that
+// happens, not race it. A ResponseWriter that cannot flush (e.g. an
+// httptest.ResponseRecorder in a unit test) is a no-op, not an error.
+func flushResponse(w http.ResponseWriter) {
+	_ = http.NewResponseController(w).Flush()
+}
+
 // writeError serializes err as errs JSON with status derived from
 // errs.HTTPStatus.
 func writeError(w http.ResponseWriter, err error) {

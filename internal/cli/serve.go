@@ -119,7 +119,15 @@ func newServeCmd(app *App) *cobra.Command {
 			closeEngine := func() { closed.Do(func() { _ = eng.Close() }) }
 			defer closeEngine()
 
-			token := daemon.NewToken()
+			// Persisted, not minted fresh (daemon.NewToken directly): PLAN
+			// §34f item 3 wants a restart -- this build's own `serve
+			// --restart`, or the successor spawnRestartedDaemon below
+			// spawns -- to keep every already-open browser tab and MCP
+			// bridge working rather than invalidating them all at once.
+			token, err := daemon.LoadOrCreateToken()
+			if err != nil {
+				return err
+			}
 
 			idleCtx, idleCancel := context.WithCancel(context.Background())
 			defer idleCancel()
@@ -135,11 +143,31 @@ func newServeCmd(app *App) *cobra.Command {
 			})
 			defer func() { _ = wsMgr.Close() }()
 
+			// Bound before Server.New so its Port field is the real one:
+			// this process serves wrapped (below) itself, via its own
+			// http.Server, rather than through Server.ListenAndServe, so
+			// nothing else tells Server what port it ended up on. Binding
+			// this early also fails fast (a port already in use, with no
+			// fallback requested) before the engine above has done its more
+			// expensive open -- previously wasted work on exactly that
+			// failure.
+			ln, err := listenLoopback(port, !cmd.Flags().Changed("port"))
+			if err != nil {
+				return err
+			}
+			_, actualPortStr, _ := net.SplitHostPort(ln.Addr().String())
+			actualPort, _ := strconv.Atoi(actualPortStr)
+			started := time.Now()
+
 			srv := server.New(server.Options{
-				Engine:     eng,
-				Workspaces: wsMgr,
-				Token:      token,
-				Version:    Version,
+				Engine:      eng,
+				Workspaces:  wsMgr,
+				Token:       token,
+				Version:     Version,
+				Commit:      Commit,
+				Port:        actualPort,
+				Started:     started,
+				RestartHook: spawnRestartedDaemon(ws, actualPort, idleTimeout),
 			})
 
 			defer srv.Close()
@@ -162,10 +190,6 @@ func newServeCmd(app *App) *cobra.Command {
 			// guard above or by this command returning.
 			startScavenger(idleCtx)
 
-			ln, err := listenLoopback(port, !cmd.Flags().Changed("port"))
-			if err != nil {
-				return err
-			}
 			httpServer := &http.Server{Handler: wrapped}
 			guard.start()
 
@@ -176,15 +200,12 @@ func newServeCmd(app *App) *cobra.Command {
 				}
 			}()
 
-			_, actualPortStr, _ := net.SplitHostPort(ln.Addr().String())
-			actualPort, _ := strconv.Atoi(actualPortStr)
-
 			info := &daemon.Info{
 				PID:       os.Getpid(),
 				Port:      actualPort,
 				Token:     token,
 				Version:   Version,
-				Started:   time.Now(),
+				Started:   started,
 				Workspace: ws.Dir,
 			}
 			if err := daemon.Write(ws, info); err != nil {
@@ -202,6 +223,10 @@ func newServeCmd(app *App) *cobra.Command {
 			} else {
 				app.Printer.Line("sapien daemon listening on 127.0.0.1:%d (pid %d)", actualPort, info.PID)
 			}
+
+			// Never blocks startup, never louder than Debug on failure
+			// (PLAN §34f item 4): see kickBackgroundUpdateCheck's own doc.
+			go kickBackgroundUpdateCheck(idleCtx, cfg.Updates, "")
 
 			sigCh := make(chan os.Signal, 1)
 			signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)

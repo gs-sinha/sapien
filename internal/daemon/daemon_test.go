@@ -107,6 +107,60 @@ func TestNewToken(t *testing.T) {
 	}
 }
 
+// --- TokenPath / LoadOrCreateToken (PLAN §34f item 3) ---
+
+func TestTokenPath_UnderHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	assert.Equal(t, filepath.Join(home, ".sapien", "daemon-token"), daemon.TokenPath())
+}
+
+func TestLoadOrCreateToken_CreatesWhenMissing(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	tok, err := daemon.LoadOrCreateToken()
+	require.NoError(t, err)
+	assert.Len(t, tok, 64)
+
+	fi, err := os.Stat(daemon.TokenPath())
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0600), fi.Mode().Perm())
+}
+
+func TestLoadOrCreateToken_ReusesExisting(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	first, err := daemon.LoadOrCreateToken()
+	require.NoError(t, err)
+
+	second, err := daemon.LoadOrCreateToken()
+	require.NoError(t, err)
+
+	assert.Equal(t, first, second, "a restart must not invalidate every session by minting a new token")
+}
+
+func TestLoadOrCreateToken_RegeneratesWhenFileIsEmpty(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	require.NoError(t, os.MkdirAll(filepath.Dir(daemon.TokenPath()), 0o700))
+	require.NoError(t, os.WriteFile(daemon.TokenPath(), []byte(""), 0o600))
+
+	tok, err := daemon.LoadOrCreateToken()
+	require.NoError(t, err)
+	assert.Len(t, tok, 64)
+}
+
+func TestLoadOrCreateToken_TrimsWhitespace(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	require.NoError(t, os.MkdirAll(filepath.Dir(daemon.TokenPath()), 0o700))
+	require.NoError(t, os.WriteFile(daemon.TokenPath(), []byte("  a-persisted-token  \n"), 0o600))
+
+	tok, err := daemon.LoadOrCreateToken()
+	require.NoError(t, err)
+	assert.Equal(t, "a-persisted-token", tok)
+}
+
 func TestAliveNilInfo(t *testing.T) {
 	assert.False(t, daemon.Alive(context.Background(), nil))
 }

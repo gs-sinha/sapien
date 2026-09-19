@@ -61,6 +61,9 @@ func TestMalformedBodyIsInvalid(t *testing.T) {
 		{http.MethodPut, "/v1/settings/semantic"},
 		{http.MethodPost, "/v1/settings/semantic/test"},
 		{http.MethodPost, "/v1/settings/semantic/ollama/pull"},
+		{http.MethodPost, "/v1/daemon/restart"},
+		{http.MethodPost, "/v1/update/apply"},
+		{http.MethodPut, "/v1/settings/updates"},
 	}
 
 	for _, rt := range routes {

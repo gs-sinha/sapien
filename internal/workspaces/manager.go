@@ -333,7 +333,8 @@ func (m *Manager) Close() error {
 // directory (PLAN §34f item 5: a "user"-scope settings change must be
 // applied to every open workspace engine, not just the one the request
 // named -- internal/server's settings handler uses this to reach the
-// others). The primary is included like any other open workspace.
+// others; GET /v1/daemon sums active runs across them, item 3). The
+// primary is included like any other open workspace.
 func (m *Manager) Engines() map[string]engine.Engine {
 	m.mu.Lock()
 	defer m.mu.Unlock()
