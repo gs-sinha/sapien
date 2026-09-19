@@ -300,12 +300,22 @@ esac
 # from wherever this script happens to run, that commonly finds none at
 # all, which status_json reports as anything other than `"running":true`
 # and this section quietly skips.
+#
+# Only when the binary just written is the `sapien` this machine actually
+# runs (what PATH resolves to): installing a second copy somewhere else
+# (--prefix /tmp/try-it) must not take over a daemon that belongs to another
+# build. v1.4.0's script restarted it regardless.
 status_json="$("$PREFIX/sapien" daemon status --json 2>/dev/null || true)"
 case "$status_json" in
   *'"running":true'* | *'"running": true'*)
-    say "restarting the running daemon"
-    "$PREFIX/sapien" daemon restart >/dev/null 2>&1 \
-      || echo "install.sh: warning: could not restart the running daemon; run \`sapien daemon restart\` yourself" >&2
+    on_path="$(command -v sapien 2>/dev/null || true)"
+    if [ -n "$on_path" ] && [ "$(resolve_path "$on_path")" = "$(resolve_path "$PREFIX/sapien")" ]; then
+      say "restarting the running daemon"
+      "$PREFIX/sapien" daemon restart >/dev/null 2>&1 \
+        || echo "install.sh: warning: could not restart the running daemon; run \`sapien daemon restart\` yourself" >&2
+    else
+      say "a daemon is running from another sapien (${on_path:-not on PATH}); left alone"
+    fi
     ;;
 esac
 

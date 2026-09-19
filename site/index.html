@@ -71,7 +71,7 @@
   <section class="hero">
     <div class="wrap hero-grid">
       <div>
-        <a class="pill" href="#releases"><span class="tag" data-latest>v1.3.1</span> macOS &amp; Linux · Apache-2.0 · free</a>
+        <a class="pill" href="#releases"><span class="tag" data-latest>v1.4.0</span> macOS &amp; Linux · Apache-2.0 · free</a>
         <h1>API discovery for <em>agents</em> and humans.</h1>
         <p class="lede">Sapien gives every service in your org <strong>business-first docs, a schema and ready-to-send payloads</strong>, written by the agents already working in those repos. Any agent in any repo can query it, any developer can browse it, and an agent can turn it into <strong>multi-service flows from one sentence</strong>.</p>
         <div class="install">
@@ -311,7 +311,7 @@ released  allocation-service.getAllocation   <span class="ok">200</span>   2/2
               <div class="tabs-panels">
                 <div class="tabpanel" role="tabpanel" id="p-script" aria-labelledby="t-script">
                   <pre class="code"><span class="p">$ </span>curl -fsSL https://gs-sinha.github.io/sapien/install.sh | sh</pre>
-                  <p class="note">Detects your OS and CPU (an Apple silicon Mac under Rosetta still gets the native build), verifies the release checksum, and installs to <code>/usr/local/bin</code>, or <code>~/.local/bin</code> when that isn't writable. Works with <code>wget</code> too. Pin a version with <code>SAPIEN_VERSION=v1.3.1</code>, or choose the directory with <code>sh -s -- --prefix ~/bin</code>.</p>
+                  <p class="note">Detects your OS and CPU (an Apple silicon Mac under Rosetta still gets the native build), verifies the release checksum, and installs to <code>/usr/local/bin</code>, or <code>~/.local/bin</code> when that isn't writable. Works with <code>wget</code> too. Pin a version with <code>SAPIEN_VERSION=v1.4.0</code>, or choose the directory with <code>sh -s -- --prefix ~/bin</code>.</p>
                 </div>
                 <div class="tabpanel" role="tabpanel" id="p-brew" aria-labelledby="t-brew">
                   <pre class="code"><span class="p">$ </span>brew install gs-sinha/tap/sapien</pre>
@@ -724,9 +724,9 @@ released  allocation-service.getAllocation  <span class="ok">passed</span>  200 
       <div class="releases">
         <div class="card latest">
           <p class="eyebrow" style="margin:0"><svg class="i" aria-hidden="true"><use href="#i-tag"/></svg>Latest release</p>
-          <p class="ver" data-latest>v1.3.1</p>
-          <p class="date" data-latest-date>September 15, 2026</p>
-          <p class="note" style="margin:0">Need an older version? Set it for the install script: <code>curl … | SAPIEN_VERSION=v1.3.0 sh</code></p>
+          <p class="ver" data-latest>v1.4.0</p>
+          <p class="date" data-latest-date>September 20, 2026</p>
+          <p class="note" style="margin:0">Need an older version? Set it for the install script: <code>curl … | SAPIEN_VERSION=v1.3.1 sh</code></p>
           <div class="links">
             <a class="btn" href="https://github.com/gs-sinha/sapien/releases" data-latest-link>Release notes</a>
             <a class="btn" href="https://github.com/gs-sinha/sapien/blob/main/CHANGELOG.md">Full changelog</a>
@@ -734,6 +734,18 @@ released  allocation-service.getAllocation  <span class="ok">passed</span>  200 
         </div>
 
         <ol class="timeline">
+          <li>
+            <h3>v1.4.0 <span class="when">September 20, 2026</span></h3>
+            <ul>
+              <li>A Changes page: every changed file in the workspace repo as a tree, with diff, commit, pull and push, without leaving the inspector.</li>
+              <li>Folders for flows, memories and examples, with multi-select and drag-to-folder; <code>sapien flow|memory|example mv</code>.</li>
+              <li>Conditions and loops in flows: <code>when:</code>, <code>foreach:</code> and <code>repeat:</code> blocks, and a read-only flow chart on flow and run pages.</li>
+              <li>A Settings page: semantic search on or off with no restart (Ollama models listed and pulled for you, what to embed, task prefixes), daemon restart, update checks and <code>sapien upgrade</code>.</li>
+              <li>Switch a service's branch from its page, for this machine or for the team.</li>
+              <li>The inspector opens at <code>http://sapien.localhost:7717</code>, sessions survive a daemon restart, and re-running the install script upgrades in place.</li>
+              <li>Fixed from agent reports: <code>${...}</code> inside a CEL assertion is now expanded (it could never fail before), <code>out</code> works in a step's own assertions, and <code>patch_flow</code> keeps a flow's formatting.</li>
+            </ul>
+          </li>
           <li>
             <h3>v1.3.1 <span class="when">September 15, 2026</span></h3>
             <ul>
