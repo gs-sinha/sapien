@@ -125,6 +125,37 @@ func TestCompileAssertion_PathContainsNonString(t *testing.T) {
 	assert.Equal(t, "5 in body.tags", c.Expr)
 }
 
+func TestCompileAssertion_PathLtLteGtGte(t *testing.T) {
+	cases := []struct {
+		name string
+		a    domain.Assertion
+		want string
+	}{
+		{"lt", domain.Assertion{Path: "body.count", Lt: 10}, "body.count < 10"},
+		{"lte", domain.Assertion{Path: "body.count", Lte: 10}, "body.count <= 10"},
+		{"gt", domain.Assertion{Path: "body.count", Gt: 0}, "body.count > 0"},
+		{"gte", domain.Assertion{Path: "body.count", Gte: 0}, "body.count >= 0"},
+		{"gt string/timestamp", domain.Assertion{Path: "body.createdAt", Gt: "2024-01-01T00:00:00Z"}, `body.createdAt > "2024-01-01T00:00:00Z"`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c, err := CompileAssertion(tc.a)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, c.Expr)
+		})
+	}
+}
+
+func TestCompileAssertion_PathLtGtAmbiguous(t *testing.T) {
+	_, err := CompileAssertion(domain.Assertion{Path: "body.count", Gt: 0, Lt: 10})
+	require.Error(t, err)
+	assert.Equal(t, errs.FlowInvalid, errs.CodeOf(err))
+
+	_, err = CompileAssertion(domain.Assertion{Path: "body.count", Eq: 5, Gte: 0})
+	require.Error(t, err)
+	assert.Equal(t, errs.FlowInvalid, errs.CodeOf(err))
+}
+
 func TestCompileAssertion_Empty(t *testing.T) {
 	_, err := CompileAssertion(domain.Assertion{})
 	require.Error(t, err)
@@ -164,6 +195,10 @@ func TestCompileAssertion_CompiledExprsEvaluate(t *testing.T) {
 		{Path: "body.name", Matches: "QCOM"},
 		{Path: "body.name", Contains: "QCOM"},
 		{Path: "body.counts", Contains: 2},
+		{Path: "body.count", Lt: 10},
+		{Path: "body.count", Lte: 2},
+		{Path: "body.count", Gt: 1},
+		{Path: "body.count", Gte: 2},
 	}
 	for _, a := range tt {
 		c, err := CompileAssertion(a)

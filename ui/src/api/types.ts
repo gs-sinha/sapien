@@ -324,6 +324,14 @@ export interface Assertion {
   exists?: boolean;
   matches?: string;
   contains?: unknown;
+  /** path < this value (interpolated like eq; numeric or string/timestamp ordering as CEL defines it). */
+  lt?: unknown;
+  /** path <= this value (interpolated like eq). */
+  lte?: unknown;
+  /** path > this value (interpolated like eq). */
+  gt?: unknown;
+  /** path >= this value (interpolated like eq). */
+  gte?: unknown;
   message?: string;
   line?: number;
 }

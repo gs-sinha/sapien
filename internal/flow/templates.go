@@ -97,16 +97,20 @@ func collectTemplates(v any) []string {
 }
 
 // assertionTemplates collects every `${...}` template inside a structured
-// assertion's comparison values -- eq, neq, contains, and matches -- the
-// same way collectTemplates does for step input/body/headers, so a
-// template there gets the same EXPR_SYNTAX/UNKNOWN_STEP/STEP_ORDER/
-// UNKNOWN_FIELD checks as everywhere else (PLAN §8).
+// assertion's comparison values -- eq, neq, contains, matches, and
+// lt/lte/gt/gte -- the same way collectTemplates does for step
+// input/body/headers, so a template there gets the same EXPR_SYNTAX/
+// UNKNOWN_STEP/STEP_ORDER/UNKNOWN_FIELD checks as everywhere else (PLAN §8).
 func assertionTemplates(a domain.Assertion) []string {
 	var out []string
 	out = append(out, collectTemplates(a.Eq)...)
 	out = append(out, collectTemplates(a.Neq)...)
 	out = append(out, collectTemplates(a.Contains)...)
 	out = append(out, templates(a.Matches)...)
+	out = append(out, collectTemplates(a.Lt)...)
+	out = append(out, collectTemplates(a.Lte)...)
+	out = append(out, collectTemplates(a.Gt)...)
+	out = append(out, collectTemplates(a.Gte)...)
 	return out
 }
 

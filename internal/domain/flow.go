@@ -140,7 +140,15 @@ type Assertion struct {
 	Exists    *bool  `yaml:"exists,omitempty" json:"exists,omitempty"`
 	Matches   string `yaml:"matches,omitempty" json:"matches,omitempty"` // regex
 	Contains  any    `yaml:"contains,omitempty" json:"contains,omitempty"`
-	Message   string `yaml:"message,omitempty" json:"message,omitempty"`
+	// Lt/Lte/Gt/Gte compare Path's value with an ordering operator instead
+	// of equality (CEL's own numeric/string ordering); like Eq/Neq/Contains,
+	// each accepts a `${...}` template and is interpolated the same way,
+	// keeping the interpolated value's native type.
+	Lt      any    `yaml:"lt,omitempty" json:"lt,omitempty"`
+	Lte     any    `yaml:"lte,omitempty" json:"lte,omitempty"`
+	Gt      any    `yaml:"gt,omitempty" json:"gt,omitempty"`
+	Gte     any    `yaml:"gte,omitempty" json:"gte,omitempty"`
+	Message string `yaml:"message,omitempty" json:"message,omitempty"`
 	// Soft records a mismatch as a warning on the step instead of failing
 	// it: the run stays green, the result is kept, and a later run reports
 	// when the assertion starts (or stops) passing.
