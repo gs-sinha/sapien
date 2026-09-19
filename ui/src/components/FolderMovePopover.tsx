@@ -24,7 +24,8 @@ export function FolderMovePopover({
   loadFolders,
   onMove,
   onMoved,
-  label = 'Move to folder…',
+  label,
+  count,
 }: {
   currentFolder?: string;
   /** Static autocomplete list -- used when the caller already has every
@@ -35,14 +36,31 @@ export function FolderMovePopover({
    *  item just for this. A failed load just leaves the list empty
    *  (free text still works); never blocks opening the popover. */
   loadFolders?: () => Promise<string[]>;
-  onMove: (folder: string) => Promise<unknown>;
+  /** `onProgress` is only ever passed (and only ever called) in bulk mode
+   *  (`count` set): the caller runs its own sequential per-item moves and
+   *  reports back after each one so the button can show "Moving D / N…".
+   *  A resolved value that's an array of per-item failures (bulk mode
+   *  only; anything else is ignored) drives the toast wording below --
+   *  the caller never throws for an individual item's failure, since a
+   *  partial failure still needs the list reloaded and the popover closed
+   *  so the action bar's own inline error list (not this popover) is what
+   *  the user sees next. */
+  onMove: (folder: string, onProgress?: (done: number, total: number) => void) => Promise<unknown>;
   onMoved: () => void;
+  /** Single-item mode (`count` omitted, the default): full button text,
+   *  unchanged default "Move to folder…". Bulk mode (`count` given, from
+   *  a list page's selection action bar): the plural noun for the toast
+   *  ("flows"/"memories"/"examples") -- the button itself always reads
+   *  "Move N to folder…" instead. */
   label?: string;
+  /** Selected-row count; only set for the bulk action-bar usage. */
+  count?: number;
 }) {
   const [open, setOpen] = useState(false);
   const [value, setValue] = useState(currentFolder || '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [loadedFolders, setLoadedFolders] = useState<string[]>([]);
   const ref = useRef<HTMLDivElement>(null);
   const listId = useId();
@@ -85,17 +103,31 @@ export function FolderMovePopover({
     const folder = normalizeFolder(target ?? value);
     setBusy(true);
     setError(null);
+    setProgress(null);
     try {
-      await onMove(folder);
-      pushToast('success', folder ? `moved to ${folder}` : 'moved to root');
+      const result = await onMove(folder, count !== undefined ? (done, total) => setProgress({ done, total }) : undefined);
+      if (count !== undefined) {
+        const dest = folder || 'root';
+        const noun = label ?? 'items';
+        const failedCount = Array.isArray(result) ? result.length : 0;
+        const okCount = count - failedCount;
+        if (failedCount === 0) pushToast('success', `moved ${count} ${noun} to ${dest}`);
+        else if (okCount > 0) pushToast('error', `moved ${okCount}/${count} ${noun} to ${dest}; ${failedCount} failed`);
+        else pushToast('error', `failed to move ${noun} to ${dest}`);
+      } else {
+        pushToast('success', folder ? `moved to ${folder}` : 'moved to root');
+      }
       setOpen(false);
       onMoved();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Move failed.');
     } finally {
       setBusy(false);
+      setProgress(null);
     }
   };
+
+  const buttonLabel = progress ? `Moving ${progress.done} / ${progress.total}…` : count !== undefined ? `Move ${count} to folder…` : label ?? 'Move to folder…';
 
   return (
     <div className="relative inline-block" ref={ref}>
@@ -104,7 +136,7 @@ export function FolderMovePopover({
         onClick={() => setOpen((o) => !o)}
         className="rounded border border-slate-300 px-1.5 py-0.5 text-xs dark:border-slate-700"
       >
-        {label}
+        {buttonLabel}
       </button>
       {open && (
         <div className="absolute right-0 z-10 mt-1 w-56 rounded border border-slate-200 bg-white p-2 text-left shadow-lg dark:border-slate-800 dark:bg-slate-900">
