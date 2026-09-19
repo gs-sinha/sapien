@@ -8,10 +8,14 @@ const (
 	// KindMergeStep sets or replaces the given top-level keys of the step
 	// named by ID (Fields), leaving every other key as it was.
 	KindMergeStep = "merge_step"
-	// KindAddStep inserts Step (which must carry its own `id`) into the
-	// steps list named by Phase ("" for the main `steps:`, "setup", or
-	// "teardown"), positioned via After or Before (mutually exclusive), or
-	// appended at the end when neither is set.
+	// KindAddStep inserts Step (which must carry its own `id`) into a step
+	// list, positioned via After or Before (mutually exclusive) or appended
+	// at the end when neither is set. With After/Before, the target list
+	// and the step's phase/block are INFERRED from wherever that anchor
+	// step actually lives (setup/steps/teardown, and its enclosing loop
+	// block if it's nested); Phase/Into are then only checked, not used to
+	// pick the list -- see Phase and Into. With neither set, Phase and Into
+	// pick the list directly, same as before this inference existed.
 	KindAddStep = "add_step"
 	// KindRemoveStep deletes the step named by ID from whichever of
 	// setup/steps/teardown currently holds it.
@@ -50,16 +54,26 @@ type Op struct {
 	// end of the list.
 	After  string `json:"after,omitempty"`
 	Before string `json:"before,omitempty"`
-	// Phase selects add_step's target list: "" (default) for the main
+	// Phase selects add_step's target list: "" or "steps" for the main
 	// `steps:`, "setup", or "teardown". A phase list that doesn't exist yet
-	// is created. Ignored when Into is set (a block's nested steps live
-	// wherever the block itself does, not in a phase list of their own).
+	// is created. With no After/Before, Into set makes Phase irrelevant (a
+	// block's nested steps live wherever the block itself does, not in a
+	// phase list of their own) and it is simply ignored. With After/Before,
+	// Phase is never used to pick the list (the anchor is) -- it is only
+	// checked: a non-empty Phase that names a different phase than the
+	// anchor's own is an error naming where the anchor actually is. "" is
+	// always treated as "not given", indistinguishable from an explicit
+	// "steps" only when the anchor happens to be in the main list.
 	Phase string `json:"phase,omitempty"`
-	// Into is a loop block's step id (PLAN §34f.8): when set, the new step
-	// is added inside that block's own `steps:` list (After/Before then
-	// name siblings inside that block) instead of a top-level phase list.
-	// Mutually exclusive with Phase in effect, though not in validation --
-	// Phase is simply ignored when Into is set.
+	// Into is a loop block's step id (PLAN §34f.8): when set (and no
+	// After/Before), the new step is added inside that block's own
+	// `steps:` list (After/Before then name siblings inside that block)
+	// instead of a top-level phase list. With After/Before, Into is never
+	// used to pick the list (the anchor's own enclosing block, if any, is)
+	// -- it is only checked: a non-empty Into that names a different block
+	// than the one the anchor is actually nested in (or "" when the anchor
+	// isn't nested in one at all) is an error naming where the anchor
+	// actually is.
 	Into string `json:"into,omitempty"`
 
 	// Inputs is set_inputs' replacement for the flow's `inputs:` mapping.
