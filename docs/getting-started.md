@@ -324,11 +324,18 @@ sapien ui
 
 `sapien ui` finds or starts the workspace's daemon (like `sapien mcp`) and
 opens a browser at its `/ui/session` URL, which exchanges the daemon's
-bearer token for an HttpOnly session cookie and redirects into the app at
-`/ui/`. `--no-open` prints the URL instead of launching a browser; `--json`
-prints `{"url", "port"}`. The browser is whichever one you have set as the
-system default -- `sapien ui` shells out to `open` (macOS) or `xdg-open`
-(Linux) and names no browser of its own.
+bearer token for an HttpOnly session cookie (good for 90 days) and
+redirects into the app at `/ui/`. `--no-open` prints the URL instead of
+launching a browser; `--json` prints `{"url", "port"}`. The browser is
+whichever one you have set as the system default -- `sapien ui` shells out
+to `open` (macOS) or `xdg-open` (Linux) and names no browser of its own.
+
+The URL's host is `sapien.localhost`, not `127.0.0.1`: the whole
+`.localhost` zone is reserved by RFC 6761, so every major browser resolves
+it straight to loopback with no setup, and the daemon's host/origin guard
+accepts it exactly like `localhost`. `--loopback-ip` falls back to plain
+`127.0.0.1`, for the one browser known not to resolve `*.localhost` out of
+the box (Safari, as of this writing).
 
 ### A launcher instead of a terminal
 
@@ -339,9 +346,12 @@ sapien ui --install-app
 writes `~/Applications/Sapien.app`, a launcher for this workspace's UI, so
 it can be opened from Spotlight, the Dock, or a Raycast/Alfred hotkey. It
 is a shim that runs `sapien ui`, not a bookmark, because a URL cannot
-survive: the daemon mints a fresh bearer token on every start, and it exits
-after thirty minutes with nothing connected. Going through the CLI
-re-resolves the port and the session every time.
+survive: the daemon's port can change (an ephemeral fallback when 7717 is
+taken, or a plain restart on a different one) and it exits after thirty
+minutes with nothing connected. Going through the CLI re-resolves the port
+and mints a fresh session cookie every time -- the bearer token underneath
+it is persisted (`~/.sapien/daemon-token`), so a restart never signs out
+every tab and MCP bridge that was already using it.
 
 Re-run the command to repoint the launcher at another workspace, or after
 moving the `sapien` binary (the bundle records the absolute path it was
@@ -364,6 +374,14 @@ tabs show a banner telling you to reload rather than silently failing every
 request; one `sapien ui` relaunch revives the whole set. `--port` on
 `sapien serve` overrides the default, and a port already in use falls back
 to a random one.
+
+`sapien daemon restart` stops whatever is currently running for a
+workspace and starts a fresh one, whether or not anything was running to
+begin with -- the same thing the Settings page's daemon panel does when it
+asks the daemon to restart itself (`GET /v1/daemon`, `POST
+/v1/daemon/restart`). The persisted bearer token means open tabs pick the
+new daemon straight back up on their next request rather than needing a
+reload.
 
 The UI is served by the daemon itself, not a separate process: it shows
 flows, runs (with every step's request, response, and timings), services,
