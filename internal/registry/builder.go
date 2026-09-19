@@ -16,6 +16,7 @@ import (
 
 	"github.com/gs-sinha/sapien/internal/domain"
 	"github.com/gs-sinha/sapien/internal/errs"
+	"github.com/gs-sinha/sapien/internal/folder"
 	"github.com/gs-sinha/sapien/internal/gitsrc"
 	"github.com/gs-sinha/sapien/internal/ingest/docs"
 	"github.com/gs-sinha/sapien/internal/ingest/openapi"
@@ -648,16 +649,19 @@ type rawFlow struct {
 	Steps []rawFlowStep `yaml:"steps"`
 }
 
-// scanFlows discovers pkg's service-owned flows (flows/*.flow.yaml) as
-// FlowSummary records owned by the service named ownerID.
+// scanFlows discovers pkg's service-owned flows (flows/**/*.flow.yaml, at
+// any depth -- PLAN §34f item 6, mirroring internal/engine/local's own
+// reindexOwnerFlows so a service-tier flow in a subfolder is found on
+// add_service/sync_service exactly as it would be after a write through the
+// engine) as FlowSummary records owned by the service named ownerID.
 func scanFlows(ownerID string, pkg *Package) ([]domain.FlowSummary, error) {
 	if pkg.FlowsDir == "" {
 		return nil, nil
 	}
 
-	matches, err := filepath.Glob(filepath.Join(pkg.FlowsDir, "*"+domain.FlowFileSuffix))
+	matches, err := globFlowFiles(pkg.FlowsDir)
 	if err != nil {
-		return nil, errs.Wrap(errs.Internal, err, "globbing %s", pkg.FlowsDir)
+		return nil, errs.Wrap(errs.Internal, err, "walking %s", pkg.FlowsDir)
 	}
 	sort.Strings(matches)
 
@@ -701,6 +705,7 @@ func scanFlows(ownerID string, pkg *Package) ([]domain.FlowSummary, error) {
 			ID:         id,
 			Name:       raw.Name,
 			Path:       filepath.ToSlash(relPath(pkg.Dir, f)),
+			Folder:     folder.FromAbs(pkg.FlowsDir, f),
 			OwnerKind:  "service",
 			OwnerID:    ownerID,
 			Tags:       raw.Tags,
@@ -745,6 +750,43 @@ func globFilesRecursive(dir, ext string) ([]string, error) {
 		return nil, err
 	}
 	sort.Strings(out)
+	return out, nil
+}
+
+// globFlowFiles walks dir, returning the absolute paths of every
+// "*.flow.yaml"/"*.flow.yml" file at any depth (PLAN §34f item 6), skipping
+// directories whose name starts with "." -- mirrors
+// internal/engine/local's reindexOwnerFlows. Unlike globFilesRecursive,
+// this matches on domain.FlowFileSuffix's own two-part suffix
+// (filepath.Ext alone would only ever see ".yaml"), so it needs its own
+// walk rather than reusing that helper. A missing dir yields (nil, nil),
+// not an error.
+func globFlowFiles(dir string) ([]string, error) {
+	var out []string
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		if d.IsDir() {
+			if path != dir && strings.HasPrefix(d.Name(), ".") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if strings.HasSuffix(d.Name(), domain.FlowFileSuffix) {
+			out = append(out, path)
+		}
+		return nil
+	})
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
 	return out, nil
 }
 
