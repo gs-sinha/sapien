@@ -6,7 +6,11 @@ and phase numbers refer to PLAN.md §34's roadmap.
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-09-20
+
 ### Added
+- **The agent pane starts `opencode`** as well as `claude`, `codex` and a
+  shell, and finds it in `~/.opencode/bin` when a launcher's PATH lacks it.
 - **A Changes page: the workspace repository like an editor's source-control
   panel.** One tree of every changed file -- flows, memories, examples,
   `sapien.workspace.yaml`, `environments/`, `.gitignore` -- with change marks
@@ -71,6 +75,14 @@ and phase numbers refer to PLAN.md §34's roadmap.
   remember it per browser.
 
 ### Fixed
+- **One memory longer than the embedding model's context failed the whole
+  index** with Ollama's "the input length exceeds the context length" (it
+  refuses even with `truncate` set, once an input is far enough over). A
+  refused batch is now retried input by input, the over-long one embedded
+  from its head, and the length that fit is remembered so later ones are
+  clipped before they are sent; no table of per-model limits is needed.
+  Settings also gains "Keep the model in memory" (`semantic.keep_alive`), so
+  Ollama can give back the model's RAM sooner than its five-minute default.
 - **A `${...}` template inside a bare CEL assertion, an `expr:`, `until`,
   `when`, `extract` or a loop field was never expanded**, so
   `body.id != "${steps.a.out.id}"` compared against the literal text and
