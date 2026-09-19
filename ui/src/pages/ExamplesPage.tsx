@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { examples, folders as foldersApi } from '../api/client';
+import { BulkMoveBar } from '../components/BulkMoveBar';
 import { EmptyState } from '../components/EmptyState';
 import { FolderBreadcrumb } from '../components/FolderBreadcrumb';
 import { FolderMovePopover } from '../components/FolderMovePopover';
@@ -10,7 +11,9 @@ import { Timestamp } from '../components/Timestamp';
 import { CommitButton, ItemTierBadge, MoveTierControl, PushButton, ShippedBadge } from '../components/tiers';
 import { distinctFolders, underFolder } from '../lib/folders';
 import { useAsync } from '../lib/useAsync';
+import { useBulkMove } from '../lib/useBulkMove';
 import { useFolderParam } from '../lib/useFolderParam';
+import { pushToast } from '../state/toast';
 import type { ExampleQueryParams, SavedExample } from '../api/types';
 
 function FilterInput({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder: string }) {
@@ -46,6 +49,28 @@ export default function ExamplesPage() {
   const folderList = useMemo(() => distinctFolders(data || []), [data]);
   const filtered = useMemo(() => underFolder(data || [], folder), [data, folder]);
 
+  const { selected, setSelected, failures, clearSelection, bulkMove } = useBulkMove(
+    (id, target) => foldersApi.moveExample(id, target),
+    reload,
+  );
+
+  // Selection is a view-level concern layered on top of whatever the
+  // filters currently show; changing any of them invalidates it rather
+  // than leaving a stale selection the user can no longer see.
+  useEffect(() => {
+    clearSelection();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [folder, service, operation, tag, text]);
+
+  const handleDropIds = async (ids: string[], targetFolder: string) => {
+    setSelected(new Set(ids));
+    const failed = await bulkMove(ids, targetFolder);
+    const dest = targetFolder || 'root';
+    if (failed.length === 0) pushToast('success', `moved ${ids.length} examples to ${dest}`);
+    else if (failed.length < ids.length) pushToast('error', `moved ${ids.length - failed.length}/${ids.length} examples to ${dest}; ${failed.length} failed`);
+    else pushToast('error', `failed to move examples to ${dest}`);
+  };
+
   return (
     <div className="p-4">
       <h1 className="mb-4 text-lg font-semibold">Examples</h1>
@@ -57,7 +82,7 @@ export default function ExamplesPage() {
       </div>
 
       <div className="flex flex-col gap-4 md:flex-row">
-        <FolderSidebar items={data || []} selected={folder} onSelect={setFolder} treeKey="folders:examples" />
+        <FolderSidebar items={data || []} selected={folder} onSelect={setFolder} treeKey="folders:examples" onDropIds={handleDropIds} />
         <div className="min-w-0 flex-1">
           {folderList.length > 0 && <FolderBreadcrumb folder={folder} onNavigate={setFolder} />}
           {loading && <div className="text-sm text-slate-400">Loading…</div>}
@@ -69,8 +94,21 @@ export default function ExamplesPage() {
             />
           )}
           {!loading && !error && data && data.length > 0 && (
+            <BulkMoveBar
+              count={selected.size}
+              itemLabel="examples"
+              folders={folderList}
+              onMove={(target, onProgress) => bulkMove(Array.from(selected), target, onProgress)}
+              onClear={clearSelection}
+              failures={failures}
+            />
+          )}
+          {!loading && !error && data && data.length > 0 && (
             <Table<SavedExample>
               rowKey={(e) => e.id}
+              selectedKeys={selected}
+              onSelectionChange={setSelected}
+              draggable
               columns={[
                 {
                   key: 'id',
