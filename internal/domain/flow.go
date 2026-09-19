@@ -50,7 +50,12 @@ type Step struct {
 	// directly on the step taking precedence. A step must set Call,
 	// Example, or both (when both, Call must match the example's
 	// operation). See internal/flow.Materialize.
-	Example string            `yaml:"example,omitempty" json:"example,omitempty"`
+	Example string `yaml:"example,omitempty" json:"example,omitempty"`
+	// When is a CEL boolean (inputs/env/steps only, no `status`/`body`/...:
+	// this step hasn't run yet) evaluated before the request is built; false
+	// records the step `skipped` (SkipReason "when") without sending a
+	// request or evaluating assertions, and the run continues (PLAN §34f.7).
+	When    string            `yaml:"when,omitempty" json:"when,omitempty"`
 	Input   map[string]any    `yaml:"input,omitempty" json:"input,omitempty"` // bound by name to path/query/header params
 	Params  *ExplicitParams   `yaml:"params,omitempty" json:"params,omitempty"`
 	Body    any               `yaml:"body,omitempty" json:"body,omitempty"`
@@ -60,8 +65,54 @@ type Step struct {
 	Until   string            `yaml:"until,omitempty" json:"until,omitempty"` // CEL; step is polled until true
 	Poll    *Poll             `yaml:"poll,omitempty" json:"poll,omitempty"`
 	Timeout string            `yaml:"timeout,omitempty" json:"timeout,omitempty"` // per-request timeout, e.g. "10s"
-	Line    int               `yaml:"-" json:"line,omitempty"`
+
+	// Block fields (PLAN §34f.8): a step with Steps set and no Call/Example
+	// is a loop block -- every call-only field above must be empty on it
+	// (BLOCK_SHAPE) -- that runs its nested Steps repeatedly: once per
+	// element of Foreach (a CEL expression over a list), or per Repeat's
+	// rules. Exactly one of Foreach/Repeat is set. Blocks cannot nest
+	// (NESTED_LOOP) and are not allowed in Setup/Teardown (LOOP_IN_PHASE).
+	Foreach string  `yaml:"foreach,omitempty" json:"foreach,omitempty"` // CEL -> list; iter.item is each element (PLAN §34f.8 calls this loop.item; see internal/expr.IterValue for why it is `iter` here)
+	Repeat  *Repeat `yaml:"repeat,omitempty" json:"repeat,omitempty"`
+	// Max caps Foreach's iteration count (default 100 when unset, hard
+	// limit 1000): a list longer than Max fails the block before iterating
+	// -- it never silently truncates. Unused for a Repeat block, which
+	// takes its own required Repeat.Max instead.
+	Max int `yaml:"max,omitempty" json:"max,omitempty"`
+	// BreakWhen is a CEL boolean evaluated after each iteration (with
+	// access to that iteration's nested steps and iter.item/iter.index);
+	// true ends the loop after that iteration, same as running out of
+	// list/reaching Repeat's own stop condition.
+	BreakWhen string `yaml:"break_when,omitempty" json:"break_when,omitempty"`
+	// OnError is "stop" (default) or "continue": whether a failed nested
+	// step ends the whole block (and the run, as today) or lets the loop
+	// keep iterating, with the block's own final status still failed if any
+	// iteration failed.
+	OnError string `yaml:"on_error,omitempty" json:"on_error,omitempty"`
+	// Steps is a block's nested step list; a non-block step must leave it
+	// nil (BLOCK_SHAPE).
+	Steps []Step `yaml:"steps,omitempty" json:"steps,omitempty"`
+
+	Line int `yaml:"-" json:"line,omitempty"`
 }
+
+// Repeat configures a repeat block (PLAN §34f.8): re-run Steps until Until
+// is true (checked after each iteration), or while While stays true
+// (checked before each iteration), up to Max iterations, waiting Interval
+// between them. At least one of Until/While is required, and Max is always
+// required (1..1000) -- unlike Foreach's Max, a repeat has no natural
+// default.
+type Repeat struct {
+	Until    string `yaml:"until,omitempty" json:"until,omitempty"`
+	While    string `yaml:"while,omitempty" json:"while,omitempty"`
+	Max      int    `yaml:"max" json:"max"`
+	Interval string `yaml:"interval,omitempty" json:"interval,omitempty"` // duration, e.g. "1s"; default: no wait
+}
+
+// IsBlock reports whether s is a loop block (Steps set) rather than a call
+// step. A well-formed flow (BLOCK_SHAPE checked) never sets both Steps and
+// Call/Example on the same step.
+func (s Step) IsBlock() bool { return len(s.Steps) > 0 }
 
 // ExplicitParams is the disambiguated form of Step.Input.
 type ExplicitParams struct {

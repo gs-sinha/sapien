@@ -8,11 +8,14 @@ import "github.com/gs-sinha/sapien/internal/domain"
 // keeps the summary about the main steps (setup counts too, since a failed
 // setup step blocks the main steps the same way a failed main step does),
 // so a failed cleanup step never muddies whether the run's own work
-// passed.
+// passed. A loop block's own aggregated StepResult (Kind != "", PLAN
+// §34f.8) is also excluded: it is not itself a step for steps_total (or any
+// of the other per-status counts) -- each of its nested executions already
+// counts individually, as a leaf.
 func Summarize(steps []domain.StepResult) domain.RunSummary {
 	var s domain.RunSummary
 	for _, step := range steps {
-		if step.Phase == "teardown" {
+		if step.Phase == "teardown" || step.Kind != "" {
 			continue
 		}
 		s.StepsTotal++

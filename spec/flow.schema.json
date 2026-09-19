@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$comment": "*.flow.yaml -- see PLAN.md section 8 and internal/domain/flow.go. Reserved future keys (when, parallel, foreach, retry, use, needs, datasets) are rejected today via additionalProperties: false.",
+  "$comment": "*.flow.yaml -- see PLAN.md section 8, section 34f, and internal/domain/flow.go. Reserved future keys (parallel, retry, use, needs, datasets) are rejected today via additionalProperties: false. A step is either a call step or a loop block (has `steps:`); see $defs/step's if/then/else.",
   "title": "Flow file",
   "type": "object",
   "additionalProperties": false,
@@ -83,6 +83,21 @@
       }
     },
     "step": {
+      "description": "A step is a call step (an operation call) or a loop block (PLAN §34f.8): whichever it is decided purely by whether `steps:` is present.",
+      "if": {
+        "type": "object",
+        "required": [
+          "steps"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/blockStep"
+      },
+      "else": {
+        "$ref": "#/$defs/callStep"
+      }
+    },
+    "callStep": {
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -112,6 +127,11 @@
         "example": {
           "type": "string",
           "pattern": "^[a-z0-9._-]+$"
+        },
+        "when": {
+          "type": "string",
+          "minLength": 1,
+          "description": "CEL boolean (inputs/env/steps only, plus loop.*/sibling access when nested in a block); false skips this step without sending a request."
         },
         "input": {
           "type": "object"
@@ -148,6 +168,112 @@
         "timeout": {
           "type": "string",
           "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$"
+        }
+      }
+    },
+    "blockStep": {
+      "description": "A loop block (PLAN §34f.8): runs its nested `steps:` once per element of `foreach`, or per `repeat`'s rules. Exactly one of foreach/repeat is required. Loop blocks cannot nest and are not allowed inside setup:/teardown: (checked by the Go validator, NESTED_LOOP/LOOP_IN_PHASE -- not structurally expressible here since this schema has no notion of a step's ancestry).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "steps"
+      ],
+      "oneOf": [
+        {
+          "required": [
+            "foreach"
+          ]
+        },
+        {
+          "required": [
+            "repeat"
+          ]
+        }
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-zA-Z_][a-zA-Z0-9_-]*$"
+        },
+        "when": {
+          "type": "string",
+          "minLength": 1,
+          "description": "CEL boolean (inputs/env/steps only); false skips the whole block (no iterations) without sending any request."
+        },
+        "foreach": {
+          "type": "string",
+          "minLength": 1,
+          "description": "CEL expression over inputs/env/steps evaluating to a list; loop.item is each element inside the block."
+        },
+        "repeat": {
+          "$ref": "#/$defs/repeat"
+        },
+        "max": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000,
+          "description": "Caps foreach's iteration count (default 100); a list longer than max fails the block before iterating. Not used with repeat, which takes its own required repeat.max."
+        },
+        "break_when": {
+          "type": "string",
+          "minLength": 1,
+          "description": "CEL boolean, evaluated after each iteration (sees loop.* and this iteration's nested steps); true ends the loop."
+        },
+        "on_error": {
+          "enum": [
+            "stop",
+            "continue"
+          ],
+          "description": "Default stop: a failed nested step ends the block (and the run). continue: the loop keeps iterating; the block's own final status is still failed if any iteration failed."
+        },
+        "steps": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/step"
+          }
+        }
+      }
+    },
+    "repeat": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max"
+      ],
+      "anyOf": [
+        {
+          "required": [
+            "until"
+          ]
+        },
+        {
+          "required": [
+            "while"
+          ]
+        }
+      ],
+      "properties": {
+        "until": {
+          "type": "string",
+          "minLength": 1,
+          "description": "CEL boolean, checked after each iteration; true stops the loop."
+        },
+        "while": {
+          "type": "string",
+          "minLength": 1,
+          "description": "CEL boolean, checked before each iteration; false stops the loop without running it."
+        },
+        "max": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "interval": {
+          "type": "string",
+          "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$",
+          "description": "Wait between iterations; default no wait."
         }
       }
     },

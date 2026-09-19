@@ -649,10 +649,15 @@ func parsePackageDocs(name string, pkg *Package, matcher *docs.RefMatcher) ([]do
 // *.flow.yaml files: only the fields FlowSummary needs. Every other key
 // (inputs, description, a step's body/extract/assert/... in any shape) is
 // silently ignored by yaml.v3, so odd or evolving flow shapes never break
-// discovery.
+// discovery. Steps is a loop block's own nested steps (PLAN §34f.8): a
+// block has no Call of its own, but its children's calls still count
+// toward the flow's Operations, matching flow.Uses(); StepCount stays
+// top-level-only (a block counts as one, like flow.Summary()'s own
+// len(f.Steps)), so this recursion is for Operations alone.
 type rawFlowStep struct {
-	ID   string `yaml:"id"`
-	Call string `yaml:"call"`
+	ID    string        `yaml:"id"`
+	Call  string        `yaml:"call"`
+	Steps []rawFlowStep `yaml:"steps"`
 }
 
 type rawFlow struct {
@@ -660,6 +665,23 @@ type rawFlow struct {
 	Name  string        `yaml:"name"`
 	Tags  []string      `yaml:"tags"`
 	Steps []rawFlowStep `yaml:"steps"`
+}
+
+// collectRawOps appends each distinct, non-empty Call in steps to ops (in
+// first-appearance order, deduplicated via seen), recursing into a loop
+// block's own nested Steps (PLAN §34f.8) -- mirroring flow.Uses's walk of
+// the fully-parsed domain.Flow, so a service's declared Operations agree
+// between the lightweight scanner here and the real one.
+func collectRawOps(steps []rawFlowStep, seen map[string]bool, ops *[]string) {
+	for _, s := range steps {
+		if s.Call != "" && !seen[s.Call] {
+			seen[s.Call] = true
+			*ops = append(*ops, s.Call)
+		}
+		if len(s.Steps) > 0 {
+			collectRawOps(s.Steps, seen, ops)
+		}
+	}
 }
 
 // scanFlows discovers pkg's service-owned flows (flows/**/*.flow.yaml, at
@@ -695,13 +717,7 @@ func scanFlows(ownerID string, pkg *Package) ([]domain.FlowSummary, error) {
 
 		var ops []string
 		seenOp := map[string]bool{}
-		for _, s := range raw.Steps {
-			if s.Call == "" || seenOp[s.Call] {
-				continue
-			}
-			seenOp[s.Call] = true
-			ops = append(ops, s.Call)
-		}
+		collectRawOps(raw.Steps, seenOp, &ops)
 
 		info, statErr := os.Stat(f)
 		var updated time.Time

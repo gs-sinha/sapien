@@ -44,14 +44,23 @@ type Op struct {
 	Fields map[string]any `json:"fields,omitempty"`
 
 	// After/Before position add_step's new step relative to an existing
-	// step id in the same Phase list; at most one may be set. Neither set
-	// appends to the end of the list.
+	// step id, as a sibling within the same list -- the top-level Phase
+	// list, or, when Into is set, that block's own nested `steps:` list;
+	// at most one of After/Before may be set. Neither set appends to the
+	// end of the list.
 	After  string `json:"after,omitempty"`
 	Before string `json:"before,omitempty"`
 	// Phase selects add_step's target list: "" (default) for the main
 	// `steps:`, "setup", or "teardown". A phase list that doesn't exist yet
-	// is created.
+	// is created. Ignored when Into is set (a block's nested steps live
+	// wherever the block itself does, not in a phase list of their own).
 	Phase string `json:"phase,omitempty"`
+	// Into is a loop block's step id (PLAN §34f.8): when set, the new step
+	// is added inside that block's own `steps:` list (After/Before then
+	// name siblings inside that block) instead of a top-level phase list.
+	// Mutually exclusive with Phase in effect, though not in validation --
+	// Phase is simply ignored when Into is set.
+	Into string `json:"into,omitempty"`
 
 	// Inputs is set_inputs' replacement for the flow's `inputs:` mapping.
 	Inputs map[string]any `json:"inputs,omitempty"`
@@ -72,7 +81,9 @@ type Meta struct {
 // allowedMergeFields is merge_step's whitelist of step keys (mirrors
 // internal/domain.Step, minus `id`, which identifies the step rather than
 // describing it, and `params`, the explicit-params form set_step/add_step
-// can still express via Step).
+// can still express via Step). `steps` (a block's nested step list) is
+// deliberately NOT included (PLAN §34f.8): a block's nested steps are
+// edited individually by id, or the whole block is replaced with set_step.
 var allowedMergeFields = map[string]bool{
 	"input":   true,
 	"body":    true,
@@ -84,4 +95,11 @@ var allowedMergeFields = map[string]bool{
 	"timeout": true,
 	"call":    true,
 	"example": true,
+	"when":    true,
+	// Loop block fields (PLAN §34f.8).
+	"foreach":    true,
+	"repeat":     true,
+	"max":        true,
+	"break_when": true,
+	"on_error":   true,
 }

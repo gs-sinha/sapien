@@ -141,10 +141,6 @@ func applyAddStep(root *yaml.Node, op Op) error {
 	if op.After != "" && op.Before != "" {
 		return fmt.Errorf("add_step: set after or before, not both")
 	}
-	phaseKey, err := phaseKeyFor(op.Phase)
-	if err != nil {
-		return err
-	}
 	newNode, err := encodeStepNode("", op.Step)
 	if err != nil {
 		return err
@@ -158,9 +154,33 @@ func applyAddStep(root *yaml.Node, op Op) error {
 		return fmt.Errorf("add_step: step id %q already exists", newID)
 	}
 
-	seq, err := getOrCreateSeq(root, phaseKey)
-	if err != nil {
-		return err
+	var seq *yaml.Node
+	var listLabel string
+	if op.Into != "" {
+		// PLAN §34f.8: add inside a loop block's own nested `steps:`
+		// instead of a top-level phase list; After/Before then name
+		// siblings inside that block.
+		_, _, _, blockNode, ferr := findStep(root, op.Into)
+		if ferr != nil {
+			return fmt.Errorf("add_step: into block %q not found; ids present: %s", op.Into, strings.Join(allStepIDs(root), ", "))
+		}
+		s, err := getOrCreateNestedSeq(blockNode)
+		if err != nil {
+			return err
+		}
+		seq = s
+		listLabel = fmt.Sprintf("block %q", op.Into)
+	} else {
+		phaseKey, err := phaseKeyFor(op.Phase)
+		if err != nil {
+			return err
+		}
+		s, err := getOrCreateSeq(root, phaseKey)
+		if err != nil {
+			return err
+		}
+		seq = s
+		listLabel = fmt.Sprintf("phase %q", phaseLabel(op.Phase))
 	}
 
 	insertIdx := len(seq.Content)
@@ -168,15 +188,15 @@ func applyAddStep(root *yaml.Node, op Op) error {
 	case op.After != "":
 		i, ok := seqIndexOf(seq, op.After)
 		if !ok {
-			return fmt.Errorf("add_step: after step %q not found in phase %q; ids present: %s",
-				op.After, phaseLabel(op.Phase), strings.Join(allStepIDs(root), ", "))
+			return fmt.Errorf("add_step: after step %q not found in %s; ids present: %s",
+				op.After, listLabel, strings.Join(allStepIDs(root), ", "))
 		}
 		insertIdx = i + 1
 	case op.Before != "":
 		i, ok := seqIndexOf(seq, op.Before)
 		if !ok {
-			return fmt.Errorf("add_step: before step %q not found in phase %q; ids present: %s",
-				op.Before, phaseLabel(op.Phase), strings.Join(allStepIDs(root), ", "))
+			return fmt.Errorf("add_step: before step %q not found in %s; ids present: %s",
+				op.Before, listLabel, strings.Join(allStepIDs(root), ", "))
 		}
 		insertIdx = i
 	}
@@ -350,25 +370,58 @@ func encodeStepNode(defaultID string, stepVal any) (*yaml.Node, error) {
 }
 
 // findStep locates the step named id across setup, steps, and teardown (in
-// that order), returning the phase key it was found under, the sequence
-// node holding it, its index within that sequence, and the step's own
-// mapping node. If no step has that id anywhere, the error names every id
-// actually present.
+// that order), recursing one level into any loop block's own nested
+// `steps:` along the way (PLAN §34f.8; blocks cannot nest, so one level is
+// enough) -- so set_step, merge_step, remove_step, and add_step's
+// already-exists/into checks all address a nested step exactly like a
+// top-level one. Returns the phase key the step's list lives under (the
+// block's own phase, for a nested step -- there is no separate notion of
+// "inside a block" in this return value, and no caller currently uses it
+// for more than logging/labels), the sequence node actually holding the
+// step, its index within that sequence, and the step's own mapping node.
+// If no step has that id anywhere, the error names every id actually
+// present (including nested ones).
 func findStep(root *yaml.Node, id string) (phaseKey string, seq *yaml.Node, idx int, node *yaml.Node, err error) {
 	for _, pk := range phaseKeys {
 		_, s := mappingGet(root, pk)
 		if s == nil || s.Kind != yaml.SequenceNode {
 			continue
 		}
-		if i, ok := seqIndexOf(s, id); ok {
-			return pk, s, i, s.Content[i], nil
+		if holder, i, n, ok := findStepInSeq(s, id); ok {
+			return pk, holder, i, n, nil
 		}
 	}
 	return "", nil, -1, nil, fmt.Errorf("unknown step id %q; ids present: %s", id, strings.Join(allStepIDs(root), ", "))
 }
 
-// seqIndexOf returns the index within seq (a step-list SequenceNode) of the
-// step mapping whose `id` equals id.
+// findStepInSeq searches seq (a step-list SequenceNode) for the step named
+// id, recursing one level into any item's own nested `steps:` (a loop
+// block). Returns the SequenceNode actually holding the match -- seq
+// itself, or a block's nested steps node -- and its index within that
+// sequence.
+func findStepInSeq(seq *yaml.Node, id string) (holder *yaml.Node, idx int, node *yaml.Node, ok bool) {
+	for i, item := range seq.Content {
+		if item.Kind != yaml.MappingNode {
+			continue
+		}
+		if _, idNode := mappingGet(item, "id"); idNode != nil && idNode.Value == id {
+			return seq, i, item, true
+		}
+		if _, nested := mappingGet(item, "steps"); nested != nil && nested.Kind == yaml.SequenceNode {
+			if h, ni, n, ok := findStepInSeq(nested, id); ok {
+				return h, ni, n, true
+			}
+		}
+	}
+	return nil, -1, nil, false
+}
+
+// seqIndexOf returns the index within seq (a step-list SequenceNode,
+// searched at this one level only -- not recursively) of the step mapping
+// whose `id` equals id. Used for add_step's After/Before, which name a
+// sibling within the specific list being inserted into (a phase list, or a
+// block's nested steps when Into is set), never a step nested somewhere
+// else entirely.
 func seqIndexOf(seq *yaml.Node, id string) (int, bool) {
 	for i, item := range seq.Content {
 		if item.Kind != yaml.MappingNode {
@@ -381,8 +434,9 @@ func seqIndexOf(seq *yaml.Node, id string) (int, bool) {
 	return -1, false
 }
 
-// allStepIDs lists every step id across setup, steps, and teardown, in that
-// order, for error messages.
+// allStepIDs lists every step id across setup, steps, and teardown, in
+// that order, recursing into each loop block's own nested steps right
+// after the block itself, for error messages.
 func allStepIDs(root *yaml.Node) []string {
 	var out []string
 	for _, pk := range phaseKeys {
@@ -390,13 +444,24 @@ func allStepIDs(root *yaml.Node) []string {
 		if s == nil || s.Kind != yaml.SequenceNode {
 			continue
 		}
-		for _, item := range s.Content {
-			if item.Kind != yaml.MappingNode {
-				continue
-			}
-			if _, idNode := mappingGet(item, "id"); idNode != nil {
-				out = append(out, idNode.Value)
-			}
+		out = append(out, seqStepIDs(s)...)
+	}
+	return out
+}
+
+// seqStepIDs lists every step id in seq, recursing one level into any
+// item's own nested `steps:`.
+func seqStepIDs(seq *yaml.Node) []string {
+	var out []string
+	for _, item := range seq.Content {
+		if item.Kind != yaml.MappingNode {
+			continue
+		}
+		if _, idNode := mappingGet(item, "id"); idNode != nil {
+			out = append(out, idNode.Value)
+		}
+		if _, nested := mappingGet(item, "steps"); nested != nil && nested.Kind == yaml.SequenceNode {
+			out = append(out, seqStepIDs(nested)...)
 		}
 	}
 	return out
@@ -428,5 +493,23 @@ func getOrCreateSeq(root *yaml.Node, phaseKey string) (*yaml.Node, error) {
 	}
 	newSeq := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
 	mappingSetOrdered(root, phaseKey, newSeq)
+	return newSeq, nil
+}
+
+// getOrCreateNestedSeq returns blockNode's own `steps:` SequenceNode,
+// creating an empty one if absent (PLAN §34f.8: a well-formed block always
+// has at least one nested step already, since `steps: []` fails the
+// schema's minItems: 1, but add_step's `into` is defensive about a
+// malformed document anyway).
+func getOrCreateNestedSeq(blockNode *yaml.Node) (*yaml.Node, error) {
+	_, s := mappingGet(blockNode, "steps")
+	if s != nil {
+		if s.Kind != yaml.SequenceNode {
+			return nil, fmt.Errorf("block's steps is not a list")
+		}
+		return s, nil
+	}
+	newSeq := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
+	blockNode.Content = append(blockNode.Content, keyNode("steps"), newSeq)
 	return newSeq, nil
 }

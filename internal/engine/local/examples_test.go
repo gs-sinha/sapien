@@ -537,6 +537,39 @@ func TestExamples_FromRun_DefaultsToFirstStepWithRequest(t *testing.T) {
 	assert.Equal(t, "create", created.Verified.StepID)
 }
 
+// TestExamples_FromRun_LoopBlockDefaultsToLatestIteration confirms StepID
+// naming a loop block's nested step (PLAN §34f.8), which ran more than
+// once, defaults to its LATEST execution when Iteration is nil, matching
+// steps.<id>'s own "latest execution" rule.
+func TestExamples_FromRun_LoopBlockDefaultsToLatestIteration(t *testing.T) {
+	l := openExamplesEngine(t)
+	iter := func(n int) *int { return &n }
+
+	run := seedRun(t, l, "stage",
+		domain.StepResult{
+			StepID: "fetch", Iteration: iter(0), Parent: "each", Operation: "rider-service.getRider", Status: domain.StepPassed,
+			Request: &domain.RequestRecord{Method: "GET", URL: "http://localhost:8083/v1/riders/R1"},
+			Response: &domain.ResponseRecord{Status: 200, Body: map[string]any{"riderId": "R1"}},
+		},
+		domain.StepResult{
+			StepID: "fetch", Iteration: iter(1), Parent: "each", Operation: "rider-service.getRider", Status: domain.StepPassed,
+			Request: &domain.RequestRecord{Method: "GET", URL: "http://localhost:8083/v1/riders/R2"},
+			Response: &domain.ResponseRecord{Status: 200, Body: map[string]any{"riderId": "R2"}},
+		},
+	)
+
+	req := engineExampleFromRun(run.ID, "fetch", "latest-rider")
+	created, err := l.Examples().FromRun(context.Background(), req)
+	require.NoError(t, err)
+	assert.Equal(t, "R2", created.Input["riderId"], "should default to the latest (iteration 1) execution")
+
+	req2 := engineExampleFromRun(run.ID, "fetch", "first-rider")
+	req2.Iteration = iter(0)
+	created2, err := l.Examples().FromRun(context.Background(), req2)
+	require.NoError(t, err)
+	assert.Equal(t, "R1", created2.Input["riderId"], "an explicit iteration must select that execution, not the latest")
+}
+
 func TestExamples_FromRun_ErrorsWhenStepNotFound(t *testing.T) {
 	l := openExamplesEngine(t)
 

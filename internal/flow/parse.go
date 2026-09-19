@@ -36,6 +36,7 @@ type stepDoc struct {
 	ID      string                 `yaml:"id"`
 	Call    string                 `yaml:"call"`
 	Example string                 `yaml:"example,omitempty"`
+	When    string                 `yaml:"when,omitempty"`
 	Input   map[string]any         `yaml:"input,omitempty"`
 	Params  *domain.ExplicitParams `yaml:"params,omitempty"`
 	Body    any                    `yaml:"body,omitempty"`
@@ -45,7 +46,16 @@ type stepDoc struct {
 	Until   string                 `yaml:"until,omitempty"`
 	Poll    *domain.Poll           `yaml:"poll,omitempty"`
 	Timeout string                 `yaml:"timeout,omitempty"`
-	Line    int                    `yaml:"-"`
+
+	// Block fields (PLAN §34f.8); see domain.Step.
+	Foreach   string         `yaml:"foreach,omitempty"`
+	Repeat    *domain.Repeat `yaml:"repeat,omitempty"`
+	Max       int            `yaml:"max,omitempty"`
+	BreakWhen string         `yaml:"break_when,omitempty"`
+	OnError   string         `yaml:"on_error,omitempty"`
+	Steps     []stepDoc      `yaml:"steps,omitempty"`
+
+	Line int `yaml:"-"`
 }
 
 // UnmarshalYAML decodes a step mapping node and records its starting line.
@@ -114,18 +124,25 @@ func stepsToDomain(docs []stepDoc) []domain.Step {
 	out := make([]domain.Step, len(docs))
 	for i, sd := range docs {
 		st := domain.Step{
-			ID:      sd.ID,
-			Call:    sd.Call,
-			Example: sd.Example,
-			Input:   sd.Input,
-			Params:  sd.Params,
-			Body:    sd.Body,
-			Headers: sd.Headers,
-			Extract: sd.Extract,
-			Until:   sd.Until,
-			Poll:    sd.Poll,
-			Timeout: sd.Timeout,
-			Line:    sd.Line,
+			ID:        sd.ID,
+			Call:      sd.Call,
+			Example:   sd.Example,
+			When:      sd.When,
+			Input:     sd.Input,
+			Params:    sd.Params,
+			Body:      sd.Body,
+			Headers:   sd.Headers,
+			Extract:   sd.Extract,
+			Until:     sd.Until,
+			Poll:      sd.Poll,
+			Timeout:   sd.Timeout,
+			Foreach:   sd.Foreach,
+			Repeat:    sd.Repeat,
+			Max:       sd.Max,
+			BreakWhen: sd.BreakWhen,
+			OnError:   sd.OnError,
+			Steps:     stepsToDomain(sd.Steps), // one level in practice (NESTED_LOOP forbids more); recursion here is defensive, not a limit
+			Line:      sd.Line,
 		}
 		if len(sd.Assert) > 0 {
 			st.Assert = make([]domain.Assertion, len(sd.Assert))
@@ -266,12 +283,13 @@ func Uses(f *domain.Flow) []string {
 	total := len(f.Setup) + len(f.Steps) + len(f.Teardown)
 	seen := make(map[string]bool, total)
 	out := make([]string, 0, total)
-	for _, st := range AllSteps(f) {
-		if st.Call == "" || seen[st.Call] {
+	for _, fs := range AllSteps(f) {
+		call := fs.Step.Call
+		if call == "" || seen[call] {
 			continue
 		}
-		seen[st.Call] = true
-		out = append(out, st.Call)
+		seen[call] = true
+		out = append(out, call)
 	}
 	return out
 }

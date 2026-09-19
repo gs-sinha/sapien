@@ -482,6 +482,30 @@ func TestRunStep_ReturnsOnlyTheNamedStep(t *testing.T) {
 	assert.Nil(t, RunStep(context.Background(), eng, run, "no-such-step"))
 }
 
+// TestRunStep_LoopBlockDefaultsToLatestIteration confirms a nested step id
+// that ran more than once inside a loop block (PLAN §34f.8) is diagnosed
+// from its LATEST execution, matching steps.<id>'s own "latest execution"
+// rule elsewhere: an earlier passed iteration must not shadow a later
+// failed one.
+func TestRunStep_LoopBlockDefaultsToLatestIteration(t *testing.T) {
+	op := allocateOp()
+	eng := &stubEngine{
+		getOperation: func(ctx context.Context, id string) (*domain.Operation, error) { return &op, nil },
+		searchDocs: func(ctx context.Context, query string, opts domain.SearchOptions) ([]domain.DocSearchResult, error) {
+			return []domain.DocSearchResult{noRiderDoc()}, nil
+		},
+	}
+	iter := func(n int) *int { return &n }
+	passedFirst := domain.StepResult{StepID: "allocate", Iteration: iter(0), Parent: "each", Status: domain.StepPassed, Response: &domain.ResponseRecord{Status: 201}}
+	failedLatest := noRiderStep()
+	failedLatest.Iteration = iter(1)
+	failedLatest.Parent = "each"
+	run := &domain.Run{Steps: []domain.StepResult{passedFirst, failedLatest}}
+
+	hints := RunStep(context.Background(), eng, run, "allocate")
+	require.NotEmpty(t, hints, "the latest (failed) iteration should be diagnosed, not the earlier passed one")
+}
+
 func TestRunStep_NilRunOrEngine(t *testing.T) {
 	assert.Nil(t, RunStep(context.Background(), &stubEngine{}, nil, "x"))
 	assert.Nil(t, RunStep(context.Background(), nil, &domain.Run{}, "x"))

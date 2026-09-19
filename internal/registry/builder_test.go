@@ -135,9 +135,16 @@ func TestBuilder_Build_SmokeFlow(t *testing.T) {
 	snap, err := b.Build(context.Background(), fixtureRef("allocation-service"))
 	require.NoError(t, err)
 
-	require.Len(t, snap.Flows, 1)
-	flow := snap.Flows[0]
-	assert.Equal(t, "smoke", flow.ID)
+	// allocation-service's flows/ has two fixtures: smoke.flow.yaml and
+	// bulk-allocate.flow.yaml (PLAN §34f.7-8's loop-block fixture).
+	require.Len(t, snap.Flows, 2)
+	byID := map[string]domain.FlowSummary{}
+	for _, f := range snap.Flows {
+		byID[f.ID] = f
+	}
+
+	flow, ok := byID["smoke"]
+	require.True(t, ok, "%+v", snap.Flows)
 	assert.Equal(t, "Allocation smoke test", flow.Name)
 	assert.Equal(t, "service", flow.OwnerKind)
 	assert.Equal(t, "allocation-service", flow.OwnerID)
@@ -146,6 +153,17 @@ func TestBuilder_Build_SmokeFlow(t *testing.T) {
 	assert.Equal(t, 2, flow.StepCount)
 	assert.NotEmpty(t, flow.Hash)
 	assert.False(t, flow.Updated.IsZero())
+
+	// bulk-allocate's operations come from a mix of a loop block's nested
+	// steps (allocate, check -> allocation-service.allocate/getAllocation)
+	// and a top-level step after the block (summary ->
+	// allocation-service.getAllocation, already seen): the lightweight
+	// scanFlows YAML decode must recurse into a block's own `steps:` to see
+	// them at all, the same way flow.Uses does for the fully-parsed flow.
+	bulk, ok := byID["bulk-allocate"]
+	require.True(t, ok, "%+v", snap.Flows)
+	assert.Equal(t, []string{"allocation-service.allocate", "allocation-service.getAllocation"}, bulk.Operations)
+	assert.Equal(t, 2, bulk.StepCount, "StepCount is top-level only: the block counts as one step")
 }
 
 func TestBuilder_Build_GitSourceNotImplemented(t *testing.T) {

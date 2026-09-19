@@ -117,7 +117,8 @@ func (s *server) getFlow(ctx context.Context, req *sdkmcp.CallToolRequest, in Ge
 }
 
 // renderFlowOutline is get_flow(detail=outline): the flow's shape without
-// its bodies or prose, one line per step.
+// its bodies or prose, one line per step, indenting a loop block's own
+// nested steps one level deeper (PLAN §34f.8).
 func renderFlowOutline(f *domain.Flow) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "flow %s: %d setup, %d steps, %d teardown\n", f.ID, len(f.Setup), len(f.Steps), len(f.Teardown))
@@ -127,32 +128,76 @@ func renderFlowOutline(f *domain.Flow) string {
 		}
 		fmt.Fprintf(&b, "%s:\n", name)
 		for _, st := range steps {
-			call := st.Call
-			if call == "" && st.Example != "" {
-				call = "example " + st.Example
-			}
-			extras := ""
-			if n := len(st.Assert); n > 0 {
-				extras += fmt.Sprintf(" [%d assert]", n)
-			}
-			if len(st.Extract) > 0 {
-				keys := make([]string, 0, len(st.Extract))
-				for k := range st.Extract {
-					keys = append(keys, k)
-				}
-				sort.Strings(keys)
-				extras += " extract:" + strings.Join(keys, ",")
-			}
-			if st.Until != "" {
-				extras += " until"
-			}
-			fmt.Fprintf(&b, "  - %s: %s%s\n", st.ID, call, extras)
+			renderOutlineStep(&b, st, "  ")
 		}
 	}
 	phase("setup", f.Setup)
 	phase("steps", f.Steps)
 	phase("teardown", f.Teardown)
 	return b.String()
+}
+
+// renderOutlineStep renders one line for st (a call step or a loop block,
+// PLAN §34f.8) at indent, recursing one level into a block's own nested
+// steps at one extra level of indent.
+func renderOutlineStep(b *strings.Builder, st domain.Step, indent string) {
+	if st.IsBlock() {
+		shape := ""
+		switch {
+		case st.Foreach != "":
+			shape = "foreach:" + st.Foreach
+			if st.Max > 0 {
+				shape += fmt.Sprintf(" max:%d", st.Max)
+			}
+		case st.Repeat != nil:
+			shape = "repeat:"
+			if st.Repeat.Until != "" {
+				shape += " until:" + st.Repeat.Until
+			}
+			if st.Repeat.While != "" {
+				shape += " while:" + st.Repeat.While
+			}
+			shape += fmt.Sprintf(" max:%d", st.Repeat.Max)
+		}
+		if st.When != "" {
+			shape += " when:" + st.When
+		}
+		if st.BreakWhen != "" {
+			shape += " break_when:" + st.BreakWhen
+		}
+		if st.OnError != "" {
+			shape += " on_error:" + st.OnError
+		}
+		fmt.Fprintf(b, "%s- %s: %s\n", indent, st.ID, shape)
+		for _, nested := range st.Steps {
+			renderOutlineStep(b, nested, indent+"  ")
+		}
+		return
+	}
+
+	call := st.Call
+	if call == "" && st.Example != "" {
+		call = "example " + st.Example
+	}
+	extras := ""
+	if st.When != "" {
+		extras += " when:" + st.When
+	}
+	if n := len(st.Assert); n > 0 {
+		extras += fmt.Sprintf(" [%d assert]", n)
+	}
+	if len(st.Extract) > 0 {
+		keys := make([]string, 0, len(st.Extract))
+		for k := range st.Extract {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		extras += " extract:" + strings.Join(keys, ",")
+	}
+	if st.Until != "" {
+		extras += " until"
+	}
+	fmt.Fprintf(b, "%s- %s: %s%s\n", indent, st.ID, call, extras)
 }
 
 // --- validate_flow -----------------------------------------------------
@@ -745,7 +790,7 @@ func resolveUpdateSource(wsDir string, in UpdateFlowInput) (string, error) {
 // update_flow... Accept a file path, or a step-level patch").
 type PatchFlowInput struct {
 	ID  string         `json:"id" jsonschema:"flow id"`
-	Ops []flowpatch.Op `json:"ops" jsonschema:"operations to apply in order: set_step{id,step}, merge_step{id,fields}, add_step{step,phase?,after?,before?}, remove_step{id}, set_inputs{inputs}, set_meta{meta:{name?,description?,tags?}}"`
+	Ops []flowpatch.Op `json:"ops" jsonschema:"operations to apply in order: set_step{id,step} (a step or a loop block, by id, nested or not), merge_step{id,fields} (fields include when and, on a loop block, foreach/repeat/max/break_when/on_error -- not steps: edit nested steps individually or set_step the whole block), add_step{step,phase?,after?,before?} for a top-level step, or add_step{step,into,after?,before?} to add inside a loop block's own nested steps (after/before then name a sibling inside that block), remove_step{id} (removing a block's id removes its nested steps too), set_inputs{inputs}, set_meta{meta:{name?,description?,tags?}}"`
 }
 
 func (s *server) patchFlow(ctx context.Context, req *sdkmcp.CallToolRequest, in PatchFlowInput) (*sdkmcp.CallToolResult, any, error) {
@@ -854,6 +899,10 @@ func runViewForDetail(run *domain.Run, detail string) RunView {
 	if mode == "full" {
 		return rv
 	}
+	// PLAN §34f.8: summary/failed collapse a loop block's nested step ids
+	// to one line each -- "x12 passed" -- keeping full detail (below) only
+	// for an iteration that failed.
+	rv = collapseIterations(rv)
 	for i := range rv.Steps {
 		st := &rv.Steps[i]
 		failed := st.Status == string(domain.StepFailed) || st.Status == string(domain.StepErrored)

@@ -75,11 +75,16 @@ type ErrorInfo struct {
 
 // StepResult is the persisted outcome of one step.
 type StepResult struct {
-	StepID     string            `json:"step_id"`
-	Index      int               `json:"index"`
-	Operation  string            `json:"operation,omitempty"`
-	Status     StepStatus        `json:"status"`
-	Attempts   int               `json:"attempts,omitempty"` // >1 when polled
+	StepID    string     `json:"step_id"`
+	Index     int        `json:"index"`
+	Operation string     `json:"operation,omitempty"`
+	Status    StepStatus `json:"status"`
+	Attempts  int        `json:"attempts,omitempty"` // >1 when polled
+	// SkipReason names why Status is skipped: "when" (this step's `when`
+	// evaluated false) is the only reason set today; a step skipped because
+	// an earlier step failed/errored, or because it fell outside a resumed
+	// run's window, leaves this empty.
+	SkipReason string            `json:"skip_reason,omitempty"`
 	Request    *RequestRecord    `json:"request,omitempty"`
 	Response   *ResponseRecord   `json:"response,omitempty"`
 	Timings    *Timings          `json:"timings,omitempty"`
@@ -97,6 +102,24 @@ type StepResult struct {
 	// Warnings carries non-fatal notes such as "step definition changed since
 	// the run it was reused from".
 	Warnings []string `json:"warnings,omitempty"`
+
+	// -- loop blocks (PLAN §34f.8) --
+
+	// Iteration is set on a nested execution inside a loop block: its
+	// 0-based iteration number. A pointer so iteration 0 serialises rather
+	// than being omitted; nil for a top-level/setup/teardown step and for a
+	// block's own StepResult.
+	Iteration *int `json:"iteration,omitempty"`
+	// Parent is the enclosing block's step id, for a nested execution;
+	// empty otherwise.
+	Parent string `json:"parent,omitempty"`
+	// Kind is "foreach" or "repeat" on a loop block's own StepResult;
+	// empty for a call step and for a nested execution.
+	Kind string `json:"kind,omitempty"`
+	// Count is set on a loop block's own StepResult: the number of
+	// iterations actually run (0 for an empty foreach list, or a repeat
+	// whose `while` was already false before the first iteration).
+	Count int `json:"count,omitempty"`
 }
 
 // RequestRecord is the (redacted) request as sent.

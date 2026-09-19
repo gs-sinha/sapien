@@ -235,6 +235,32 @@ func TestEval_NoSuchKey(t *testing.T) {
 	assert.Contains(t, ee.Message, "in body")
 }
 
+// TestEval_SkippedStepReference confirms a reference to a step id that is
+// entirely absent from Steps (the shape a `when: false` skip leaves behind,
+// PLAN §34f.7) gets its own, more specific error than the generic "no such
+// key" one -- distinguishing "steps.create.body.missingField" (create ran;
+// one of its fields is missing) from "steps.release" (release never ran at
+// all).
+func TestEval_SkippedStepReference(t *testing.T) {
+	e := New()
+	s := stepScope()
+
+	_, err := e.Eval("steps.release.status", s)
+	require.Error(t, err)
+	ee := errs.As(err)
+	assert.Equal(t, errs.Expr, ee.Code)
+	assert.Contains(t, ee.Message, "steps.release was skipped (when: false)")
+	assert.Contains(t, ee.Message, "guard with has(steps.release)")
+
+	// A reference two levels down from an existing step's own missing body
+	// field is unaffected: the message it gets is the generic "no such key"
+	// one, since it's the step that's missing, not one of its fields.
+	_, err = e.Eval("steps.create.body.missingField", s)
+	require.Error(t, err)
+	ee = errs.As(err)
+	assert.NotContains(t, ee.Message, "was skipped")
+}
+
 func TestEvalBool_RequiresBool(t *testing.T) {
 	e := New()
 	s := stepScope()

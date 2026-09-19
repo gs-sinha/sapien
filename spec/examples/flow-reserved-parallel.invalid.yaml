@@ -1,9 +1,9 @@
-# invalid: "when" is a reserved future key (conditional steps) and is rejected today
+# invalid: "parallel" is a reserved future key (parallel step groups) and is rejected today
 version: 1
 id: order-allocation
 steps:
   - id: create
     call: order-service.createOrder
-    when: "${inputs.city == 'NYC'}"
+    parallel: true
     assert:
       - status == 201

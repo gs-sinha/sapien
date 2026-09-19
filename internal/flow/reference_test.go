@@ -37,11 +37,13 @@ func fencedYAMLBlocks(md string) []string {
 }
 
 func TestReference_UnderLineLimit(t *testing.T) {
-	// Raised from 210 for "Setup and teardown" (PLAN §8/§9) and again for
-	// "Soft assertions": still a budget, just one that fits the DSL's
-	// current size rather than the size it had before those features.
+	// Raised from 210 for "Setup and teardown" (PLAN §8/§9), again for
+	// "Soft assertions", and again for "Control flow" (`when`, PLAN §34f.7,
+	// then loop blocks, PLAN §34f.8): still a budget, just one that fits
+	// the DSL's current size rather than the size it had before those
+	// features.
 	n := strings.Count(Reference(), "\n")
-	assert.LessOrEqual(t, n, 280, "Reference() should stay a concise, agent-sized reference")
+	assert.LessOrEqual(t, n, 420, "Reference() should stay a concise, agent-sized reference")
 }
 
 // TestReference_DocumentsEveryDSLKey pins the reference to the DSL's actual
@@ -58,6 +60,7 @@ func TestReference_DocumentsEveryDSLKey(t *testing.T) {
 		reflect.TypeOf(domain.Step{}),
 		reflect.TypeOf(domain.ExplicitParams{}),
 		reflect.TypeOf(domain.Poll{}),
+		reflect.TypeOf(domain.Repeat{}), // PLAN §34f.8: until/while/max/interval, nested under a block's own `repeat:`
 		reflect.TypeOf(domain.Assertion{}),
 		reflect.TypeOf(domain.Range{}),
 	} {

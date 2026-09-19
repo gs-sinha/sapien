@@ -417,7 +417,7 @@ func (e *exampleAPI) FromRun(ctx context.Context, req engine.ExampleFromRun) (*d
 	if err != nil {
 		return nil, err
 	}
-	step, err := pickRunStep(run, req.StepID)
+	step, err := pickRunStep(run, req.StepID, req.Iteration)
 	if err != nil {
 		return nil, err
 	}
@@ -468,13 +468,32 @@ func (e *exampleAPI) FromRun(ctx context.Context, req engine.ExampleFromRun) (*d
 
 // pickRunStep selects the step FromRun should save: the step named stepID,
 // or -- when stepID is empty -- the run's only step, or (a multi-step run)
-// its first step that has a recorded request.
-func pickRunStep(run *domain.Run, stepID string) (*domain.StepResult, error) {
+// its first step that has a recorded request. When stepID names a loop
+// block's nested step (PLAN §34f.8) that ran more than once, iteration
+// selects which execution: nil defaults to its LATEST one, matching
+// steps.<id>'s own "latest execution" rule; a non-nil iteration with no
+// matching execution is an error rather than a silent fallback.
+func pickRunStep(run *domain.Run, stepID string, iteration *int) (*domain.StepResult, error) {
 	if stepID != "" {
+		found := -1
 		for i := range run.Steps {
-			if run.Steps[i].StepID == stepID {
+			if run.Steps[i].StepID != stepID {
+				continue
+			}
+			if iteration == nil {
+				found = i // keep scanning: last match wins
+				continue
+			}
+			if run.Steps[i].Iteration != nil && *run.Steps[i].Iteration == *iteration {
 				return &run.Steps[i], nil
 			}
+		}
+		if found >= 0 {
+			return &run.Steps[found], nil
+		}
+		if iteration != nil {
+			return nil, errs.New(errs.Invalid, "run %q has no step %q at iteration %d", run.ID, stepID, *iteration).
+				WithDetail("run_id", run.ID).WithDetail("step_id", stepID).WithDetail("iteration", *iteration)
 		}
 		return nil, errs.New(errs.Invalid, "run %q has no step %q", run.ID, stepID).
 			WithDetail("run_id", run.ID).WithDetail("step_id", stepID)

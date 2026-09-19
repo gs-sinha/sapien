@@ -57,6 +57,23 @@ func TestApply_MergeStep_ReplacesOneFieldLeavesOthers(t *testing.T) {
 	assert.Equal(t, []any{"status == 201"}, allocate["assert"], "the untouched `allocate` step's assert must survive")
 }
 
+// TestApply_MergeStep_When confirms `when` (PLAN §34f.7) is on the
+// merge_step whitelist, alongside the other bare-CEL step fields.
+func TestApply_MergeStep_When(t *testing.T) {
+	out, err := Apply(baseFlow, []Op{{
+		Kind:   KindMergeStep,
+		ID:     "allocate",
+		Fields: map[string]any{"when": "inputs.releaseNow"},
+	}})
+	require.NoError(t, err)
+
+	var doc map[string]any
+	require.NoError(t, yaml.Unmarshal([]byte(out), &doc))
+	steps := doc["steps"].([]any)
+	allocate := steps[1].(map[string]any)
+	assert.Equal(t, "inputs.releaseNow", allocate["when"])
+}
+
 func TestApply_MergeStep_UnknownField(t *testing.T) {
 	_, err := Apply(baseFlow, []Op{{
 		Kind:   KindMergeStep,
@@ -441,4 +458,184 @@ func indexOfSubstring(s, substr string) int {
 		}
 	}
 	return -1
+}
+
+// ---- loop blocks (PLAN §34f.8) --------------------------------------------
+
+const blockFlow = `version: 1
+id: bulk-allocate
+steps:
+  - id: create
+    call: order-service.createOrder
+    body: { customerId: cust_123 }
+    extract:
+      orderId: body.orderId
+
+  - id: each
+    foreach: "['a', 'b']"
+    max: 10
+    steps:
+      - id: allocate
+        call: allocation-service.allocate
+        body: { orderId: "${iter.item}" }
+        assert:
+          - status == 201
+
+  - id: verify
+    call: allocation-service.getAllocation
+    input: { allocationId: x1 }
+`
+
+func TestApply_SetStep_NestedStepByID(t *testing.T) {
+	out, err := Apply(blockFlow, []Op{{
+		Kind: KindSetStep,
+		ID:   "allocate",
+		Step: map[string]any{
+			"id":   "allocate",
+			"call": "allocation-service.allocate",
+			"body": map[string]any{"orderId": "${iter.item}", "priority": "high"},
+		},
+	}})
+	require.NoError(t, err)
+
+	var doc map[string]any
+	require.NoError(t, yaml.Unmarshal([]byte(out), &doc))
+	steps := doc["steps"].([]any)
+	block := steps[1].(map[string]any)
+	nested := block["steps"].([]any)
+	allocate := nested[0].(map[string]any)
+	body := allocate["body"].(map[string]any)
+	assert.Equal(t, "high", body["priority"], "set_step must find and replace the nested step in place")
+}
+
+func TestApply_MergeStep_NestedStepByID(t *testing.T) {
+	out, err := Apply(blockFlow, []Op{{
+		Kind:   KindMergeStep,
+		ID:     "allocate",
+		Fields: map[string]any{"when": "iter.index == 0"},
+	}})
+	require.NoError(t, err)
+
+	var doc map[string]any
+	require.NoError(t, yaml.Unmarshal([]byte(out), &doc))
+	steps := doc["steps"].([]any)
+	block := steps[1].(map[string]any)
+	nested := block["steps"].([]any)
+	allocate := nested[0].(map[string]any)
+	assert.Equal(t, "iter.index == 0", allocate["when"])
+}
+
+func TestApply_RemoveStep_NestedStepByID(t *testing.T) {
+	out, err := Apply(blockFlow, []Op{{Kind: KindRemoveStep, ID: "allocate"}})
+	require.NoError(t, err)
+
+	var doc map[string]any
+	require.NoError(t, yaml.Unmarshal([]byte(out), &doc))
+	steps := doc["steps"].([]any)
+	block := steps[1].(map[string]any)
+	nested, _ := block["steps"].([]any)
+	assert.Empty(t, nested)
+}
+
+// TestApply_RemoveStep_BlockRemovesChildren confirms removing a loop
+// block's own id removes its nested steps too -- they are part of the same
+// YAML node, so no special-casing is needed beyond finding the block.
+func TestApply_RemoveStep_BlockRemovesChildren(t *testing.T) {
+	out, err := Apply(blockFlow, []Op{{Kind: KindRemoveStep, ID: "each"}})
+	require.NoError(t, err)
+	assert.NotContains(t, out, "id: allocate")
+	assert.NotContains(t, out, "foreach:")
+
+	var doc map[string]any
+	require.NoError(t, yaml.Unmarshal([]byte(out), &doc))
+	steps := doc["steps"].([]any)
+	require.Len(t, steps, 2, "create and verify remain; each and its nested allocate are gone")
+}
+
+func TestApply_AddStep_Into(t *testing.T) {
+	out, err := Apply(blockFlow, []Op{{
+		Kind: KindAddStep,
+		Into: "each",
+		Step: map[string]any{
+			"id":   "log",
+			"call": "allocation-service.getAllocation",
+			"input": map[string]any{
+				"allocationId": "${iter.item}",
+			},
+		},
+	}})
+	require.NoError(t, err)
+
+	var doc map[string]any
+	require.NoError(t, yaml.Unmarshal([]byte(out), &doc))
+	steps := doc["steps"].([]any)
+	block := steps[1].(map[string]any)
+	nested := block["steps"].([]any)
+	require.Len(t, nested, 2)
+	assert.Equal(t, "allocate", nested[0].(map[string]any)["id"])
+	assert.Equal(t, "log", nested[1].(map[string]any)["id"])
+}
+
+func TestApply_AddStep_IntoWithAfter(t *testing.T) {
+	// Add a second nested step first, then insert a third `after: allocate`
+	// (a sibling inside the block), confirming After is scoped to the
+	// block's own list, not the top-level `steps:`.
+	out, err := Apply(blockFlow, []Op{
+		{Kind: KindAddStep, Into: "each", Step: map[string]any{"id": "b", "call": "allocation-service.getAllocation", "input": map[string]any{"allocationId": "x"}}},
+		{Kind: KindAddStep, Into: "each", After: "allocate", Step: map[string]any{"id": "mid", "call": "allocation-service.getAllocation", "input": map[string]any{"allocationId": "y"}}},
+	})
+	require.NoError(t, err)
+
+	var doc map[string]any
+	require.NoError(t, yaml.Unmarshal([]byte(out), &doc))
+	steps := doc["steps"].([]any)
+	block := steps[1].(map[string]any)
+	nested := block["steps"].([]any)
+	require.Len(t, nested, 3)
+	ids := []string{
+		nested[0].(map[string]any)["id"].(string),
+		nested[1].(map[string]any)["id"].(string),
+		nested[2].(map[string]any)["id"].(string),
+	}
+	assert.Equal(t, []string{"allocate", "mid", "b"}, ids)
+}
+
+func TestApply_AddStep_IntoUnknownBlock(t *testing.T) {
+	_, err := Apply(blockFlow, []Op{{
+		Kind: KindAddStep,
+		Into: "nope",
+		Step: map[string]any{"id": "x", "call": "allocation-service.getAllocation", "input": map[string]any{"allocationId": "1"}},
+	}})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `into block "nope" not found`)
+}
+
+// TestApply_MergeStep_LoopFields confirms foreach/repeat/max/break_when/
+// on_error are all on the merge_step whitelist (PLAN §34f.8), and that
+// `steps` (a block's nested list) deliberately is not.
+func TestApply_MergeStep_LoopFields(t *testing.T) {
+	out, err := Apply(blockFlow, []Op{{
+		Kind:   KindMergeStep,
+		ID:     "each",
+		Fields: map[string]any{"max": float64(50), "break_when": "iter.index >= 1", "on_error": "continue"},
+	}})
+	require.NoError(t, err)
+
+	var doc map[string]any
+	require.NoError(t, yaml.Unmarshal([]byte(out), &doc))
+	steps := doc["steps"].([]any)
+	block := steps[1].(map[string]any)
+	assert.EqualValues(t, 50, block["max"])
+	assert.Equal(t, "iter.index >= 1", block["break_when"])
+	assert.Equal(t, "continue", block["on_error"])
+}
+
+func TestApply_MergeStep_StepsFieldRejected(t *testing.T) {
+	_, err := Apply(blockFlow, []Op{{
+		Kind:   KindMergeStep,
+		ID:     "each",
+		Fields: map[string]any{"steps": []any{}},
+	}})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `unknown field "steps"`)
 }

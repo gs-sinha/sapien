@@ -38,14 +38,34 @@ func (r *Runner) executeStep(ctx context.Context, ec *execCtx, step domain.Step,
 	var assertions []domain.AssertionResult
 	attempts := 0
 
-	r.emitStep(ec, step.ID, domain.StepResolving, 0)
-
 	fail := func(status domain.StepStatus, err error) (domain.StepResult, expr.StepValue) {
 		return assembleStep(ec, result, status, err, usedSecrets, req, haveReq, resp, assertions, outMap, attempts, started)
 	}
 
+	// `when` is checked before anything else: no resolving event, no
+	// request, no assertions, and (PLAN §34f.7) the step is left out of
+	// stepsSoFar entirely -- the caller (Run) skips its usual `stepsSoFar[id]
+	// = raw` assignment when it sees Status == StepSkipped coming back from
+	// here. An evaluation error fails the step exactly like a bad assert
+	// expression does. ec.iter is non-nil exactly when step is a loop
+	// block's nested step (PLAN §34f.8), giving `when` (and everything else
+	// below) access to iter.item/iter.index alongside this block iteration's
+	// siblings via stepsSoFar.
+	if step.When != "" {
+		ok, werr := ec.eval.EvalBool(step.When, expr.Scope{Inputs: ec.run.Inputs, Env: ec.envVars, Steps: stepsSoFar, Iter: ec.iter})
+		if werr != nil {
+			return fail(domain.StepErrored, werr)
+		}
+		if !ok {
+			result.SkipReason = "when"
+			return fail(domain.StepSkipped, nil)
+		}
+	}
+
+	r.emitStep(ec, step.ID, domain.StepResolving, 0)
+
 	plainScope := func() expr.Scope {
-		return expr.Scope{Inputs: ec.run.Inputs, Env: ec.envVars, Steps: stepsSoFar}
+		return expr.Scope{Inputs: ec.run.Inputs, Env: ec.envVars, Steps: stepsSoFar, Iter: ec.iter}
 	}
 	secretScope := func() expr.Scope {
 		s := plainScope()
@@ -237,7 +257,7 @@ func (r *Runner) executeStep(ctx context.Context, ec *execCtx, step domain.Step,
 
 		current := stepValueFromResponse(req, resp)
 		ok, evalErr := ec.eval.EvalBool(step.Until, expr.Scope{
-			Inputs: ec.run.Inputs, Env: ec.envVars, Steps: stepsSoFar, Current: &current,
+			Inputs: ec.run.Inputs, Env: ec.envVars, Steps: stepsSoFar, Current: &current, Iter: ec.iter,
 		})
 		if evalErr == nil && ok {
 			break
@@ -254,7 +274,7 @@ func (r *Runner) executeStep(ctx context.Context, ec *execCtx, step domain.Step,
 	// Asserting.
 	r.emitStep(ec, step.ID, domain.StepAsserting, attempts)
 	current := stepValueFromResponse(req, resp)
-	scope := expr.Scope{Inputs: ec.run.Inputs, Env: ec.envVars, Steps: stepsSoFar, Current: &current}
+	scope := expr.Scope{Inputs: ec.run.Inputs, Env: ec.envVars, Steps: stepsSoFar, Current: &current, Iter: ec.iter}
 
 	for _, a := range step.Assert {
 		ia, ierr := interpolateAssertion(ec.eval, a, scope)

@@ -218,7 +218,10 @@ type ResponseView struct {
 
 // StepView is the compact rendering of one run step.
 type StepView struct {
-	StepID     string                   `json:"step_id"`
+	StepID string `json:"step_id"`
+	// SkipReason is set when Status is "skipped" and the reason is known
+	// beyond "not reached": today only "when" (PLAN §34f.7).
+	SkipReason string                   `json:"skip_reason,omitempty"`
 	Operation  string                   `json:"operation,omitempty"`
 	Status     string                   `json:"status"`
 	Request    *RequestView             `json:"request,omitempty"`
@@ -234,6 +237,29 @@ type StepView struct {
 	// Warnings carries non-fatal notes such as "step definition changed
 	// since the reused run".
 	Warnings []string `json:"warnings,omitempty"`
+
+	// -- loop blocks (PLAN §34f.8) --
+
+	// Iteration is set on a nested execution inside a loop block (its
+	// 0-based iteration number); nil on a top-level step, a block's own
+	// StepView, or a Collapsed summary entry (below).
+	Iteration *int `json:"iteration,omitempty"`
+	// Parent is the enclosing block's step id, for a nested execution.
+	Parent string `json:"parent,omitempty"`
+	// Kind is "foreach" or "repeat" on a loop block's own StepView.
+	Kind string `json:"kind,omitempty"`
+	// Count is a loop block's own StepView: iterations actually run.
+	Count int `json:"count,omitempty"`
+	// Collapsed is set (summary/failed detail modes only, by
+	// collapseIterations) when this StepView stands in for every
+	// iteration of one nested step id that shared the same (passed)
+	// outcome, instead of listing each one individually: Collapsed names
+	// how many iterations collapsed into this one entry, Iteration is nil,
+	// and there is no request/response/assertions. An iteration that did
+	// NOT pass is never folded in here -- it keeps its own full StepView
+	// (Iteration set), so "include full detail only for failed iterations"
+	// holds even after collapsing.
+	Collapsed int `json:"collapsed,omitempty"`
 }
 
 // RunView is the compact rendering of a run, used by execute_api, run_flow,
@@ -272,6 +298,7 @@ func buildRunView(run *domain.Run, stepFilter string, includeBodies, capBodies b
 		}
 		sv := StepView{
 			StepID:     st.StepID,
+			SkipReason: st.SkipReason,
 			Operation:  st.Operation,
 			Status:     string(st.Status),
 			Assertions: st.Assertions,
@@ -280,6 +307,10 @@ func buildRunView(run *domain.Run, stepFilter string, includeBodies, capBodies b
 			Phase:      st.Phase,
 			Reused:     st.Reused,
 			Warnings:   st.Warnings,
+			Iteration:  st.Iteration,
+			Parent:     st.Parent,
+			Kind:       st.Kind,
+			Count:      st.Count,
 		}
 		if includeBodies {
 			if st.Request != nil {
@@ -305,13 +336,84 @@ func buildRunView(run *domain.Run, stepFilter string, includeBodies, capBodies b
 	return rv
 }
 
+// collapseIterations replaces, in rv.Steps, each loop block's nested step
+// id's run of per-iteration StepViews with a compact summary (PLAN §34f.8:
+// "collapse a block to one line per nested step id"): every iteration of
+// one nested step id that passed folds into one synthetic Collapsed entry
+// ("x12 passed"); an iteration that did not pass keeps its own full
+// StepView (so "iteration 7 failed" still shows full detail), positioned
+// where that nested step id first appeared. A block's own StepView (Kind
+// != "") and any non-nested step are left untouched. Used by run_flow's
+// summary/failed detail modes; full keeps every iteration as-is (the
+// caller skips this entirely).
+func collapseIterations(rv RunView) RunView {
+	type groupKey struct{ parent, stepID string }
+	groups := map[groupKey][]int{}
+	var order []groupKey
+	for i, sv := range rv.Steps {
+		if sv.Parent == "" {
+			continue
+		}
+		k := groupKey{sv.Parent, sv.StepID}
+		if _, ok := groups[k]; !ok {
+			order = append(order, k)
+		}
+		groups[k] = append(groups[k], i)
+	}
+	if len(groups) == 0 {
+		return rv
+	}
+
+	flushed := make(map[groupKey]bool, len(groups))
+	out := make([]StepView, 0, len(rv.Steps))
+	for _, sv := range rv.Steps {
+		if sv.Parent == "" {
+			out = append(out, sv)
+			continue
+		}
+		k := groupKey{sv.Parent, sv.StepID}
+		if flushed[k] {
+			continue // already emitted (as part of the group's first member)
+		}
+		flushed[k] = true
+
+		var passed int
+		for _, idx := range groups[k] {
+			member := rv.Steps[idx]
+			if member.Status == string(domain.StepPassed) {
+				passed++
+				continue
+			}
+			out = append(out, member)
+		}
+		if passed > 0 {
+			out = append(out, StepView{StepID: sv.StepID, Parent: sv.Parent, Status: string(domain.StepPassed), Collapsed: passed})
+		}
+	}
+	rv.Steps = out
+	return rv
+}
+
 // renderRunText is the compact Markdown-ish rendering of a RunView.
 func renderRunText(rv RunView) string {
 	s := fmt.Sprintf("run %s: %s (%d/%d steps passed)\n", rv.ID, rv.Status, rv.Summary.StepsPassed, rv.Summary.StepsTotal)
 	for _, st := range rv.Steps {
+		if st.Collapsed > 0 {
+			s += fmt.Sprintf("- %s (parent %s): x%d %s\n", st.StepID, st.Parent, st.Collapsed, st.Status)
+			continue
+		}
 		s += fmt.Sprintf("- %s (%s): %s", st.StepID, st.Operation, st.Status)
+		if st.Kind != "" {
+			s += fmt.Sprintf(" [%s x%d]", st.Kind, st.Count)
+		}
+		if st.Iteration != nil {
+			s += fmt.Sprintf(", iteration %d", *st.Iteration)
+		}
 		if st.Reused {
 			s += " (reused)"
+		}
+		if st.SkipReason != "" {
+			s += fmt.Sprintf(" (%s)", st.SkipReason)
 		}
 		if st.Response != nil {
 			s += fmt.Sprintf(" -> %d", st.Response.Status)

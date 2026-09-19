@@ -90,7 +90,9 @@ export default function RunDetailPage() {
         <div className="rounded border border-slate-200 dark:border-slate-800">
           {(run.steps || []).map((s, i) => (
             <RunStepCard
-              key={s.step_id}
+              // A loop block's nested step id (PLAN §34f.8) repeats once per
+              // iteration, so step_id alone is not a stable/unique React key.
+              key={s.iteration != null ? `${s.step_id}:${s.iteration}` : s.step_id}
               step={s}
               runId={run.id}
               env={run.environment}

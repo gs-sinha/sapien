@@ -20,20 +20,41 @@ type ExampleResolver interface {
 	SuggestExamples(ctx context.Context, ref string, n int) []string
 }
 
-// allSteps returns f's setup, main, and teardown steps concatenated, in the
-// order they execute: setup, then steps, then teardown. This is the order
-// the validator assigns step positions in for `steps.<id>` reference checks
-// (PLAN §8: a step may reference any setup step and earlier steps in its
-// own list; teardown may also reference every setup and main step) and the
-// order Uses/Materialize walk the three lists in.
-func AllSteps(f *domain.Flow) []domain.Step {
+// FlatStep is one step (a call step or a loop block) in AllSteps' walk of a
+// flow: Phase is "setup", "" (main), or "teardown"; Parent is the id of the
+// immediately enclosing loop block, or "" for a top-level step (PLAN
+// §34f.8). A block's own entry has Parent == "" (blocks cannot nest,
+// NESTED_LOOP); its nested steps each carry the block's id as Parent.
+type FlatStep struct {
+	Step   domain.Step
+	Phase  string
+	Parent string
+}
+
+// AllSteps returns f's setup, main, and teardown steps concatenated, in the
+// order they execute: setup, then steps, then teardown, recursing one level
+// into each loop block's own nested Steps immediately after the block
+// itself. This is the order the validator assigns step positions in for
+// `steps.<id>` reference checks (PLAN §8: a step may reference any setup
+// step and earlier steps in its own list; teardown may also reference every
+// setup and main step; PLAN §34f.8 relaxes this for a step referencing a
+// sibling inside its own block) and the order Uses/Materialize walk in.
+func AllSteps(f *domain.Flow) []FlatStep {
 	if f == nil {
 		return nil
 	}
-	out := make([]domain.Step, 0, len(f.Setup)+len(f.Steps)+len(f.Teardown))
-	out = append(out, f.Setup...)
-	out = append(out, f.Steps...)
-	out = append(out, f.Teardown...)
+	out := make([]FlatStep, 0, len(f.Setup)+len(f.Steps)+len(f.Teardown))
+	appendPhase := func(phase string, steps []domain.Step) {
+		for _, st := range steps {
+			out = append(out, FlatStep{Step: st, Phase: phase})
+			for _, nested := range st.Steps {
+				out = append(out, FlatStep{Step: nested, Phase: phase, Parent: st.ID})
+			}
+		}
+	}
+	appendPhase("setup", f.Setup)
+	appendPhase("", f.Steps)
+	appendPhase("teardown", f.Teardown)
 	return out
 }
 
@@ -93,6 +114,15 @@ func materializeSteps(ctx context.Context, steps []domain.Step, r ExampleResolve
 }
 
 func materializeStep(ctx context.Context, st domain.Step, r ExampleResolver) (domain.Step, []domain.Diagnostic) {
+	if st.IsBlock() {
+		// A block itself never sets `example` (BLOCK_SHAPE rejects it); its
+		// nested steps are ordinary call/example steps, resolved the same
+		// way any other step is.
+		merged := st
+		nested, diags := materializeSteps(ctx, st.Steps, r, nil)
+		merged.Steps = nested
+		return merged, diags
+	}
 	if st.Example == "" {
 		return st, nil
 	}

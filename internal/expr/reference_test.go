@@ -41,7 +41,17 @@ func referenceSampleScope() Scope {
 				Body:   map[string]any{"orderId": "ord_1"},
 				Out:    map[string]any{"orderId": "ord_1"},
 			},
+			"each": {
+				IsBlock: true,
+				Count:   3,
+				Iterations: []map[string]StepValue{
+					{"create": {Status: 201, Out: map[string]any{"orderId": "ord_1"}}},
+					{"create": {Status: 201, Out: map[string]any{"orderId": "ord_2"}}},
+					{"create": {Status: 201, Out: map[string]any{"orderId": "ord_3"}}},
+				},
+			},
 		},
+		Iter: &IterValue{Item: "ord_1", Index: 0},
 		Current: &StepValue{
 			Status:    200,
 			Headers:   map[string]string{"content-type": "application/json"},
