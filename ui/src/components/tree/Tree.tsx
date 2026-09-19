@@ -5,10 +5,25 @@
 // action). No drag/drop, no virtualization -- workspace repos and folder
 // counts here are small enough that a plain DOM list is fine.
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { KeyboardEvent, ReactNode } from 'react';
+import type { DragEvent, KeyboardEvent, ReactNode } from 'react';
 import { countLeaves, flattenVisible, folderCheckState } from './buildTree';
 import type { TreeNode } from './buildTree';
 import { loadCollapsed, saveCollapsed } from './expandState';
+
+/** Optional per-node HTML5 drop-target wiring (PLAN §34f item 6 follow-up,
+ *  item 3: dropping a dragged row onto a folder in the sidebar). Nothing
+ *  here is Tree's own concern -- it just forwards drag events for nodes
+ *  `canDrop` allows, and lets the caller drive the highlight via
+ *  `overKey`, keeping Tree itself library-free and dependency-free. */
+export interface TreeDnd<T> {
+  /** The node currently under the pointer, for the highlight style. */
+  overKey: string | null;
+  /** Defaults to folder nodes only. */
+  canDrop?: (node: TreeNode<T>) => boolean;
+  onDragEnter?: (node: TreeNode<T>) => void;
+  onDragLeave?: (node: TreeNode<T>) => void;
+  onDrop: (node: TreeNode<T>, e: DragEvent<HTMLDivElement>) => void;
+}
 
 export interface TreeProps<T> {
   nodes: TreeNode<T>[];
@@ -31,6 +46,9 @@ export interface TreeProps<T> {
   showLeaves?: boolean;
   className?: string;
   emptyLabel?: string;
+  /** See `TreeDnd`. Omitted entirely -- the default -- means no row is a
+   *  drop target, exactly as before this existed. */
+  dnd?: TreeDnd<T>;
 }
 
 function cssEscape(s: string): string {
@@ -54,6 +72,7 @@ export function Tree<T>({
   showLeaves = true,
   className,
   emptyLabel,
+  dnd,
 }: TreeProps<T>) {
   const [collapsed, setCollapsed] = useState<Set<string>>(() => loadCollapsed(treeKey));
   useEffect(() => {
@@ -181,6 +200,8 @@ export function Tree<T>({
         const state = checkable ? checkStateOf(node) : undefined;
         const showCheckbox = checkable && (node.isFolder || checkableFilter(node));
         const count = node.isFolder ? countLeaves(node) : undefined;
+        const droppable = dnd && (dnd.canDrop ? dnd.canDrop(node) : node.isFolder);
+        const droppedOn = droppable && dnd!.overKey === node.key;
         return (
           <div
             key={node.key}
@@ -196,8 +217,36 @@ export function Tree<T>({
               onSelect?.(node);
               setFocusedKey(node.key);
             }}
+            onDragEnter={
+              droppable
+                ? (e) => {
+                    e.preventDefault();
+                    dnd!.onDragEnter?.(node);
+                  }
+                : undefined
+            }
+            onDragOver={droppable ? (e) => e.preventDefault() : undefined}
+            onDragLeave={
+              droppable
+                ? (e) => {
+                    if (!e.currentTarget.contains(e.relatedTarget as Node)) dnd!.onDragLeave?.(node);
+                  }
+                : undefined
+            }
+            onDrop={
+              droppable
+                ? (e) => {
+                    e.preventDefault();
+                    dnd!.onDrop(node, e);
+                  }
+                : undefined
+            }
             className={`flex cursor-pointer items-center gap-1 rounded px-1 py-1 text-sm outline-none ${
-              selected ? 'bg-sky-50 dark:bg-sky-950' : 'hover:bg-slate-50 dark:hover:bg-slate-900'
+              droppedOn
+                ? 'ring-2 ring-inset ring-sky-500 bg-sky-50 dark:bg-sky-950'
+                : selected
+                  ? 'bg-sky-50 dark:bg-sky-950'
+                  : 'hover:bg-slate-50 dark:hover:bg-slate-900'
             } focus-visible:ring-1 focus-visible:ring-sky-500`}
           >
             {Array.from({ length: node.depth }).map((_, i) => (
