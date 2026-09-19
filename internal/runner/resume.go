@@ -19,8 +19,16 @@ type resumePlan struct {
 	reuse bool
 	// earlierByID indexes From's setup and main step results (Phase !=
 	// "teardown") by step id, for O(1) lookup while walking the current
-	// flow's setup/main lists.
+	// flow's setup/main lists. A nested step id maps to its LATEST
+	// iteration's result (later entries in From.Steps overwrite earlier
+	// ones), matching steps.<id>'s own "latest execution" rule (PLAN
+	// §34f.8); earlierNestedByParent below carries the full history.
 	earlierByID map[string]domain.StepResult
+	// earlierNestedByParent indexes From's nested step results by their
+	// Parent (a loop block's id), in original execution order, for
+	// reusing a whole block: every iteration's every nested result, not
+	// just the latest (PLAN §34f.8).
+	earlierNestedByParent map[string][]domain.StepResult
 	// fromIdx is the first index of f.Steps to execute for real; indices
 	// before it are reused (reuse == true) or skipped without data
 	// (reuse == false).
@@ -36,7 +44,9 @@ type resumePlan struct {
 
 // buildResumePlan resolves resume (nil means an ordinary full run) against
 // f, validating FromStep/UntilStep name steps in f.Steps and, when set,
-// that UntilStep does not run before FromStep.
+// that UntilStep does not run before FromStep. Resume only ever lands at a
+// block's own boundary, never inside it (PLAN §34f.8): naming a nested step
+// id is rejected with a message pointing at its enclosing block.
 func buildResumePlan(f *domain.Flow, resume *Resume) (*resumePlan, error) {
 	plan := &resumePlan{untilIdx: -1, skippedNoData: map[string]bool{}}
 	if resume == nil {
@@ -50,11 +60,15 @@ func buildResumePlan(f *domain.Flow, resume *Resume) (*resumePlan, error) {
 		}
 		plan.reuse = true
 		plan.earlierByID = map[string]domain.StepResult{}
+		plan.earlierNestedByParent = map[string][]domain.StepResult{}
 		for _, sr := range resume.From.Steps {
 			if sr.Phase == "teardown" {
 				continue
 			}
 			plan.earlierByID[sr.StepID] = sr
+			if sr.Parent != "" {
+				plan.earlierNestedByParent[sr.Parent] = append(plan.earlierNestedByParent[sr.Parent], sr)
+			}
 		}
 	}
 
@@ -63,6 +77,10 @@ func buildResumePlan(f *domain.Flow, resume *Resume) (*resumePlan, error) {
 	case resume.FromStep != "":
 		idx, ok := indexOfStep(f.Steps, resume.FromStep)
 		if !ok {
+			if blockID, nested := findEnclosingBlock(f.Steps, resume.FromStep); nested {
+				return nil, errs.New(errs.Invalid, "from_step %q is a step inside block %q", resume.FromStep, blockID).
+					WithHint(fmt.Sprintf("resume at the block %q, not inside it", blockID))
+			}
 			return nil, errs.New(errs.Invalid, "from_step %q is not one of this flow's steps", resume.FromStep).
 				WithHint("from_step must name one of the flow's main step ids")
 		}
@@ -75,6 +93,10 @@ func buildResumePlan(f *domain.Flow, resume *Resume) (*resumePlan, error) {
 	if resume.UntilStep != "" {
 		idx, ok := indexOfStep(f.Steps, resume.UntilStep)
 		if !ok {
+			if blockID, nested := findEnclosingBlock(f.Steps, resume.UntilStep); nested {
+				return nil, errs.New(errs.Invalid, "until_step %q is a step inside block %q", resume.UntilStep, blockID).
+					WithHint(fmt.Sprintf("resume through the block %q, not inside it", blockID))
+			}
 			return nil, errs.New(errs.Invalid, "until_step %q is not one of this flow's steps", resume.UntilStep).
 				WithHint("until_step must name one of the flow's main step ids")
 		}
@@ -93,7 +115,9 @@ func buildResumePlan(f *domain.Flow, resume *Resume) (*resumePlan, error) {
 	return plan, nil
 }
 
-// indexOfStep returns id's index in steps, or ok == false.
+// indexOfStep returns id's index in steps, or ok == false. It only looks at
+// the top level: a nested step (inside a loop block) is never found this
+// way, by design -- see findEnclosingBlock.
 func indexOfStep(steps []domain.Step, id string) (int, bool) {
 	for i, st := range steps {
 		if st.ID == id {
@@ -103,15 +127,42 @@ func indexOfStep(steps []domain.Step, id string) (int, bool) {
 	return 0, false
 }
 
+// findEnclosingBlock searches steps' top-level loop blocks for one whose
+// nested Steps contains id, returning that block's id. Used to give
+// from_step/until_step a specific, actionable error when it names a step
+// inside a block rather than the block itself (PLAN §34f.8: resume only
+// ever lands at a block's boundary).
+func findEnclosingBlock(steps []domain.Step, id string) (blockID string, ok bool) {
+	for _, st := range steps {
+		if !st.IsBlock() {
+			continue
+		}
+		for _, nested := range st.Steps {
+			if nested.ID == id {
+				return st.ID, true
+			}
+		}
+	}
+	return "", false
+}
+
 // defaultResumeIndex is the default resume point when From is set and
 // FromStep is not (PLAN §9): the index (in f.Steps) of the first main step
 // that did not pass in From, or -- if every step From recorded passed, or
 // the failing step's id no longer exists in f -- the index positionally
-// after the last main step From recorded.
+// after the last main step From recorded. Only top-level entries (call
+// steps and loop blocks) are considered: a loop block's own StepResult
+// already reflects whether any of its iterations failed (PLAN §34f.8), so
+// a nested result never needs to be inspected directly, and resume always
+// lands at the block's own position, never inside it.
 func defaultResumeIndex(f *domain.Flow, earlier *domain.Run) int {
+	topLevel := make(map[string]bool, len(f.Steps))
+	for _, st := range f.Steps {
+		topLevel[st.ID] = true
+	}
 	var mainSteps []domain.StepResult
 	for _, sr := range earlier.Steps {
-		if sr.Phase == "" || sr.Phase == "steps" {
+		if (sr.Phase == "" || sr.Phase == "steps") && topLevel[sr.StepID] {
 			mainSteps = append(mainSteps, sr)
 		}
 	}
@@ -220,6 +271,44 @@ func stepValueFromResult(sr domain.StepResult) expr.StepValue {
 	return sv
 }
 
+// buildBlockStepValue groups nested (an ordered list of a block's nested
+// StepResults, however many iterations it spans) by Iteration into the
+// per-iteration []map[string]StepValue shape steps.<block>.iterations
+// exposes (PLAN §34f.8), and returns the block's aggregated StepValue.
+// count is the block's own recorded iteration count -- normally equal to
+// the number of distinct iterations found in nested, but authoritative on
+// its own (e.g. an iteration whose nested steps are all reused-away).
+func buildBlockStepValue(nested []domain.StepResult, count int) expr.StepValue {
+	byIteration := map[int]map[string]expr.StepValue{}
+	maxIter := -1
+	for _, sr := range nested {
+		if sr.Iteration == nil {
+			continue
+		}
+		i := *sr.Iteration
+		if byIteration[i] == nil {
+			byIteration[i] = map[string]expr.StepValue{}
+		}
+		byIteration[i][sr.StepID] = stepValueFromResult(sr)
+		if i > maxIter {
+			maxIter = i
+		}
+	}
+	n := count
+	if maxIter+1 > n {
+		n = maxIter + 1
+	}
+	iterations := make([]map[string]expr.StepValue, n)
+	for i := range iterations {
+		if m := byIteration[i]; m != nil {
+			iterations[i] = m
+		} else {
+			iterations[i] = map[string]expr.StepValue{}
+		}
+	}
+	return expr.StepValue{IsBlock: true, Count: count, Iterations: iterations}
+}
+
 // mergeResumeInputs merges provided over earlierInputs (provided wins per
 // key), for RunOptions' "inputs default to the earlier run's inputs when
 // not given" (PLAN §9). Returns provided unchanged when earlierInputs is
@@ -264,7 +353,7 @@ func forwardRefError(step domain.Step, idx int, op *domain.Operation, refs []str
 	return domain.StepResult{
 		StepID:    step.ID,
 		Index:     idx,
-		Operation: op.ID,
+		Operation: opID(op),
 		Status:    domain.StepErrored,
 		Error:     errs.ToInfo(err),
 		Started:   now,

@@ -138,6 +138,32 @@ type execCtx struct {
 	// Run only has to set it once per phase loop rather than thread it
 	// through every call.
 	phase string
+
+	// iter and parent are set for the duration of one loop block iteration
+	// (PLAN §34f.8), by runBlockIteration, and restored (nil/"") afterward:
+	// executeStep reads iter to populate the `iter` root in every scope it
+	// builds, and finishStep reads both to stamp StepResult.Iteration/
+	// Parent and emitStep's event payload, so nested execution needs no
+	// extra parameters threaded through the whole call chain.
+	iter   *expr.IterValue
+	parent string
+
+	// idxCounter assigns each StepResult a globally monotonic Index across
+	// every phase and every loop iteration (PLAN §34f.8: "idx for nested
+	// results: keep a monotonically increasing execution index so ordering
+	// is stable"), via nextIndex(). Before loop blocks, Index was simply a
+	// step's position within its own list; that position is no longer
+	// well-defined for a nested execution, so every StepResult -- nested or
+	// not -- now gets its Index from here instead.
+	idxCounter int
+}
+
+// nextIndex returns the next value in ec's monotonic Index sequence,
+// starting at 0.
+func (ec *execCtx) nextIndex() int {
+	n := ec.idxCounter
+	ec.idxCounter++
+	return n
 }
 
 // Run executes f against opts, producing a domain.Run. Pre-flight problems
@@ -253,14 +279,15 @@ func (r *Runner) Run(ctx context.Context, f *domain.Flow, inputs map[string]any,
 
 	// ---- setup: every step is reused when resuming, else it runs (and
 	// participates in the same stop-on-failure/cancellation policy as the
-	// main steps that follow it) ----
+	// main steps that follow it). Loop blocks are not allowed in setup
+	// (LOOP_IN_PHASE), so every step here is a plain call step.
 	ec.phase = "setup"
-	for i, step := range f.Setup {
-		op := setupOps[i]
+	for _, step := range f.Setup {
+		op := setupOps[step.ID]
 
 		if sr, ok := reuseIfEligible(plan, true, step); ok {
 			warning := definitionChangedWarning(f.Source, resumeSnapshot, step.ID, resumeRunID)
-			result := reuseStepResult(sr, resumeRunID, i, warning)
+			result := reuseStepResult(sr, resumeRunID, ec.nextIndex(), warning)
 			stepsSoFar[step.ID] = stepValueFromResult(result)
 			if ferr := r.finishStep(runCtx, ec, result); ferr != nil && engineErr == nil {
 				engineErr = ferr
@@ -272,7 +299,7 @@ func (r *Runner) Run(ctx context.Context, f *domain.Flow, inputs map[string]any,
 			if runCtx.Err() != nil {
 				runCancelled = true
 			}
-			skip := skippedStepResult(step, i, op, nowFn())
+			skip := skippedStepResult(step, ec.nextIndex(), op, nowFn())
 			if ferr := r.finishStep(runCtx, ec, skip); ferr != nil && engineErr == nil {
 				engineErr = ferr
 			}
@@ -281,7 +308,7 @@ func (r *Runner) Run(ctx context.Context, f *domain.Flow, inputs map[string]any,
 			continue
 		}
 
-		result, raw := r.executeStep(runCtx, ec, step, i, op, stepsSoFar)
+		result, raw := r.executeStep(runCtx, ec, step, ec.nextIndex(), op, stepsSoFar)
 		if ferr := r.finishStep(runCtx, ec, result); ferr != nil && engineErr == nil {
 			engineErr = ferr
 		}
@@ -298,14 +325,23 @@ func (r *Runner) Run(ctx context.Context, f *domain.Flow, inputs map[string]any,
 
 	// ---- main steps: reused before the resume point, skipped with no
 	// data before it when there's nothing to reuse from, skipped after
-	// UntilStep, then the usual stop-on-failure/cancellation policy ----
+	// UntilStep, then the usual stop-on-failure/cancellation policy. A loop
+	// block (PLAN §34f.8) is reused/executed as a unit -- see reuseBlock and
+	// executeBlock -- but otherwise participates in this same window and
+	// stop-on-failure/cancellation policy exactly like a call step. ----
 	ec.phase = ""
 	for i, step := range f.Steps {
-		op := stepOps[i]
+		op := stepOps[step.ID]
 
 		if sr, ok := reuseIfEligible(plan, i < plan.fromIdx, step); ok {
+			if step.IsBlock() {
+				if ferr := r.reuseBlock(runCtx, ec, plan, step, sr, resumeRunID, stepsSoFar); ferr != nil && engineErr == nil {
+					engineErr = ferr
+				}
+				continue
+			}
 			warning := definitionChangedWarning(f.Source, resumeSnapshot, step.ID, resumeRunID)
-			result := reuseStepResult(sr, resumeRunID, i, warning)
+			result := reuseStepResult(sr, resumeRunID, ec.nextIndex(), warning)
 			stepsSoFar[step.ID] = stepValueFromResult(result)
 			if ferr := r.finishStep(runCtx, ec, result); ferr != nil && engineErr == nil {
 				engineErr = ferr
@@ -319,7 +355,7 @@ func (r *Runner) Run(ctx context.Context, f *domain.Flow, inputs map[string]any,
 			// entirely and deliberately left out of stepsSoFar -- a later
 			// reference to it is a hard error (see below), not a silent
 			// null (PLAN §9).
-			skip := skippedStepResult(step, i, op, nowFn())
+			skip := skippedStepResult(step, ec.nextIndex(), op, nowFn())
 			if ferr := r.finishStep(runCtx, ec, skip); ferr != nil && engineErr == nil {
 				engineErr = ferr
 			}
@@ -327,7 +363,7 @@ func (r *Runner) Run(ctx context.Context, f *domain.Flow, inputs map[string]any,
 		}
 
 		if plan.untilIdx >= 0 && i > plan.untilIdx {
-			skip := skippedStepResult(step, i, op, nowFn())
+			skip := skippedStepResult(step, ec.nextIndex(), op, nowFn())
 			if ferr := r.finishStep(runCtx, ec, skip); ferr != nil && engineErr == nil {
 				engineErr = ferr
 			}
@@ -339,7 +375,7 @@ func (r *Runner) Run(ctx context.Context, f *domain.Flow, inputs map[string]any,
 			if runCtx.Err() != nil {
 				runCancelled = true
 			}
-			skip := skippedStepResult(step, i, op, nowFn())
+			skip := skippedStepResult(step, ec.nextIndex(), op, nowFn())
 			if ferr := r.finishStep(runCtx, ec, skip); ferr != nil && engineErr == nil {
 				engineErr = ferr
 			}
@@ -349,7 +385,7 @@ func (r *Runner) Run(ctx context.Context, f *domain.Flow, inputs map[string]any,
 		}
 
 		if refs := referencedSkippedSteps(step, plan.skippedNoData); len(refs) > 0 {
-			result := forwardRefError(step, i, op, refs, nowFn())
+			result := forwardRefError(step, ec.nextIndex(), op, refs, nowFn())
 			if ferr := r.finishStep(runCtx, ec, result); ferr != nil && engineErr == nil {
 				engineErr = ferr
 			}
@@ -358,7 +394,13 @@ func (r *Runner) Run(ctx context.Context, f *domain.Flow, inputs map[string]any,
 			continue
 		}
 
-		result, raw := r.executeStep(runCtx, ec, step, i, op, stepsSoFar)
+		var result domain.StepResult
+		var raw expr.StepValue
+		if step.IsBlock() {
+			result, raw = r.executeBlock(runCtx, ec, step, ec.nextIndex(), stepOps, stepsSoFar, &engineErr)
+		} else {
+			result, raw = r.executeStep(runCtx, ec, step, ec.nextIndex(), op, stepsSoFar)
+		}
 		if ferr := r.finishStep(runCtx, ec, result); ferr != nil && engineErr == nil {
 			engineErr = ferr
 		}
@@ -381,11 +423,11 @@ func (r *Runner) Run(ctx context.Context, f *domain.Flow, inputs map[string]any,
 	ec.phase = "teardown"
 	tdCtx, tdCancel := context.WithTimeout(context.WithoutCancel(ctx), teardownTimeout)
 	defer tdCancel()
-	for i, step := range f.Teardown {
-		op := teardownOps[i]
+	for _, step := range f.Teardown {
+		op := teardownOps[step.ID]
 
 		if refs := referencedSkippedSteps(step, plan.skippedNoData); len(refs) > 0 {
-			result := forwardRefError(step, i, op, refs, nowFn())
+			result := forwardRefError(step, ec.nextIndex(), op, refs, nowFn())
 			if ferr := r.finishStep(tdCtx, ec, result); ferr != nil && engineErr == nil {
 				engineErr = ferr
 			}
@@ -393,7 +435,7 @@ func (r *Runner) Run(ctx context.Context, f *domain.Flow, inputs map[string]any,
 			continue
 		}
 
-		result, raw := r.executeStep(tdCtx, ec, step, i, op, stepsSoFar)
+		result, raw := r.executeStep(tdCtx, ec, step, ec.nextIndex(), op, stepsSoFar)
 		if ferr := r.finishStep(tdCtx, ec, result); ferr != nil && engineErr == nil {
 			engineErr = ferr
 		}
@@ -420,22 +462,39 @@ func (r *Runner) Run(ctx context.Context, f *domain.Flow, inputs map[string]any,
 }
 
 // resolveOps resolves each of steps' `call` reference to its normalized
-// operation, in order; a pre-flight error (like the original single-list
-// version) if any is unresolvable.
-func (r *Runner) resolveOps(ctx context.Context, steps []domain.Step) ([]*domain.Operation, error) {
-	ops := make([]*domain.Operation, len(steps))
-	for i, step := range steps {
-		op, err := r.ops.Operation(ctx, step.Call)
-		if err != nil {
-			return nil, err
+// operation, keyed by step id, recursing one level into each loop block's
+// own nested steps (PLAN §34f.8); a pre-flight error (like the original
+// single-list version) if any is unresolvable. A block has no operation of
+// its own, so it gets no entry in the result -- callers look it up by id
+// and treat a miss as "this is a block" (or a step resolveOps was never
+// asked about).
+func (r *Runner) resolveOps(ctx context.Context, steps []domain.Step) (map[string]*domain.Operation, error) {
+	ops := map[string]*domain.Operation{}
+	var walk func([]domain.Step) error
+	walk = func(list []domain.Step) error {
+		for _, step := range list {
+			if step.IsBlock() {
+				if err := walk(step.Steps); err != nil {
+					return err
+				}
+				continue
+			}
+			op, err := r.ops.Operation(ctx, step.Call)
+			if err != nil {
+				return err
+			}
+			ops[step.ID] = op
 		}
-		ops[i] = op
+		return nil
+	}
+	if err := walk(steps); err != nil {
+		return nil, err
 	}
 	return ops, nil
 }
 
 // addOpHashes merges ops' operation hashes into dst.
-func addOpHashes(dst map[string]string, ops []*domain.Operation) {
+func addOpHashes(dst map[string]string, ops map[string]*domain.Operation) {
 	for _, op := range ops {
 		if op != nil {
 			dst[op.ID] = op.Hash
@@ -460,11 +519,20 @@ func skippedStepResult(step domain.Step, idx int, op *domain.Operation, now time
 	return domain.StepResult{
 		StepID:    step.ID,
 		Index:     idx,
-		Operation: op.ID,
+		Operation: opID(op),
 		Status:    domain.StepSkipped,
 		Started:   now,
 		Finished:  now,
 	}
+}
+
+// opID returns op.ID, or "" if op is nil -- a loop block has no operation
+// of its own (PLAN §34f.8), so resolveOps gives it no entry.
+func opID(op *domain.Operation) string {
+	if op == nil {
+		return ""
+	}
+	return op.ID
 }
 
 // rememberStep records a just-executed step's raw value for later steps'
@@ -491,11 +559,18 @@ func (r *Runner) Call(ctx context.Context, operationID string, params map[string
 	return r.Run(ctx, f, nil, opts)
 }
 
-// finishStep stamps result.Phase from ec.phase, records it onto ec.run,
-// persists it (if a store is configured), and emits its terminal run.step
-// event -- for every phase (setup, steps, teardown) alike.
+// finishStep stamps result.Phase from ec.phase (and, inside a loop block's
+// iteration, Iteration/Parent from ec.iter/ec.parent -- PLAN §34f.8),
+// records it onto ec.run, persists it (if a store is configured), and emits
+// its terminal run.step event -- for every phase and every nested execution
+// alike.
 func (r *Runner) finishStep(ctx context.Context, ec *execCtx, result domain.StepResult) error {
 	result.Phase = ec.phase
+	if ec.iter != nil {
+		idx := ec.iter.Index
+		result.Iteration = &idx
+		result.Parent = ec.parent
+	}
 	ec.run.Steps = append(ec.run.Steps, result)
 	r.emitStep(ec, result.StepID, result.Status, result.Attempts)
 	if ec.opts.Runs != nil {
@@ -514,13 +589,18 @@ func (r *Runner) emit(opts Options, typ domain.EventType, payload any) {
 }
 
 func (r *Runner) emitStep(ec *execCtx, stepID string, status domain.StepStatus, attempt int) {
-	r.emit(ec.opts, domain.EventRunStep, map[string]any{
+	payload := map[string]any{
 		"run_id":  ec.run.ID,
 		"step_id": stepID,
 		"status":  string(status),
 		"attempt": attempt,
 		"phase":   ec.phase,
-	})
+	}
+	if ec.iter != nil {
+		payload["iteration"] = ec.iter.Index
+		payload["parent"] = ec.parent
+	}
+	r.emit(ec.opts, domain.EventRunStep, payload)
 }
 
 // ErrorFor turns a finished run's terminal status into an error for CLI exit
