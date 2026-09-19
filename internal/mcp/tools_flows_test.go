@@ -118,6 +118,31 @@ func TestTool_ValidateFlow_Invalid(t *testing.T) {
 	assert.Contains(t, firstText(res), "did you mean")
 }
 
+// TestTool_ValidateFlow_SurfacesAnyDiagnosticCodeGenerically confirms
+// validate_flow's handler has no diagnostic-code-specific logic: it
+// generically renders and returns whatever ValidationResult the engine
+// produces, text and StructuredContent alike, for ANY code -- which is
+// what lets the loop-block diagnostics (BLOCK_SHAPE, NESTED_LOOP,
+// LOOP_IN_PHASE, MAYBE_SKIPPED, PLAN §34f.8) reach an agent without any
+// wiring change here. This package's tests use a fake engine (see
+// fakeFlows.Validate) rather than the real internal/flow validator, so the
+// diagnostics THEMSELVES -- whether each of those codes fires on the
+// flow shapes that should trigger it -- are covered directly in
+// internal/flow's own tests (validate_loops_test.go); this test only
+// exercises a diagnostic code this package has never seen before,
+// confirming the pass-through has no allowlist of known codes.
+func TestTool_ValidateFlow_SurfacesAnyDiagnosticCodeGenerically(t *testing.T) {
+	cs := newTestSession(t, Config{Default: DefaultPermissions()}, "claude-code")
+	res := callTool(t, cs, "validate_flow", map[string]any{"flow_yaml": "version: 1\nid: x\nINVALID\n"})
+	require.False(t, res.IsError)
+	out := decodeStructured[domain.ValidationResult](t, res.StructuredContent)
+	require.False(t, out.Valid)
+	require.Len(t, out.Diagnostics, 1)
+	assert.Equal(t, "E_OPERATION_NOT_FOUND", out.Diagnostics[0].Code)
+	assert.Contains(t, firstText(res), "E_OPERATION_NOT_FOUND")
+	assert.Contains(t, firstText(res), out.Diagnostics[0].Message)
+}
+
 func TestTool_CreateFlow(t *testing.T) {
 	cs := newTestSession(t, Config{Default: DefaultPermissions()}, "claude-code")
 	res := callTool(t, cs, "create_flow", map[string]any{
