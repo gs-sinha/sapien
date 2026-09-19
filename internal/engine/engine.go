@@ -268,6 +268,11 @@ type ExampleFromRun struct {
 	Scope       domain.ExampleScope  `json:"scope,omitempty"` // default workspace
 	Tags        []string             `json:"tags,omitempty"`
 	Source      *domain.MemorySource `json:"source,omitempty"` // who saved it: user | agent{client}
+	// Iteration selects which execution of StepID to save when it names a
+	// loop block's nested step, which may have run more than once (PLAN
+	// §34f.8); nil defaults to its LATEST execution. Ignored when StepID
+	// does not name a nested step.
+	Iteration *int `json:"iteration,omitempty"`
 }
 
 // ContextAPI builds agent context bundles.

@@ -136,6 +136,9 @@ type CreateExampleInput struct {
 
 	RunID  string `json:"run_id,omitempty" jsonschema:"run id to save a verified example from; mutually exclusive with operation"`
 	StepID string `json:"step_id,omitempty" jsonschema:"step within run_id; default the run's only (or first) step"`
+	// Iteration is only meaningful when StepID names a loop block's nested
+	// step (PLAN §34f.8), which may have run more than once.
+	Iteration *int `json:"iteration,omitempty" jsonschema:"which execution of step_id to save, when it is a loop block's nested step that ran more than once; default its latest execution"`
 
 	Operation string            `json:"operation,omitempty" jsonschema:"operation id for a hand-written example; mutually exclusive with run_id. verified cannot be set by hand"`
 	Input     map[string]any    `json:"input,omitempty" jsonschema:"path/query/header parameter values by name (hand-written only)"`
@@ -179,6 +182,7 @@ func (s *server) createExample(ctx context.Context, req *sdkmcp.CallToolRequest,
 		created, err = s.engine().Examples().FromRun(ctx, engine.ExampleFromRun{
 			RunID: in.RunID, StepID: in.StepID, ID: in.ID, Description: in.Description,
 			Scope: scope, Tags: in.Tags, Source: &domain.MemorySource{Kind: "agent", Client: client},
+			Iteration: in.Iteration,
 		})
 	} else {
 		created, err = s.engine().Examples().Create(ctx, domain.SavedExample{

@@ -113,18 +113,24 @@ func Run(ctx context.Context, eng engine.Engine, run *domain.Run) []Hint {
 // of run identified by stepID (or nil if run has no such step, or that step
 // isn't a diagnosis candidate). Unlike Run, the full searchBudget is
 // available to this single step, since nothing else is competing for it.
+// A loop block's nested step id (PLAN §34f.8) may have run more than once;
+// this defaults to its LATEST execution, matching steps.<id>'s own
+// "latest execution" rule elsewhere.
 func RunStep(ctx context.Context, eng engine.Engine, run *domain.Run, stepID string) []Hint {
 	if run == nil || eng == nil {
 		return nil
 	}
+	found := -1
 	for i := range run.Steps {
-		if run.Steps[i].StepID != stepID {
-			continue
+		if run.Steps[i].StepID == stepID {
+			found = i
 		}
-		hints, _ := stepHints(ctx, eng, run.Steps[i], searchBudget)
-		return hints
 	}
-	return nil
+	if found == -1 {
+		return nil
+	}
+	hints, _ := stepHints(ctx, eng, run.Steps[found], searchBudget)
+	return hints
 }
 
 // isFailed reports whether st is a diagnosis candidate: its status is
