@@ -780,7 +780,7 @@ ignores, is refused.`,
 		},
 	}
 	cmd.Flags().StringVarP(&message, "message", "m", "", "commit message (required)")
-	cmd.Flags().BoolVar(&all, "all", false, "commit every untracked, modified, deleted or renamed file `workspace changes` reports")
+	cmd.Flags().BoolVar(&all, "all", false, "commit every untracked, modified, deleted or renamed file 'workspace changes' reports")
 	return cmd
 }
 
