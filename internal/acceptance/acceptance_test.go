@@ -337,6 +337,10 @@ func TestAcceptance_PRDSuccessScenario(t *testing.T) {
 	if testing.Short() {
 		t.Skip("acceptance: PRD §48 end-to-end scenario is skipped with -short")
 	}
+	// The developer's own ~/.sapien/config.yaml must not reach this run: a
+	// semantic: block naming an embedder that is not up stalls every sync
+	// on it and fails the timing assertions below.
+	t.Setenv("SAPIEN_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
 
 	eng, ws := setupAcceptanceWorkspace(t)
 
