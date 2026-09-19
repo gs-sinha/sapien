@@ -1,0 +1,2 @@
+function a(e){return!!(e.steps&&e.steps.length>0)}function t(e,r=40){return e.length<=r?e:`${e.slice(0,r-1)}…`}function c(e){let r;return e.foreach?r=`foreach ${e.foreach}`:e.repeat?r=`repeat ${e.repeat.until?`until ${e.repeat.until}`:e.repeat.while?`while ${e.repeat.while}`:""} · max ${e.repeat.max}`.replace(/\s+·/," ·").trim():r=e.id,{short:t(r,40),full:r}}function i(e,r){return e.id===r?!0:(e.steps||[]).some(n=>i(n,r))}export{c as b,i as c,a as i};
+//# sourceMappingURL=flowStep-2c0c7d6a.js.map
