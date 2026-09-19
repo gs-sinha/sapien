@@ -24,9 +24,18 @@ export function BulkMoveBar({
   onClear: () => void;
   failures: readonly BulkMoveFailure[];
 }) {
-  if (count === 0) return null;
+  // Always the same height, selection or not: a bar that appears on the
+  // first tick pushes every row down by its own height, and the second click
+  // of a multi-select lands on the wrong row.
+  if (count === 0) {
+    return (
+      <div className="mb-3 flex min-h-[2.375rem] items-center rounded border border-transparent px-3 py-2 text-xs text-slate-400">
+        Tick rows to move them together, or drag a row onto a folder.
+      </div>
+    );
+  }
   return (
-    <div className="mb-3 flex flex-wrap items-center gap-2 rounded border border-slate-200 bg-slate-50 px-3 py-2 text-sm dark:border-slate-800 dark:bg-slate-900">
+    <div className="mb-3 flex min-h-[2.375rem] flex-wrap items-center gap-2 rounded border border-slate-200 bg-slate-50 px-3 py-2 text-sm dark:border-slate-800 dark:bg-slate-900">
       <span>{count} selected</span>
       <span aria-hidden className="text-slate-400">
         ·
