@@ -14,6 +14,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/oklog/ulid/v2"
+
 	"github.com/gs-sinha/sapien/internal/domain"
 	"github.com/gs-sinha/sapien/internal/engine"
 )
@@ -120,6 +122,23 @@ func (f *Fake) Events() engine.EventAPI     { return (*eventAPI)(f) }
 
 // Publish sends ev to every current Events().Subscribe subscriber.
 func (f *Fake) Publish(ev domain.Event) { f.events.publish(ev) }
+
+// SeedRun adds run directly to f's run store, bypassing Runner() entirely,
+// for a test that needs a run sitting in a particular status -- most often
+// domain.RunRunning, to exercise an "in flight" check (PLAN §34f item 3's
+// GET /v1/daemon active_runs) -- rather than whatever status Runner's own
+// canned execution would leave it in. run.ID is generated if empty. Returns
+// the run as stored, for convenience.
+func (f *Fake) SeedRun(run domain.Run) domain.Run {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if run.ID == "" {
+		run.ID = "run_" + ulid.Make().String()
+	}
+	f.runs[run.ID] = run
+	f.runSeq[run.ID] = f.nextSeqLocked()
+	return run
+}
 
 var _ engine.Engine = (*Fake)(nil)
 

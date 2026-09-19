@@ -214,4 +214,18 @@ var routeTable = []routeDef{
 		func(s *Server) http.HandlerFunc { return s.handleTerminal }},
 	{http.MethodGet, "/v1/terminal/targets", "getTerminalTargets", "Commands and directories the terminal endpoint accepts", true,
 		func(s *Server) http.HandlerFunc { return s.handleTerminalTargets }},
+
+	// Daemon control and self-update (PLAN §34f items 3-4).
+	{http.MethodGet, "/v1/daemon", "getDaemon", "This daemon's identity, install method, and load", true,
+		func(s *Server) http.HandlerFunc { return s.handleDaemonGet }},
+	{http.MethodPost, "/v1/daemon/restart", "restartDaemon", "Restart the daemon, handing off to a detached successor", true,
+		func(s *Server) http.HandlerFunc { return s.handleDaemonRestart }},
+	{http.MethodGet, "/v1/update", "getUpdate", "The last update check's result and how to apply one", true,
+		func(s *Server) http.HandlerFunc { return s.handleUpdateGet }},
+	{http.MethodPost, "/v1/update/check", "checkUpdate", "Check for a newer release now, bypassing the daily cache", true,
+		func(s *Server) http.HandlerFunc { return s.handleUpdateCheck }},
+	{http.MethodPost, "/v1/update/apply", "applyUpdate", "Download and install the latest (or a given) release", true,
+		func(s *Server) http.HandlerFunc { return s.handleUpdateApply }},
+	{http.MethodPut, "/v1/settings/updates", "setUpdateSettings", "Turn the background update check on or off", true,
+		func(s *Server) http.HandlerFunc { return s.handleUpdateSettingsSet }},
 }

@@ -323,3 +323,30 @@ func TestManager_CloseOne(t *testing.T) {
 	assert.Equal(t, errs.WorkspaceNotFound, errs.CodeOf(err))
 	assert.Len(t, opened, 2)
 }
+
+// TestManager_Engines proves Engines() reports exactly the currently-open
+// set -- the primary alone at first, then also a second workspace once
+// something has opened it, and no longer once it is closed again -- which
+// is what GET /v1/daemon's active_runs (PLAN §34f item 3) sums across.
+func TestManager_Engines(t *testing.T) {
+	var opened []string
+	m, primary := newManager(t, newWorkspaceDir(t, "primary"), &opened)
+
+	engines := m.Engines()
+	require.Len(t, engines, 1)
+	assert.Equal(t, primary.Dir, engines[0].Workspace().Dir)
+
+	otherDir := newRegisteredWorkspaceDir(t, "other")
+	_, err := m.Engine(otherDir)
+	require.NoError(t, err)
+
+	engines = m.Engines()
+	require.Len(t, engines, 2)
+	dirs := []string{engines[0].Workspace().Dir, engines[1].Workspace().Dir}
+	assert.ElementsMatch(t, []string{primary.Dir, otherDir}, dirs)
+
+	require.NoError(t, m.CloseOne(otherDir))
+	engines = m.Engines()
+	require.Len(t, engines, 1)
+	assert.Equal(t, primary.Dir, engines[0].Workspace().Dir)
+}

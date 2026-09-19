@@ -306,6 +306,21 @@ func (m *Manager) List() []Info {
 	return out
 }
 
+// Engines returns every engine this Manager currently has open (the
+// primary plus any workspace opened since), for daemon-wide introspection
+// that needs to look across all of them -- GET /v1/daemon's active_runs
+// (PLAN §34f item 3), summed across every open workspace's in-flight runs.
+// The order is unspecified.
+func (m *Manager) Engines() []engine.Engine {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]engine.Engine, 0, len(m.open))
+	for _, e := range m.open {
+		out = append(out, e.eng)
+	}
+	return out
+}
+
 // Close closes every workspace this Manager opened and releases their locks.
 // The primary engine, which the Manager did not open, is left to its owner.
 func (m *Manager) Close() error {
