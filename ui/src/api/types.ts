@@ -489,6 +489,15 @@ export interface StepResult {
   error?: ErrorInfo;
   started?: string;
   finished?: string;
+  // ---- loop blocks (PLAN §34f.8) ----
+  /** 0-based iteration number for a nested execution inside a loop block; absent for a top-level step or a block's own result. */
+  iteration?: number;
+  /** The enclosing loop block's step id, for a nested execution. */
+  parent?: string;
+  /** 'foreach' | 'repeat', set on a loop block's own result (empty for a call step or a nested execution). */
+  kind?: string;
+  /** Iterations actually run, set on a loop block's own result. */
+  count?: number;
 }
 
 export interface Run {

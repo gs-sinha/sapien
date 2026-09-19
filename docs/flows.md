@@ -79,6 +79,10 @@ Step keys:
 | `poll` | `{interval: 1s, timeout: 30s}`; only used with `until`. |
 | `timeout` | Per-request timeout, e.g. `10s`. |
 
+A step with `steps:` and no `call`/`example` is a loop block instead of a
+call step: see [Conditions and loops](#conditions-and-loops) for its own
+keys (`foreach`, `repeat`, `max`, `break_when`, `on_error`, `steps`).
+
 ## Bindings
 
 `input:` binds by parameter name against the operation's contract: path
@@ -334,7 +338,96 @@ seeing zero values, and `sapien flow validate` warns (`MAYBE_SKIPPED`) at
 that reference's line when it sees no `has(steps.<id>)` or `steps.?<id>`
 guard anywhere in the same expression -- a simple, textual check, not a full
 guard-dominance analysis, so it can both over- and under-fire; treat it as a
-prompt to double check, not as gospel.
+prompt to double check, not as gospel. `when:` also works on a loop block
+and on a step nested inside one (below).
+
+### Loop blocks
+
+A step with `steps:` and no `call`/`example` is a loop block: it runs its
+nested `steps:` repeatedly instead of calling an operation itself.
+
+| Key | Meaning |
+|---|---|
+| `foreach` | CEL over `inputs`/`env`/`steps` evaluating to a list; one iteration per element, `iter.item` inside. |
+| `repeat` | `{until:, while:, max, interval}`; re-runs until `until` is true (checked after each iteration) or while `while` stays true (checked before each). |
+| `max` | Foreach's iteration cap (default 100; hard limit 1000). A list longer than `max` fails the block *before* iterating -- it never truncates silently. Not used with `repeat`, which takes its own required `repeat.max` (1..1000). |
+| `break_when` | CEL boolean, checked after each iteration; true ends the loop then. |
+| `on_error` | `stop` (default): a failed nested step ends the block, and the run, exactly as any other failed step would. `continue`: the loop keeps going regardless; the block's own final status is still `failed` if any iteration was. |
+
+Inside a block, nested steps see two extra roots: `iter.item` (the current
+element for `foreach`; unset for `repeat`) and `iter.index` (0-based) --
+available in expressions and in `${...}` templates alike. Note the name:
+PLAN's own notes for this feature say `loop.item`/`loop.index`, but `loop`
+is a reserved word in CEL itself (its parser rejects it outright), so
+Sapien uses `iter` instead.
+
+`steps.<id>` always resolves to that id's *latest* execution, so a nested
+step may read another nested step's value from the SAME iteration (if it
+already ran earlier in the block) or the PREVIOUS iteration (if it hasn't
+run yet this time around) -- guard the latter with `has()`, the same way a
+`when`-skipped step needs it, since there is no earlier iteration on the
+first pass. After the loop, `steps.<block>.count` is the number of
+iterations that actually ran (`0` for an empty list, or a `repeat.while`
+already false up front) and `steps.<block>.iterations` is a list, one entry
+per iteration, each a map from nested step id to that iteration's
+`{request, status, headers, body, latency_ms, out}`.
+
+Loop blocks cannot nest, and are not allowed inside `setup:`/`teardown:`.
+Step ids stay unique across the whole flow, blocks included, so `patch_flow`
+still addresses any step -- nested or not -- by id alone; `add_step` gains
+`into` to add a step inside a specific block.
+
+Foreach, creating one order per customer id:
+
+```yaml
+version: 1
+id: bulk-create-orders
+inputs:
+  customerIds: { type: array, required: true }
+steps:
+  - id: create-each
+    foreach: inputs.customerIds
+    max: 50
+    steps:
+      - id: create
+        call: order-service.createOrder
+        body:
+          customerId: "${iter.item}"
+          type: QCOM
+          pickup: { lat: 12.9716, lng: 77.5946 }
+          drop: { lat: 12.9352, lng: 77.6146 }
+        assert:
+          - status == 201
+```
+
+Repeat, paginating by widening a search radius until a page comes back
+empty, each pass reading the previous pass's radius via `steps.fetch`:
+
+```yaml
+version: 1
+id: paginate-riders
+steps:
+  - id: page
+    repeat:
+      until: "has(steps.fetch) && steps.fetch.out.done"
+      max: 10
+    steps:
+      - id: fetch
+        call: rider-service.searchRiders
+        body:
+          lat: 12.9716
+          lng: 77.5946
+          radiusKm: "${has(steps.fetch) ? steps.fetch.out.radiusKm + 1.0 : 1.0}"
+        extract:
+          done: body.riders.size() == 0
+          radiusKm: request.body.radiusKm
+```
+
+Resume only ever lands at a block's own boundary, never inside it: naming a
+nested step in `--from`/`--until` (or MCP's `from_step`/`until_step`) is
+rejected with a message pointing at the enclosing block. Resuming a run at
+or after a block reuses every one of its nested executions across every
+iteration, not just the block's own aggregated result.
 
 ## Resuming a run
 
@@ -361,10 +454,15 @@ flow patch`, or edit the file and `sapien flow update <id> --file`.
 
 `patch_flow` (MCP) and `sapien flow patch <id> --ops @ops.json` apply
 step-level operations to the YAML file, preserving comments and order:
-`set_step` (replace a step by id), `merge_step` (set some of a step's keys,
-for example one assertion list), `add_step` (with `after`, `before`, or
-`phase: setup|teardown`), `remove_step`, `set_inputs`, `set_meta`. When
-the file was already edited on disk, `update_flow(id, path)` or `sapien
+`set_step` (replace a step by id, nested inside a loop block or not),
+`merge_step` (set some of a step's keys, for example one assertion list, or
+a loop block's `foreach`/`repeat`/`max`/`break_when`/`on_error` -- never
+`steps`, a block's nested list: edit those individually or `set_step` the
+whole block), `add_step` (with `after`, `before`, `phase: setup|teardown`,
+or `into: <block id>` to add inside a loop block's own nested steps),
+`remove_step` (removing a block's id removes its nested steps with it),
+`set_inputs`, `set_meta`. When the file was already edited on disk,
+`update_flow(id, path)` or `sapien
 flow update <id> --file <path>` re-reads and validates it. `create_flow`'s
 `path` is relative to the workspace's `flows/` directory and must stay
 inside it; the tool returns a summary (id, path, step counts, operations,
