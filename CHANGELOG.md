@@ -6,6 +6,28 @@ and phase numbers refer to PLAN.md §34's roadmap.
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-09-20
+
+### Added
+- **Add a workspace from the inspector.** The workspace picker's "Add
+  workspace..." creates a new workspace (pick the parent in a folder browser,
+  name it, optionally `git init`), clones a workspace repository from its URL
+  and opens it (a repository without a `sapien.workspace.yaml` gets one), or
+  registers a folder you already have -- then switches to it. `POST
+  /v1/workspaces/create`, `POST /v1/workspaces/clone`, and `GET /v1/fs/dirs`
+  for the folder browser. A destination must be new or empty, a path must be
+  absolute or start with `~`, a failed create or clone removes what it made
+  so a retry works, and a destination that already holds another
+  repository's checkout is refused rather than adopted.
+
+### Fixed
+- **A git URL starting with `-` could be read by git as an option.** Every
+  git invocation that takes a URL (`clone`, `ls-remote`) now passes it after
+  `--`, and such a URL is rejected as not a git URL.
+- `scripts/install.sh` restarts a running daemon only when it replaced the
+  `sapien` that PATH resolves; installing a second copy with `--prefix` no
+  longer takes over a daemon that belongs to another build.
+
 ## [1.4.0] - 2026-09-20
 
 ### Added
