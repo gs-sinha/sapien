@@ -4,11 +4,12 @@
 //
 // This package is the mechanism, not the policy: it knows nothing about
 // HTTP, which commands are safe to run, or which directories a session may
-// start in. Deciding that (the allowlist: exactly "claude", "codex", or
-// the user's $SHELL, resolved via exec.LookPath, and a directory drawn
-// from the workspace/registered services/home) is internal/server's job,
-// since that's the package with access to the engine's workspace and
-// service list. Manager.Start trusts its Spec completely.
+// start in. Deciding that (the allowlist: exactly "claude", "codex",
+// "opencode", or the user's $SHELL, resolved via exec.LookPath, and a
+// directory drawn from the workspace/registered services/home) is
+// internal/server's job, since that's the package with access to the
+// engine's workspace and service list. Manager.Start trusts its Spec
+// completely.
 package terminal
 
 import (

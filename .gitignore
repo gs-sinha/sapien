@@ -17,3 +17,4 @@ docs/feedback/
 experiments/search-eval/*.json
 experiments/search-eval/*.npy
 experiments/search-eval/queries.yaml
+.aider*

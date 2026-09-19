@@ -100,8 +100,8 @@ editing, running, and saving from these pages.
 ## Agent pane
 
 `/ui/agent` (PLAN §34c Phase 7b) runs the user's own coding agent --
-`claude`, `codex`, or a plain shell -- in a real PTY on the daemon's
-machine (`GET /v1/terminal`, `internal/terminal` + `internal/server/
+`claude`, `codex`, `opencode`, or a plain shell -- in a real PTY on the
+daemon's machine (`GET /v1/terminal`, `internal/terminal` + `internal/server/
 handlers_terminal.go`), rendered in the browser with xterm.js. It's a
 split view, not a terminal-only page:
 
@@ -148,8 +148,8 @@ process); a `{"type":"resize","cols":n,"rows":n}` text frame from the
 client on every fit change; a final `{"type":"exit","code":n}` text frame
 from the server before it closes the socket. No user text is ever
 interpolated into a command -- the server only ever spawns `claude`,
-`codex`, or the user's `$SHELL`, resolved via `exec.LookPath`, in a
-directory drawn from the workspace/registered services/home (see that
+`codex`, `opencode`, or the user's `$SHELL`, resolved via `exec.LookPath`,
+in a directory drawn from the workspace/registered services/home (see that
 package's doc comment for the exact allowlist).
 
 **Which workspace the pane belongs to.** One daemon serves many

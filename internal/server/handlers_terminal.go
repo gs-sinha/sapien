@@ -35,12 +35,12 @@ func resolveShell() string {
 }
 
 // allowedCommands is the exact, fixed set of commands the terminal
-// endpoint will ever spawn: the two coding agents this pane exists for,
-// plus a plain shell as a fallback. Order matters only for
+// endpoint will ever spawn: the coding agents this pane exists for, plus a
+// plain shell as a fallback. Order matters only for
 // terminalTargetsResponse.Commands, which lists whichever of these
 // actually resolve on PATH.
 func allowedCommands() []string {
-	return []string{"claude", "codex", resolveShell()}
+	return []string{"claude", "codex", "opencode", resolveShell()}
 }
 
 // validateCommand checks command against allowedCommands and resolves it
@@ -57,7 +57,7 @@ func validateCommand(command string) (string, error) {
 	}
 	if !allowed {
 		return "", errs.New(errs.Invalid, "command %q is not allowed", command).
-			WithHint("only claude, codex, or your shell may be started here")
+			WithHint("only claude, codex, opencode, or your shell may be started here")
 	}
 	path, err := resolveTerminalCommand(command)
 	if err != nil {
@@ -66,20 +66,39 @@ func validateCommand(command string) (string, error) {
 	return path, nil
 }
 
-// Agents installed in ~/.local/bin should also be available when Sapien
-// was started by a launcher with a minimal PATH. Prefer PATH so explicit
+// Agents installed outside PATH should also be available when Sapien was
+// started by a launcher with a minimal PATH: claude and codex install into
+// ~/.local/bin, opencode into ~/.opencode/bin. Prefer PATH so explicit
 // installations keep their usual precedence; never expand arbitrary names.
 func resolveTerminalCommand(command string) (string, error) {
 	path, err := exec.LookPath(command)
-	if err == nil || (command != "codex" && command != "claude") {
-		return path, err
+	if err == nil {
+		return path, nil
 	}
-	if home, homeErr := os.UserHomeDir(); homeErr == nil {
-		if path, fallbackErr := exec.LookPath(filepath.Join(home, ".local", "bin", command)); fallbackErr == nil {
+	home, homeErr := os.UserHomeDir()
+	if homeErr != nil {
+		return "", err
+	}
+	for _, dir := range agentFallbackDirs(command) {
+		if path, fallbackErr := exec.LookPath(filepath.Join(home, dir, command)); fallbackErr == nil {
 			return path, nil
 		}
 	}
 	return "", err
+}
+
+// agentFallbackDirs lists the directories outside PATH each allowlisted
+// agent's installer is known to use. Anything not named here -- including
+// the user's shell -- is only ever resolved via PATH.
+func agentFallbackDirs(command string) []string {
+	switch command {
+	case "claude", "codex":
+		return []string{".local/bin"}
+	case "opencode":
+		return []string{".opencode/bin"}
+	default:
+		return nil
+	}
 }
 
 // cleanAbsDir returns p as a cleaned absolute path, or "" if that fails.

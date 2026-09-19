@@ -56,6 +56,34 @@ func TestTerminalCodexOutsidePath(t *testing.T) {
 	assert.Equal(t, preferred, path)
 }
 
+func TestTerminalOpencodeOutsidePath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", t.TempDir())
+	bin := filepath.Join(home, ".opencode", "bin")
+	require.NoError(t, os.MkdirAll(bin, 0755))
+	opencode := filepath.Join(bin, "opencode")
+	require.NoError(t, os.WriteFile(opencode, []byte("#!/bin/sh\nexit 0\n"), 0755))
+
+	path, err := validateCommand("opencode")
+	require.NoError(t, err)
+	assert.Equal(t, opencode, path)
+
+	_, ts := newTestServer(t, nil)
+	resp := doReq(t, ts, http.MethodGet, "/v1/terminal/targets", reqOpts{token: "test-token"})
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var body terminalTargetsResponse
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+	assert.Contains(t, body.Commands, "opencode")
+
+	// A PATH installation takes precedence over the fallback.
+	preferred := filepath.Join(os.Getenv("PATH"), "opencode")
+	require.NoError(t, os.WriteFile(preferred, []byte("#!/bin/sh\nexit 0\n"), 0755))
+	path, err = validateCommand("opencode")
+	require.NoError(t, err)
+	assert.Equal(t, preferred, path)
+}
+
 func TestTerminalRejectsDisallowedCommand(t *testing.T) {
 	_, ts := newTestServer(t, nil)
 
@@ -127,7 +155,7 @@ func TestTerminalTargets(t *testing.T) {
 	assert.Contains(t, body.Commands, "/bin/sh")
 	assert.NotContains(t, body.Commands, "rm")
 	for _, c := range body.Commands {
-		assert.Contains(t, []string{"claude", "codex", "/bin/sh"}, c, "targets must only ever list the allowlisted commands")
+		assert.Contains(t, []string{"claude", "codex", "opencode", "/bin/sh"}, c, "targets must only ever list the allowlisted commands")
 	}
 
 	var paths []string
