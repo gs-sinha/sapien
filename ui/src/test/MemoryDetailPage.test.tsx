@@ -106,7 +106,9 @@ describe('MemoryDetailPage', () => {
     for (const text of ['local', 'team']) {
       expect(screen.queryByText(text)).not.toBeInTheDocument();
     }
-    expect(screen.queryByRole('button', { name: /Move to/ })).not.toBeInTheDocument();
+    // The tier-move control is absent when there's no tier; the folder-move
+    // popover ("Move to folder…") is unrelated to tier and always present.
+    expect(screen.queryByRole('button', { name: /^Move to (team|local)$/ })).not.toBeInTheDocument();
     expect(
       screen.getByText('Scope says who the memory is about; tier says where its file is: local until you move it to the team.'),
     ).toBeInTheDocument();

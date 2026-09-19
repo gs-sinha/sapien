@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { flows, operations } from '../api/client';
+import { flows, folders as foldersApi, operations } from '../api/client';
 import type { FlowWithSource } from '../api/types-runs';
+import { FolderMovePopover } from '../components/FolderMovePopover';
 import { KeyValue } from '../components/KeyValue';
 import { ActiveRunPanel, stepStatuses } from './flows/ActiveRunPanel';
 import type { ActiveRun } from './flows/ActiveRunPanel';
@@ -15,6 +16,7 @@ import { ValidatePanel } from './flows/ValidatePanel';
 import { YamlSourcePanel } from './flows/YamlSourcePanel';
 import { applyStepEditsToYaml, hasAnyEdits, loadStepEdits, saveStepEdits } from './flows/stepEdits';
 import type { FlowStepEdits, StepEdit } from './flows/stepEdits';
+import { distinctFolders } from '../lib/folders';
 import { useAsync } from '../lib/useAsync';
 import { subscribe } from '../state/events';
 import { pushToast } from '../state/toast';
@@ -209,6 +211,13 @@ export default function FlowDetailPage() {
               {flow.shipped === 'unpushed' && <PushButton onPushed={reload} />}
             </>
           )}
+          <span className="text-xs text-slate-500">{flow.folder || '(root)'}</span>
+          <FolderMovePopover
+            currentFolder={flow.folder}
+            loadFolders={() => flows.list().then(distinctFolders)}
+            onMove={(next) => foldersApi.moveFlow(flow.id, next)}
+            onMoved={reload}
+          />
         </div>
         <FlowDescription text={flow.description} />
         <div className="max-w-2xl">

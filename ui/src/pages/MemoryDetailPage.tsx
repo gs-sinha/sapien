@@ -4,10 +4,12 @@
 // App.tsx -- see the build report for why (route-edit budget).
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { memories } from '../api/client';
+import { memories, folders as foldersApi } from '../api/client';
+import { FolderMovePopover } from '../components/FolderMovePopover';
 import { KeyValue } from '../components/KeyValue';
 import { Timestamp } from '../components/Timestamp';
 import { CommitButton, ItemTierBadge, MoveTierControl, PushButton, ShippedBadge } from '../components/tiers';
+import { distinctFolders } from '../lib/folders';
 import { useAsync } from '../lib/useAsync';
 import { MarkdownLite } from './memories/MarkdownLite';
 import { pushToast } from '../state/toast';
@@ -100,6 +102,13 @@ export default function MemoryDetailPage() {
             {mem.shipped === 'unpushed' && <PushButton onPushed={reload} />}
           </>
         )}
+        <span className="text-xs text-slate-500">{mem.folder || '(root)'}</span>
+        <FolderMovePopover
+          currentFolder={mem.folder}
+          loadFolders={() => memories.list().then(distinctFolders)}
+          onMove={(next) => foldersApi.moveMemory(mem.id, next)}
+          onMoved={reload}
+        />
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">

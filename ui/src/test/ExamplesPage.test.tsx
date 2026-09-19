@@ -149,7 +149,9 @@ describe('ExamplesPage', () => {
     await waitFor(() => expect(screen.getByText('ex-local')).toBeInTheDocument());
 
     expect(rowOf('order-happy-path')).not.toHaveTextContent('local');
-    expect(within(rowOf('order-happy-path')).queryByRole('button', { name: /Move to/ })).not.toBeInTheDocument();
+    // The tier-move control is absent with no tier; the folder-move popover
+    // ("Move to folder…") is unrelated to tier and always present.
+    expect(within(rowOf('order-happy-path')).queryByRole('button', { name: /^Move to (team|local)$/ })).not.toBeInTheDocument();
 
     expect(rowOf('ex-local')).toHaveTextContent('local');
     expect(within(rowOf('ex-local')).getByRole('button', { name: 'Move to team' })).toBeInTheDocument();
