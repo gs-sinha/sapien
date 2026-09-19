@@ -59,6 +59,23 @@ export function saveStepEdits(flowId: string, edits: FlowStepEdits): void {
   }
 }
 
+// applyEditsToSteps walks a step list depth-first, applying `edits` by step
+// id, and recurses into a loop block's own `steps` (PLAN §34f.8: step ids
+// stay unique across the whole flow, blocks included, so an edit keyed by
+// a nested step's id must reach it there too).
+function applyEditsToSteps(steps: Array<Record<string, unknown>>, edits: FlowStepEdits): void {
+  for (const step of steps) {
+    const id = typeof step.id === 'string' ? step.id : undefined;
+    const edit = id ? edits[id] : undefined;
+    if (edit) {
+      if (edit.input !== undefined) step.input = edit.input;
+      if (edit.body !== undefined) step.body = edit.body;
+      if (edit.headers !== undefined) step.headers = edit.headers;
+    }
+    if (Array.isArray(step.steps)) applyEditsToSteps(step.steps as Array<Record<string, unknown>>, edits);
+  }
+}
+
 // applyStepEditsToYaml parses the flow's saved YAML `source`, overwrites
 // input/body/headers on every step named in `edits` (leaving everything
 // else -- other steps, extract/assert/until/poll, key order -- exactly as
@@ -76,14 +93,7 @@ export async function applyStepEditsToYaml(source: string, edits: FlowStepEdits)
     return source;
   }
   const steps = (doc as { steps: Array<Record<string, unknown>> }).steps;
-  for (const step of steps) {
-    const id = typeof step.id === 'string' ? step.id : undefined;
-    const edit = id ? edits[id] : undefined;
-    if (!edit) continue;
-    if (edit.input !== undefined) step.input = edit.input;
-    if (edit.body !== undefined) step.body = edit.body;
-    if (edit.headers !== undefined) step.headers = edit.headers;
-  }
+  applyEditsToSteps(steps, edits);
   return yaml.dump(doc, { lineWidth: -1, noRefs: true });
 }
 
