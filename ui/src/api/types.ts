@@ -1103,7 +1103,7 @@ export interface ApiError {
 // server package.
 
 /** GET/PUT /v1/settings/semantic: which embedding provider is configured. */
-export type SemanticProviderKind = 'ollama' | 'openai_compatible';
+export type SemanticProviderKind = 'ollama' | 'openai';
 
 /** Where a semantic-search or service-ref setting is/would be stored: this machine's user config, or the committed workspace. */
 export type SemanticSettingsScope = 'user' | 'workspace';

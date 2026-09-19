@@ -21,7 +21,7 @@ import type {
 
 const DEFAULT_BASE_URL: Record<SemanticProviderKind, string> = {
   ollama: 'http://localhost:11434',
-  openai_compatible: 'https://api.openai.com/v1',
+  openai: 'https://api.openai.com/v1',
 };
 
 const OLLAMA_SUGGESTIONS: Array<{ model: string; label?: string }> = [
@@ -183,8 +183,8 @@ function SemanticForm({ initial, onSaved }: { initial: SemanticSettings; onSaved
               <input
                 type="radio"
                 name="semantic-kind"
-                checked={kind === 'openai_compatible'}
-                onChange={() => switchKind('openai_compatible')}
+                checked={kind === 'openai'}
+                onChange={() => switchKind('openai')}
               />
               OpenAI-compatible
             </label>

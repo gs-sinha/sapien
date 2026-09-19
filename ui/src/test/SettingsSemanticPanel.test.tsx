@@ -172,7 +172,7 @@ describe('SemanticSearchPanel', () => {
 
   it('shows "unchanged" as the API key placeholder when a key is already stored, and omits api_key from Save unless touched', async () => {
     const user = userEvent.setup();
-    get.mockResolvedValue({ ...baseSettings, kind: 'openai_compatible', api_key_set: true, model: 'text-embedding-3-small' });
+    get.mockResolvedValue({ ...baseSettings, kind: 'openai', api_key_set: true, model: 'text-embedding-3-small' });
     render(<SemanticSearchPanel />);
 
     const apiKeyField = await screen.findByLabelText('API key');
