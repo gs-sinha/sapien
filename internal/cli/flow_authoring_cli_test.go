@@ -94,6 +94,31 @@ func TestFlowPatch_OpsFile(t *testing.T) {
 	assert.Contains(t, yamlSent, "inputs:")
 }
 
+// TestFlowPatch_NotesPrinted confirms flowpatch.Result.Notes reaches the
+// CLI: one `note:` line per affected step in text mode, and
+// flowSaveSummary.notes in JSON mode.
+func TestFlowPatch_NotesPrinted(t *testing.T) {
+	dir, _ := setupFakeEngine(t)
+	commented := "version: 1\nid: commented-demo\nsteps:\n  # fetches the order\n  - id: get\n    call: order-service.getOrder\n    input: { orderId: x1 }\n"
+	file := writeTemp(t, "commented-demo.flow.yaml", commented)
+	_, stderr, code := run(t, "--workspace", dir, "flow", "create", file)
+	require.Equal(t, 0, code, "stderr: %s", stderr)
+
+	stdout, stderr, code := run(t, "--workspace", dir, "flow", "patch", "commented-demo", "--merge-step", "get={until: status == 200}")
+	require.Equal(t, 0, code, "stderr: %s", stderr)
+	assert.Contains(t, stdout, "patched flow commented-demo")
+	assert.Contains(t, stdout, "note: step `get` kept its comment; check it still describes the step")
+
+	stdout, stderr, code = run(t, "--workspace", dir, "flow", "patch", "commented-demo", "--remove-step", "get", "--json")
+	require.Equal(t, 0, code, "stderr: %s", stderr)
+	var got map[string]any
+	require.NoError(t, json.Unmarshal([]byte(stdout), &got))
+	notes, ok := got["notes"].([]any)
+	require.True(t, ok, "stdout: %s", stdout)
+	require.Len(t, notes, 1)
+	assert.Equal(t, "step `get` had a comment above it; it was removed with the step", notes[0])
+}
+
 func TestFlowUpdate_FromFile(t *testing.T) {
 	dir, fake := setupFakeEngine(t)
 	file := writeTemp(t, "auth-demo.flow.yaml", authoringFlow)
