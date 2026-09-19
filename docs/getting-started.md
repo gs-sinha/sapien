@@ -125,35 +125,6 @@ Supported clients:
 Codex and Cursor configs are global by nature, so both are available
 everywhere too, the same as `claude-code` with `--scope user`.
 
-### Optional semantic search
-
-Sapien's SQLite task, operation, and documentation search runs without an
-embedding model. Semantic search is opt-in and is disabled by default, which
-is usually the right setting for a smaller machine or for a catalog whose
-authored task phrases already retrieve well.
-
-Enable it for one workspace in `<workspace>/.sapien/config.yaml`, or use the
-same block in `~/.sapien/config.yaml` to enable it by default for every
-workspace:
-
-```yaml
-semantic:
-  enabled: true
-  kind: ollama
-  base_url: http://localhost:11434
-  model: nomic-embed-text
-  batch_size: 8
-```
-
-Set `enabled: false` or remove the block to use SQLite-only retrieval. A
-workspace setting overrides the user setting, so a smaller machine can put
-`semantic: {enabled: false}` in that workspace even when the user default is
-enabled. When disabled, Sapien starts no semantic worker and makes no embedding
-calls. When enabled, one background worker embeds operations and docs; authored
-task phrases enrich their target operation's existing vector and do not add
-extra vectors. Search results that semantic retrieval helped carry
-`matched_on: semantic`. Restart the Sapien daemon after changing this setting.
-
 Verify with:
 
 ```sh
@@ -329,6 +300,42 @@ bearer token for an HttpOnly session cookie and redirects into the app at
 prints `{"url", "port"}`. The browser is whichever one you have set as the
 system default -- `sapien ui` shells out to `open` (macOS) or `xdg-open`
 (Linux) and names no browser of its own.
+
+### Optional semantic search
+
+Sapien's SQLite task, operation, and documentation search runs without an
+embedding model; semantic search is an optional addition on top of it,
+off by default, and is not a setup step -- turn it on whenever you like,
+live, with no daemon restart.
+
+The easiest way is the inspector's Settings page (Settings -> Semantic
+search): it detects a local Ollama install, lists the models you already
+have pulled, and can pull a new one (`nomic-embed-text` is the recommended
+default until the search-eval harness has measured another).
+
+From the terminal:
+
+```sh
+brew install ollama                  # skip if already installed
+brew services start ollama
+sapien semantic enable --kind ollama --model nomic-embed-text
+```
+
+`enable` tries one embed call against the config before saving it (refusing
+otherwise, unless `--force`), applies it immediately, and reindexes existing
+content in the background. `sapien semantic status` shows the configuration
+and live indexing progress, `sapien semantic test` tries a config without
+saving it, `sapien semantic reindex` rebuilds the vector index from scratch,
+and `sapien semantic disable` goes back to lexical-only search. Search
+results semantic retrieval helped carry `matched_on: semantic`. Authored
+`tasks:` phrases enrich their target operation's existing vector rather than
+creating extra vectors.
+
+`--workspace-scope` on `enable`/`disable` writes to the workspace's own
+`.sapien/config.yaml` instead of the user-level `~/.sapien/config.yaml`
+every workspace defaults to; a workspace's own setting always wins over the
+user one, so a smaller machine can opt one workspace out even when the user
+default is enabled.
 
 ### A launcher instead of a terminal
 
