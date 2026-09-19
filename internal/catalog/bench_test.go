@@ -55,7 +55,12 @@ func TestApply_Large1000Operations(t *testing.T) {
 	assert.Len(t, change.Added, n)
 	limit := 3 * time.Second
 	if raceEnabled {
-		limit = 60 * time.Second // -race plus the knowledge columns: measured 21-32 s on a loaded laptop
+		// -race plus the knowledge columns: 21-32 s on a loaded laptop, but
+		// 66-73 s on a shared two-core CI runner, five times out of six
+		// since 2026-09-06 with no change to this package. The budget is
+		// there to catch an accidental quadratic, which would take many
+		// minutes, not to grade the runner.
+		limit = 3 * time.Minute
 	}
 	assert.Less(t, elapsed, limit, "Apply of %d operations took %s", n, elapsed)
 

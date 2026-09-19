@@ -71,7 +71,7 @@
   <section class="hero">
     <div class="wrap hero-grid">
       <div>
-        <a class="pill" href="#releases"><span class="tag" data-latest>v1.4.0</span> macOS &amp; Linux · Apache-2.0 · free</a>
+        <a class="pill" href="#releases"><span class="tag" data-latest>v1.4.1</span> macOS &amp; Linux · Apache-2.0 · free</a>
         <h1>API discovery for <em>agents</em> and humans.</h1>
         <p class="lede">Sapien gives every service in your org <strong>business-first docs, a schema and ready-to-send payloads</strong>, written by the agents already working in those repos. Any agent in any repo can query it, any developer can browse it, and an agent can turn it into <strong>multi-service flows from one sentence</strong>.</p>
         <div class="install">
@@ -311,7 +311,7 @@ reversed  ledger-service.getEntry            <span class="ok">200</span>   2/2
               <div class="tabs-panels">
                 <div class="tabpanel" role="tabpanel" id="p-script" aria-labelledby="t-script">
                   <pre class="code"><span class="p">$ </span>curl -fsSL https://gs-sinha.github.io/sapien/install.sh | sh</pre>
-                  <p class="note">Detects your OS and CPU (an Apple silicon Mac under Rosetta still gets the native build), verifies the release checksum, and installs to <code>/usr/local/bin</code>, or <code>~/.local/bin</code> when that isn't writable. Works with <code>wget</code> too. Pin a version with <code>SAPIEN_VERSION=v1.4.0</code>, or choose the directory with <code>sh -s -- --prefix ~/bin</code>.</p>
+                  <p class="note">Detects your OS and CPU (an Apple silicon Mac under Rosetta still gets the native build), verifies the release checksum, and installs to <code>/usr/local/bin</code>, or <code>~/.local/bin</code> when that isn't writable. Works with <code>wget</code> too. Pin a version with <code>SAPIEN_VERSION=v1.4.1</code>, or choose the directory with <code>sh -s -- --prefix ~/bin</code>.</p>
                 </div>
                 <div class="tabpanel" role="tabpanel" id="p-brew" aria-labelledby="t-brew">
                   <pre class="code"><span class="p">$ </span>brew install gs-sinha/tap/sapien</pre>
@@ -336,7 +336,7 @@ reversed  ledger-service.getEntry            <span class="ok">200</span>   2/2
             <h3>Create a workspace</h3>
             <p>A workspace is the folder that lists the services one system is made of. Start local; you can make it a team workspace later. <a href="#workspaces">Local or team?</a></p>
             <pre class="code"><span class="p">$ </span>sapien init ~/sapien-workspace &amp;&amp; cd ~/sapien-workspace</pre>
-            <p class="note"><span class="badge">Next release</span> After this first one, workspaces don't need a terminal: the inspector's workspace picker has <b>Add workspace</b>, which creates a new workspace, clones your team's workspace repo, or opens a folder you already have, then switches to it.</p>
+            <p class="note">After this first one, workspaces don't need a terminal: the inspector's workspace picker has <b>Add workspace</b>, which creates a new workspace, clones your team's workspace repo, or opens a folder you already have, then switches to it.</p>
           </div>
         </li>
 
@@ -421,7 +421,7 @@ reversed  ledger-service.getEntry            <span class="ok">200</span>   2/2
             <li><div class="body">
               <h4>Create it</h4>
               <pre class="code"><span class="p">$ </span>sapien init ~/sapien-workspace &amp;&amp; cd ~/sapien-workspace</pre>
-              <p class="note"><span class="badge">Next release</span> Or in the inspector: workspace picker → <b>Add workspace</b> → <b>New</b>. Pick the parent folder in the folder browser, name it, optionally tick <i>git init</i>, and it is created, registered and opened.</p>
+              <p class="note">Or in the inspector: workspace picker → <b>Add workspace</b> → <b>New</b>. Pick the parent folder in the folder browser, name it, optionally tick <i>git init</i>, and it is created, registered and opened.</p>
             </div></li>
             <li><div class="body">
               <h4>Add the services you have checked out</h4>
@@ -478,7 +478,7 @@ reversed  ledger-service.getEntry            <span class="ok">200</span>   2/2
               <pre class="code"><span class="p">$ </span>git clone git@github.com:acme/sapien-workspace.git ~/acme-workspace
 <span class="p">$ </span>sapien workspace add ~/acme-workspace
 <span class="p">$ </span>sapien workspace use ~/acme-workspace     <span class="c"># the default outside any workspace</span></pre>
-              <p class="note"><span class="badge">Next release</span> Or without a terminal: in the inspector, workspace picker → <b>Add workspace</b> → <b>Clone</b>. Paste the repo URL, pick where it should live, and Sapien clones it, registers it and switches to it, with every service searchable as soon as it opens. <b>Existing</b> does the same for a clone you already have.</p>
+              <p class="note">Or without a terminal: in the inspector, workspace picker → <b>Add workspace</b> → <b>Clone</b>. Paste the repo URL, pick where it should live, and Sapien clones it, registers it and switches to it, with every service searchable as soon as it opens. <b>Existing</b> does the same for a clone you already have.</p>
             </div></li>
             <li><div class="body">
               <h4>Connect your agent and add your own secrets</h4>
@@ -727,9 +727,9 @@ reversed  ledger-service.getEntry           <span class="ok">passed</span>  200 
       <div class="releases">
         <div class="card latest">
           <p class="eyebrow" style="margin:0"><svg class="i" aria-hidden="true"><use href="#i-tag"/></svg>Latest release</p>
-          <p class="ver" data-latest>v1.4.0</p>
+          <p class="ver" data-latest>v1.4.1</p>
           <p class="date" data-latest-date>September 20, 2026</p>
-          <p class="note" style="margin:0">Need an older version? Set it for the install script: <code>curl … | SAPIEN_VERSION=v1.3.1 sh</code></p>
+          <p class="note" style="margin:0">Need an older version? Set it for the install script: <code>curl … | SAPIEN_VERSION=v1.4.0 sh</code></p>
           <div class="links">
             <a class="btn" href="https://github.com/gs-sinha/sapien/releases" data-latest-link>Release notes</a>
             <a class="btn" href="https://github.com/gs-sinha/sapien/blob/main/CHANGELOG.md">Full changelog</a>
@@ -737,6 +737,14 @@ reversed  ledger-service.getEntry           <span class="ok">passed</span>  200 
         </div>
 
         <ol class="timeline">
+          <li>
+            <h3>v1.4.1 <span class="when">September 20, 2026</span></h3>
+            <ul>
+              <li>Add a workspace from the inspector: create a new one, clone your team's workspace repo from its URL, or open a folder you already have, then switch to it.</li>
+              <li>Git URLs are passed to git after <code>--</code>, so a URL starting with <code>-</code> can never be read as an option.</li>
+              <li>The install script restarts a running daemon only when it replaced the <code>sapien</code> on your PATH.</li>
+            </ul>
+          </li>
           <li>
             <h3>v1.4.0 <span class="when">September 20, 2026</span></h3>
             <ul>
