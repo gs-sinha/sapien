@@ -44,6 +44,16 @@ const (
 	CodeUnknownFlowInput = "UNKNOWN_FLOW_INPUT"
 	CodeContextRoot      = "CONTEXT_ROOT"
 	CodeSecretContext    = "SECRET_CONTEXT"
+	// CodeTemplateInExpr is a `${` that survives expr.ExpandTemplates --
+	// unterminated, or left behind inside a string literal ExpandTemplates
+	// itself left alone because the literal never closes -- in a bare CEL
+	// field (assert/expr, until, when, break_when, foreach, repeat.until,
+	// repeat.while, extract): a flow must not go green with literal
+	// template text sitting where a value was meant to be compared.
+	CodeTemplateInExpr = "TEMPLATE_IN_EXPR"
+	// CodeUnknownOut is an `out.<name>` reference (assert/until/extract)
+	// naming a value this same step's own `extract:` does not produce.
+	CodeUnknownOut = "UNKNOWN_OUT"
 	// CodeMaybeSkipped is a warning (PLAN §34f.7): an expression references
 	// steps.X where X may not have run (X has a `when`, or -- once blocks
 	// exist -- X is nested in a block that may run zero times) and the

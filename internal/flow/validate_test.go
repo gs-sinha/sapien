@@ -576,6 +576,174 @@ steps:
 	assert.False(t, res.Valid)
 }
 
+// ---- `${...}` inside bare CEL (assert/expr/until/foreach/...), and lt/lte/gt/gte
+
+// TestValidateSource_BareAssertTemplate_StepOrder is BUG A's repro made a
+// validator test: a `${...}` template embedded in a bare CEL assertion
+// string used to hide its `steps.b` reference inside an opaque CEL string
+// literal, so `sapien flow validate` said nothing about `b` running after
+// `a`. ExpandTemplates now lets STEP_ORDER see through it.
+func TestValidateSource_BareAssertTemplate_StepOrder(t *testing.T) {
+	src := `version: 1
+steps:
+  - id: a
+    call: allocation-service.allocate
+    body: { orderId: ord_1 }
+    assert:
+      - 'body.riderId != "${steps.b.out.id}"'
+  - id: b
+    call: rider-service.getRider
+    input: { riderId: R1 }
+`
+	_, res := validateSrc(t, src)
+	d := diag(res, CodeStepOrder)
+	require.NotNil(t, d, "%+v", res.Diagnostics)
+	assert.False(t, res.Valid)
+}
+
+// TestValidateSource_ExprFieldTemplate_UnknownStep covers the structured
+// `expr:` form of the same bug: a template's `steps.nope` reference must be
+// checked even though it's wrapped in a quoted CEL string literal.
+func TestValidateSource_ExprFieldTemplate_UnknownStep(t *testing.T) {
+	src := `version: 1
+steps:
+  - id: a
+    call: allocation-service.allocate
+    body: { orderId: ord_1 }
+    assert:
+      - { expr: 'body.riderId != "${steps.nope.out.id}"' }
+`
+	_, res := validateSrc(t, src)
+	d := diag(res, CodeUnknownStep)
+	require.NotNil(t, d, "%+v", res.Diagnostics)
+	assert.False(t, res.Valid)
+}
+
+// TestValidateSource_UntilTemplate_StepOrder covers `until`, one of the
+// other bare-CEL fields ExpandTemplates must reach.
+func TestValidateSource_UntilTemplate_StepOrder(t *testing.T) {
+	src := `version: 1
+steps:
+  - id: a
+    call: allocation-service.getAllocation
+    input: { allocationId: alloc_1 }
+    until: 'status == 200 && body.riderId == "${steps.b.out.id}"'
+  - id: b
+    call: rider-service.getRider
+    input: { riderId: R1 }
+`
+	_, res := validateSrc(t, src)
+	d := diag(res, CodeStepOrder)
+	require.NotNil(t, d, "%+v", res.Diagnostics)
+	assert.False(t, res.Valid)
+}
+
+// TestValidateSource_TemplateInExpr_Unterminated covers the new
+// TEMPLATE_IN_EXPR diagnostic: an unterminated `${` in a bare CEL field is
+// its own error, not the generic EXPR_SYNTAX.
+func TestValidateSource_TemplateInExpr_Unterminated(t *testing.T) {
+	src := `version: 1
+steps:
+  - id: a
+    call: order-service.createOrder
+    when: "inputs.releaseNow == ${inputs.other"
+    body: { customerId: c1, type: QCOM, pickup: {lat: 1, lng: 2}, drop: {lat: 1, lng: 2} }
+`
+	_, res := validateSrc(t, src)
+	d := diag(res, CodeTemplateInExpr)
+	require.NotNil(t, d, "%+v", res.Diagnostics)
+	assert.Contains(t, d.Message, "when")
+	assert.False(t, res.Valid)
+}
+
+func TestValidateSource_StructuredGt_Valid(t *testing.T) {
+	src := `version: 1
+steps:
+  - id: a
+    call: rider-service.getRider
+    input: { riderId: R1 }
+    assert:
+      - { path: body.upcomingTrips, gt: 0 }
+`
+	_, res := validateSrc(t, src)
+	assert.True(t, res.Valid, "%+v", res.Diagnostics)
+}
+
+// TestValidateSource_StructuredGtTemplate_StepOrder confirms lt/lte/gt/gte
+// values get the same `${...}` template treatment as eq (checked via
+// assertionTemplates, mirroring TestValidateSource_AssertEqTemplate_StepOrder).
+func TestValidateSource_StructuredGtTemplate_StepOrder(t *testing.T) {
+	src := `version: 1
+steps:
+  - id: a
+    call: allocation-service.getAllocation
+    input: { allocationId: alloc_1 }
+    assert:
+      - { path: body.allocatedAt, gt: "${steps.b.out.ts}" }
+  - id: b
+    call: rider-service.getRider
+    input: { riderId: R1 }
+`
+	_, res := validateSrc(t, src)
+	d := diag(res, CodeStepOrder)
+	require.NotNil(t, d, "%+v", res.Diagnostics)
+	assert.False(t, res.Valid)
+}
+
+func TestValidateSource_StructuredComparisonAmbiguous(t *testing.T) {
+	src := `version: 1
+steps:
+  - id: a
+    call: rider-service.getRider
+    input: { riderId: R1 }
+    assert:
+      - { path: body.upcomingTrips, gt: 0, lt: 10 }
+`
+	_, res := validateSrc(t, src)
+	d := diag(res, CodeAssertionInvalid)
+	require.NotNil(t, d, "%+v", res.Diagnostics)
+	assert.False(t, res.Valid)
+}
+
+// ---- out.<name> (BUG B) ----------------------------------------------------
+
+func TestValidateSource_OutRef_Known(t *testing.T) {
+	src := `version: 1
+steps:
+  - id: a
+    call: allocation-service.allocate
+    body: { orderId: ord_1 }
+    extract:
+      tid: body.allocationId
+    assert:
+      - out.tid == body.allocationId
+    until: has(out.tid)
+`
+	_, res := validateSrc(t, src)
+	assert.Nil(t, diag(res, CodeUnknownOut), "%+v", res.Diagnostics)
+	assert.Nil(t, diag(res, CodeContextRoot), "%+v", res.Diagnostics)
+	assert.True(t, res.Valid, "%+v", res.Diagnostics)
+}
+
+func TestValidateSource_OutRef_Unknown(t *testing.T) {
+	src := `version: 1
+steps:
+  - id: a
+    call: allocation-service.allocate
+    body: { orderId: ord_1 }
+    extract:
+      tid: body.allocationId
+    assert:
+      - out.bogus == body.allocationId
+`
+	_, res := validateSrc(t, src)
+	d := diag(res, CodeUnknownOut)
+	require.NotNil(t, d, "%+v", res.Diagnostics)
+	assert.Contains(t, d.Message, "out.bogus")
+	assert.Contains(t, d.Message, "step `a`")
+	assert.False(t, res.Valid)
+}
+
 // ---- `when` (PLAN §34f.7) -------------------------------------------------
 
 func TestValidateSource_WhenValid(t *testing.T) {
