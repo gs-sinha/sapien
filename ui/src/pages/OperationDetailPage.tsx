@@ -1,5 +1,6 @@
 import { Link, useParams } from 'react-router-dom';
 import { buildContext, docs, examples, memories, operations } from '../api/client';
+import { Collapsible } from '../components/Collapsible';
 import { Markdown } from '../components/docs/Markdown';
 import { EmptyState } from '../components/EmptyState';
 import { KeyValue } from '../components/KeyValue';
@@ -177,29 +178,38 @@ export default function OperationDetailPage() {
         />
       )}
 
-      <h2 className="mb-2 mt-5 text-sm font-semibold">Docs</h2>
       {docSections.length === 0 ? (
-        <p className="text-sm text-slate-400">No docs reference this operation.</p>
+        <>
+          <h2 className="mb-2 mt-5 text-sm font-semibold">Docs</h2>
+          <p className="text-sm text-slate-400">No docs reference this operation.</p>
+        </>
       ) : (
-        <div className="space-y-3">
-          {docSections.map((d, i) => (
-            <div key={i} className="rounded border border-slate-200 p-3 dark:border-slate-800">
-              <div className="mb-1 flex items-center justify-between gap-2">
-                <span className="font-mono text-xs text-slate-400">
-                  {d.service}/{d.path}#{d.heading}
-                </span>
-                <Link
-                  to={`/ui/services/${encodeURIComponent(d.service)}?doc=${encodeURIComponent(d.path)}&section=${encodeURIComponent(d.heading)}`}
-                  className="shrink-0 text-xs text-sky-700 underline dark:text-sky-400"
-                >
-                  View full doc
-                </Link>
+        <Collapsible
+          storageKey="operation.docs"
+          title="Docs"
+          count={docSections.length}
+          summary={docSections.map((d) => d.heading).join(', ')}
+        >
+          <div className="space-y-3">
+            {docSections.map((d, i) => (
+              <div key={i} className="rounded border border-slate-200 p-3 dark:border-slate-800">
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <span className="font-mono text-xs text-slate-400">
+                    {d.service}/{d.path}#{d.heading}
+                  </span>
+                  <Link
+                    to={`/ui/services/${encodeURIComponent(d.service)}?doc=${encodeURIComponent(d.path)}&section=${encodeURIComponent(d.heading)}`}
+                    className="shrink-0 text-xs text-sky-700 underline dark:text-sky-400"
+                  >
+                    View full doc
+                  </Link>
+                </div>
+                <Markdown text={d.body} />
+                {d.unavailable && <p className="mt-1 text-xs italic text-slate-400">Full text unavailable &mdash; showing summary.</p>}
               </div>
-              <Markdown text={d.body} />
-              {d.unavailable && <p className="mt-1 text-xs italic text-slate-400">Full text unavailable &mdash; showing summary.</p>}
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        </Collapsible>
       )}
 
       <h2 className="mb-2 mt-5 text-sm font-semibold">Examples ({exampleList.length})</h2>
