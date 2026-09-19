@@ -22,9 +22,11 @@ func TestIsNewer_Table(t *testing.T) {
 		{"v1.3.1", "", false},
 		{"v1.3.1", "not-a-version", false},
 		{"not-a-version", "v1.3.1", false},
-		{"v1.3.1-5-gabc1234", "v1.3.1", true}, // a prerelease-shaped git-describe string sorts before the release
+		{"v1.3.1-5-gabc1234", "v1.3.1", false}, // git describe: five commits AFTER v1.3.1, not a prerelease of it
+		{"v1.3.1-43-g3fde1b4-dirty", "v1.3.1", false},
 		{"v1.3.1-5-gabc1234", "v1.3.2", true},
-		{"v1.3.1", "v1.3.1-5-gabc1234", false},
+		{"v1.3.1", "v1.3.1-5-gabc1234", true},
+		{"v1.4.0-rc1", "v1.4.0", true}, // a real prerelease still sorts before its release
 	}
 	for _, tc := range cases {
 		assert.Equal(t, tc.want, selfupdate.IsNewer(tc.current, tc.latest), "current=%q latest=%q", tc.current, tc.latest)

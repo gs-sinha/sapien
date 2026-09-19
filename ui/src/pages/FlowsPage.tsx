@@ -130,10 +130,6 @@ export default function FlowsPage() {
                     </span>
                   ),
                 },
-                { key: 'steps', header: 'Steps', render: (f) => f.step_count },
-                { key: 'operations', header: 'Operations', render: (f) => <OperationsCell operations={f.operations} /> },
-                { key: 'tags', header: 'Tags', render: (f) => (f.tags || []).join(', ') || '-' },
-                { key: 'updated', header: 'Updated', render: (f) => <Timestamp value={f.updated} /> },
                 {
                   key: 'folder',
                   header: 'Folder',
@@ -149,6 +145,10 @@ export default function FlowsPage() {
                     </span>
                   ),
                 },
+                { key: 'steps', header: 'Steps', render: (f) => f.step_count },
+                { key: 'operations', header: 'Operations', render: (f) => <OperationsCell operations={f.operations} /> },
+                { key: 'tags', header: 'Tags', render: (f) => (f.tags || []).join(', ') || '-' },
+                { key: 'updated', header: 'Updated', render: (f) => <Timestamp value={f.updated} /> },
               ]}
               rows={filtered}
             />

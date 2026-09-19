@@ -140,14 +140,6 @@ export default function MemoriesPage() {
                   ),
                 },
                 {
-                  key: 'subject',
-                  header: 'Subject',
-                  render: (m) => m.subject.operation || m.subject.service || m.subject.flow || m.subject.concept || '-',
-                },
-                { key: 'text', header: 'First line', render: (m) => <span className="line-clamp-1 max-w-md text-slate-500">{(m.text.split('\n')[0] || '').slice(0, 140)}</span> },
-                { key: 'status', header: 'Status', render: (m) => m.status },
-                { key: 'updated', header: 'Updated', render: (m) => <Timestamp value={m.updated} /> },
-                {
                   key: 'folder',
                   header: 'Folder',
                   render: (m) => (
@@ -162,6 +154,14 @@ export default function MemoriesPage() {
                     </span>
                   ),
                 },
+                {
+                  key: 'subject',
+                  header: 'Subject',
+                  render: (m) => m.subject.operation || m.subject.service || m.subject.flow || m.subject.concept || '-',
+                },
+                { key: 'text', header: 'First line', render: (m) => <span className="line-clamp-1 max-w-md text-slate-500">{(m.text.split('\n')[0] || '').slice(0, 140)}</span> },
+                { key: 'status', header: 'Status', render: (m) => m.status },
+                { key: 'updated', header: 'Updated', render: (m) => <Timestamp value={m.updated} /> },
               ]}
               rows={filtered}
             />

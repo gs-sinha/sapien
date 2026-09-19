@@ -100,9 +100,6 @@ export default function ExamplesPage() {
                     </span>
                   ),
                 },
-                { key: 'verified', header: 'Verified env', render: (e) => (e.verified ? e.verified.env || 'yes' : 'draft') },
-                { key: 'description', header: 'Description', render: (e) => e.description || '-' },
-                { key: 'updated', header: 'Updated', render: (e) => <Timestamp value={e.updated} /> },
                 {
                   key: 'folder',
                   header: 'Folder',
@@ -118,6 +115,9 @@ export default function ExamplesPage() {
                     </span>
                   ),
                 },
+                { key: 'verified', header: 'Verified env', render: (e) => (e.verified ? e.verified.env || 'yes' : 'draft') },
+                { key: 'description', header: 'Description', render: (e) => e.description || '-' },
+                { key: 'updated', header: 'Updated', render: (e) => <Timestamp value={e.updated} /> },
               ]}
               rows={filtered}
             />

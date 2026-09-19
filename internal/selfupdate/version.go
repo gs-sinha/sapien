@@ -18,7 +18,14 @@ var semverRE = regexp.MustCompile(`^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:-([0-9A-Za
 type semver struct {
 	major, minor, patch int
 	prerelease          string
+	// ahead is the commit count of a `git describe` suffix ("-43-gabc1234",
+	// optionally "-dirty"): a build that many commits AFTER the tag, which
+	// is the opposite of a prerelease and must not be offered the tag it
+	// was built on top of as an update.
+	ahead int
 }
+
+var describeRE = regexp.MustCompile(`^(\d+)-g[0-9a-f]+(-dirty)?$`)
 
 func parseVersion(s string) (semver, bool) {
 	m := semverRE.FindStringSubmatch(strings.TrimSpace(s))
@@ -34,6 +41,10 @@ func parseVersion(s string) (semver, bool) {
 		v.patch, _ = strconv.Atoi(m[3])
 	}
 	v.prerelease = m[4]
+	if d := describeRE.FindStringSubmatch(v.prerelease); d != nil {
+		v.ahead, _ = strconv.Atoi(d[1])
+		v.prerelease = ""
+	}
 	return v, true
 }
 
@@ -56,7 +67,7 @@ func compareVersions(a, b semver) int {
 	}
 	switch {
 	case a.prerelease == "" && b.prerelease == "":
-		return 0
+		return cmpInt(a.ahead, b.ahead)
 	case a.prerelease == "":
 		return 1
 	case b.prerelease == "":

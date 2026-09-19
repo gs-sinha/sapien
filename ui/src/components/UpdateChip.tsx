@@ -34,7 +34,7 @@ export function UpdateChip() {
       title={`Sapien ${info.latest} is available (running ${info.current})`}
       className="rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-800 hover:bg-sky-200 dark:bg-sky-950 dark:text-sky-300 dark:hover:bg-sky-900"
     >
-      v{info.latest} available
+      {info.latest.startsWith('v') ? info.latest : `v${info.latest}`} available
     </Link>
   );
 }
