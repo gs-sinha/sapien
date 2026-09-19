@@ -522,3 +522,241 @@ func TestRun_AssertTemplateSecretRejected(t *testing.T) {
 	assert.Contains(t, a.Error, "secret")
 	assert.Equal(t, domain.StepFailed, run.Steps[0].Status)
 }
+
+// ---- BUG A: `${...}` inside bare CEL (assert/expr) compares the native
+// extracted value, not the literal template text ------------------------
+
+// TestRun_BareAssertTemplateComparesNativeValue is BUG A's repro made a
+// runner test: 'body.orderId != "${steps.a.out.id}"' used to leave the
+// template as literal text inside the CEL string, so this assertion always
+// passed no matter what steps.a.out.id actually was. With equal values it
+// must now correctly evaluate the comparison and FAIL.
+func TestRun_BareAssertTemplateComparesNativeValue(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/a", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "X1"})
+	})
+	mux.HandleFunc("/b", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"orderId": "X1"})
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	opA := &domain.Operation{ID: "svc.a", ServiceID: "svc", HTTP: &domain.HTTPBinding{Method: "GET", Path: "/a"}, Responses: anySchemaResponses()}
+	opB := &domain.Operation{ID: "svc.b", ServiceID: "svc", HTTP: &domain.HTTPBinding{Method: "GET", Path: "/b"}, Responses: anySchemaResponses()}
+	ops := mapOperations{ops: map[string]*domain.Operation{opA.ID: opA, opB.ID: opB}}
+	e := singleServiceEnv("svc", srv.URL)
+	r := New(ops)
+
+	f := &domain.Flow{Version: 1, ID: "bare-template-compare", Steps: []domain.Step{
+		{ID: "a", Call: "svc.a", Extract: map[string]string{"id": "body.id"}},
+		{ID: "b", Call: "svc.b", Assert: []domain.Assertion{{Expr: `body.orderId != "${steps.a.out.id}"`}}},
+	}}
+
+	run, err := r.Run(context.Background(), f, nil, Options{Env: e})
+	require.NoError(t, err)
+	assert.Equal(t, domain.RunFailed, run.Status, "orderId equals steps.a.out.id, so != must now evaluate false")
+	require.Len(t, run.Steps[1].Assertions, 1)
+	a := run.Steps[1].Assertions[0]
+	assert.False(t, a.Passed, "a templated bare CEL assertion must compare the native extracted value, not the literal template text")
+	assert.Equal(t, `body.orderId != "${steps.a.out.id}"`, a.Expr, "Expr still shows the user's original text")
+	assert.Equal(t, "X1", a.Actual)
+}
+
+// ---- BUG B: out.<name> in assert/until (extract runs before assert) ------
+
+func TestRun_AssertUsesOut(t *testing.T) {
+	cs := newCaptureServer()
+	defer cs.Close()
+	cs.setResponse(http.StatusOK, map[string]any{"orderId": "ORD1"})
+
+	op := syntheticOp("svc", anySchemaResponses())
+	ops := mapOperations{ops: map[string]*domain.Operation{op.ID: op}}
+	e := singleServiceEnv("svc", cs.URL)
+	r := New(ops)
+
+	f := &domain.Flow{Version: 1, ID: "out-in-assert", Steps: []domain.Step{{
+		ID:      "call",
+		Call:    "svc.op",
+		Input:   map[string]any{"id": "1"},
+		Extract: map[string]string{"tid": "body.orderId"},
+		Assert:  []domain.Assertion{{Expr: "out.tid == body.orderId"}},
+	}}}
+
+	run, err := r.Run(context.Background(), f, nil, Options{Env: e})
+	require.NoError(t, err)
+	assert.Equal(t, domain.RunPassed, run.Status, "%+v", run.Steps[0])
+	require.Len(t, run.Steps[0].Assertions, 1)
+	assert.True(t, run.Steps[0].Assertions[0].Passed, run.Steps[0].Assertions[0].Error)
+	assert.Equal(t, "ORD1", run.Steps[0].Out["tid"])
+}
+
+// TestRun_AssertOutInsideListMacro confirms `out` works inside a CEL
+// comprehension macro too (not just a top-level comparison): a list.exists
+// closure referencing out.<name>.
+func TestRun_AssertOutInsideListMacro(t *testing.T) {
+	cs := newCaptureServer()
+	defer cs.Close()
+	cs.setResponse(http.StatusOK, map[string]any{
+		"items": []any{
+			map[string]any{"id": "R1"},
+			map[string]any{"id": "R2"},
+		},
+	})
+
+	op := syntheticOp("svc", anySchemaResponses())
+	ops := mapOperations{ops: map[string]*domain.Operation{op.ID: op}}
+	e := singleServiceEnv("svc", cs.URL)
+	r := New(ops)
+
+	f := &domain.Flow{Version: 1, ID: "out-in-list-macro", Steps: []domain.Step{{
+		ID:      "call",
+		Call:    "svc.op",
+		Input:   map[string]any{"id": "1"},
+		Extract: map[string]string{"id": `"R1"`},
+		Assert:  []domain.Assertion{{Expr: "body.items.exists(t, t.id == out.id)"}},
+	}}}
+
+	run, err := r.Run(context.Background(), f, nil, Options{Env: e})
+	require.NoError(t, err)
+	assert.Equal(t, domain.RunPassed, run.Status, "%+v", run.Steps[0])
+	assert.True(t, run.Steps[0].Assertions[0].Passed, run.Steps[0].Assertions[0].Error)
+}
+
+// TestRun_FailedAssertionAndFailedExtract_AssertionIsPrimary covers the
+// outcome rule when both a hard assertion and an extract fail on the same
+// step: the assertion failure is what decides the step's status (Failed,
+// no StepResult.Error), and the extract error is only secondary detail, on
+// Warnings.
+func TestRun_FailedAssertionAndFailedExtract_AssertionIsPrimary(t *testing.T) {
+	cs := newCaptureServer()
+	defer cs.Close()
+	cs.setResponse(http.StatusOK, map[string]any{"orderId": "ORD1"})
+
+	op := syntheticOp("svc", anySchemaResponses())
+	ops := mapOperations{ops: map[string]*domain.Operation{op.ID: op}}
+	e := singleServiceEnv("svc", cs.URL)
+	r := New(ops)
+
+	f := &domain.Flow{Version: 1, ID: "assert-and-extract-fail", Steps: []domain.Step{{
+		ID:      "call",
+		Call:    "svc.op",
+		Input:   map[string]any{"id": "1"},
+		Extract: map[string]string{"missing": "body.doesNotExist"},
+		Assert:  []domain.Assertion{{Expr: "status == 999"}},
+	}}}
+
+	run, err := r.Run(context.Background(), f, nil, Options{Env: e})
+	require.NoError(t, err)
+	assert.Equal(t, domain.RunFailed, run.Status)
+	step := run.Steps[0]
+	assert.Equal(t, domain.StepFailed, step.Status, "the assertion failure decides the step's status, not the extract error")
+	require.Len(t, step.Assertions, 1)
+	assert.False(t, step.Assertions[0].Passed)
+	assert.Nil(t, step.Error, "the step itself must not carry an error; the assertion failure is primary")
+	require.Len(t, step.Warnings, 1)
+	assert.Contains(t, step.Warnings[0], "missing")
+}
+
+// TestRun_ExtractTolerant_OneFailsOneSucceeds confirms one extract entry's
+// failure doesn't stop a different entry in the same step from succeeding
+// (the step still errors overall, same as a single failing extract always
+// has, but the successful entry's value is not lost).
+func TestRun_ExtractTolerant_OneFailsOneSucceeds(t *testing.T) {
+	cs := newCaptureServer()
+	defer cs.Close()
+	cs.setResponse(http.StatusOK, map[string]any{"orderId": "ORD1"})
+
+	op := syntheticOp("svc", anySchemaResponses())
+	ops := mapOperations{ops: map[string]*domain.Operation{op.ID: op}}
+	e := singleServiceEnv("svc", cs.URL)
+	r := New(ops)
+
+	f := &domain.Flow{Version: 1, ID: "extract-tolerant", Steps: []domain.Step{{
+		ID:    "call",
+		Call:  "svc.op",
+		Input: map[string]any{"id": "1"},
+		Extract: map[string]string{
+			"good":    "body.orderId",
+			"missing": "body.doesNotExist",
+		},
+	}}}
+
+	run, err := r.Run(context.Background(), f, nil, Options{Env: e})
+	require.NoError(t, err)
+	step := run.Steps[0]
+	assert.Equal(t, domain.StepErrored, step.Status)
+	require.NotNil(t, step.Error)
+	assert.Equal(t, "missing", step.Error.Details["extract"])
+	assert.Equal(t, "ORD1", step.Out["good"], "a failing extract must not stop a different one from succeeding")
+}
+
+// TestRun_OutReferenceToFailedExtract_ExplainsWhy confirms a reference to
+// out.<name> naming a failed extract gets a specific "was not extracted"
+// message instead of a bare "no such key".
+func TestRun_OutReferenceToFailedExtract_ExplainsWhy(t *testing.T) {
+	cs := newCaptureServer()
+	defer cs.Close()
+	cs.setResponse(http.StatusOK, map[string]any{"orderId": "ORD1"})
+
+	op := syntheticOp("svc", anySchemaResponses())
+	ops := mapOperations{ops: map[string]*domain.Operation{op.ID: op}}
+	e := singleServiceEnv("svc", cs.URL)
+	r := New(ops)
+
+	f := &domain.Flow{Version: 1, ID: "out-ref-failed-extract", Steps: []domain.Step{{
+		ID:      "call",
+		Call:    "svc.op",
+		Input:   map[string]any{"id": "1"},
+		Extract: map[string]string{"tid": "body.doesNotExist"},
+		Assert:  []domain.Assertion{{Expr: `out.tid == "ORD1"`}},
+	}}}
+
+	run, err := r.Run(context.Background(), f, nil, Options{Env: e})
+	require.NoError(t, err)
+	step := run.Steps[0]
+	require.Len(t, step.Assertions, 1)
+	a := step.Assertions[0]
+	assert.False(t, a.Passed)
+	assert.Contains(t, a.Error, "out.tid was not extracted")
+	assert.Contains(t, a.Error, "no such key")
+}
+
+// TestRun_UntilWithOut confirms `until` sees `out` populated by this same
+// step's own `extract:`, evaluated tolerantly on every poll attempt (not
+// just once after polling ends).
+func TestRun_UntilWithOut(t *testing.T) {
+	var mu sync.Mutex
+	attempt := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		attempt++
+		n := attempt
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"ready": n >= 3})
+	}))
+	defer srv.Close()
+
+	op := syntheticOp("svc", anySchemaResponses())
+	ops := mapOperations{ops: map[string]*domain.Operation{op.ID: op}}
+	e := singleServiceEnv("svc", srv.URL)
+	r := New(ops)
+
+	f := &domain.Flow{Version: 1, ID: "until-out", Steps: []domain.Step{{
+		ID:      "call",
+		Call:    "svc.op",
+		Input:   map[string]any{"id": "1"},
+		Extract: map[string]string{"ready": "body.ready"},
+		Until:   "out.ready == true",
+		Poll:    &domain.Poll{Interval: "1ms", Timeout: "10s"},
+	}}}
+
+	run, err := r.Run(context.Background(), f, nil, Options{Env: e, Sleep: instantSleep})
+	require.NoError(t, err)
+	assert.Equal(t, domain.RunPassed, run.Status, "%+v", run.Steps[0])
+	assert.GreaterOrEqual(t, run.Steps[0].Attempts, 3)
+	assert.Equal(t, true, run.Steps[0].Out["ready"])
+}
