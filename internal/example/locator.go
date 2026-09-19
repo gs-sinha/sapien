@@ -1,6 +1,7 @@
 package example
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/gs-sinha/sapien/internal/domain"
 	"github.com/gs-sinha/sapien/internal/errs"
+	"github.com/gs-sinha/sapien/internal/folder"
 )
 
 // ExamplesDir is the subdirectory name examples live under, workspace or
@@ -61,7 +63,7 @@ type Locator struct {
 func (l Locator) PathFor(ex domain.SavedExample) (string, error) {
 	switch ex.Scope {
 	case domain.ExampleScopeWorkspace, "":
-		return filepath.Join(l.workspaceDirForTier(ex.Tier), FileName(ex.ID)), nil
+		return withFolder(l.workspaceDirForTier(ex.Tier), ex.Folder, FileName(ex.ID))
 	case domain.ExampleScopeService:
 		dir, ok := l.ServiceDirs[ex.Service]
 		if !ok {
@@ -70,10 +72,26 @@ func (l Locator) PathFor(ex domain.SavedExample) (string, error) {
 		if l.ReadOnly[ex.Service] {
 			return "", readOnlyErr(ex.Service)
 		}
-		return filepath.Join(dir, ExamplesDir, FileName(ex.ID)), nil
+		return withFolder(filepath.Join(dir, ExamplesDir), ex.Folder, FileName(ex.ID))
 	default:
 		return "", errs.New(errs.Invalid, "example: unknown scope %q", ex.Scope)
 	}
+}
+
+// withFolder resolves dir/folderVal/name, normalizing and validating
+// folderVal first (PLAN §34f item 6, via internal/folder): "" (the default
+// -- Create's caller left Folder unset, or a plain Update carrying it
+// forward from the existing file) puts name directly in dir. Mirrors
+// internal/memory.Locator's own withFolder.
+func withFolder(dir, folderVal, name string) (string, error) {
+	norm, err := folder.NormalizeAndValidate(folderVal)
+	if err != nil {
+		return "", err
+	}
+	if norm == "" {
+		return filepath.Join(dir, name), nil
+	}
+	return filepath.Join(dir, filepath.FromSlash(norm), name), nil
 }
 
 func (l Locator) workspaceExamplesDir() string {
@@ -117,27 +135,40 @@ type scopedFile struct {
 	scope domain.ExampleScope
 }
 
-// files returns every "*.example.yaml" file under the workspace's examples
-// directory and every known service's examples directory, tagged with scope,
-// sorted lexicographically by path. Missing directories are skipped rather
-// than treated as errors (a workspace or service with no examples yet has
-// none), mirroring memory.Locator.Files.
+// files returns every "*.example.yaml" file anywhere under the workspace's
+// examples directory and every known service's examples directory -- at any
+// depth, so an example saved into a subfolder is indexed exactly like one at
+// the root (PLAN §34f item 6) -- tagged with scope, sorted lexicographically
+// by path. A directory whose name starts with "." is skipped entirely, and a
+// missing directory is skipped rather than treated as an error (a workspace
+// or service with no examples yet has none), mirroring memory.Locator.Files.
 func (l Locator) files() ([]scopedFile, error) {
 	var out []scopedFile
 
 	add := func(dir string, scope domain.ExampleScope) error {
-		entries, err := os.ReadDir(dir)
+		err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				if os.IsNotExist(err) {
+					return nil
+				}
+				return err
+			}
+			if d.IsDir() {
+				if path != dir && strings.HasPrefix(d.Name(), ".") {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if strings.HasSuffix(d.Name(), exampleFileSuffix) {
+				out = append(out, scopedFile{path: path, scope: scope})
+			}
+			return nil
+		})
 		if err != nil {
 			if os.IsNotExist(err) {
 				return nil
 			}
 			return errs.Wrap(errs.Internal, err, "list example files in %s", dir)
-		}
-		for _, e := range entries {
-			if e.IsDir() || !strings.HasSuffix(e.Name(), exampleFileSuffix) {
-				continue
-			}
-			out = append(out, scopedFile{path: filepath.Join(dir, e.Name()), scope: scope})
 		}
 		return nil
 	}
@@ -213,6 +244,60 @@ func (l Locator) tierOfPath(path string) string {
 	for name := range l.ServiceDirs {
 		if dir, ok := l.serviceExamplesDir(name); ok && isUnder(path, dir) {
 			return domain.TierService
+		}
+	}
+	return ""
+}
+
+// folderOfPath reports the folder segment of the example file at path,
+// relative to whichever known examples directory it lives under -- the same
+// directory match tierOfPath makes, just also keeping the remainder as a
+// folder instead of collapsing it to a tier name. "" for a path directly
+// inside a known directory, and for one matching none of them.
+func (l Locator) folderOfPath(path string) string {
+	if path == "" {
+		return ""
+	}
+	if l.LocalDir != "" {
+		if dir := filepath.Join(l.LocalDir, ExamplesDir); isUnder(path, dir) {
+			return folder.FromAbs(dir, path)
+		}
+	}
+	if l.WorkspaceDir != "" {
+		if dir := l.workspaceExamplesDir(); isUnder(path, dir) {
+			return folder.FromAbs(dir, path)
+		}
+	}
+	for name := range l.ServiceDirs {
+		if dir, ok := l.serviceExamplesDir(name); ok && isUnder(path, dir) {
+			return folder.FromAbs(dir, path)
+		}
+	}
+	return ""
+}
+
+// rootForPath returns the known examples directory (LocalDir/examples,
+// WorkspaceDir/examples, or a known service's examples dir) that path lives
+// under, or "" if none matches. Mirrors tierOfPath/folderOfPath's own
+// directory matching; used to bound folder.CleanEmptyDirs so a cleanup
+// after a move never walks above the kind's root for that tier.
+func (l Locator) rootForPath(path string) string {
+	if path == "" {
+		return ""
+	}
+	if l.LocalDir != "" {
+		if dir := filepath.Join(l.LocalDir, ExamplesDir); isUnder(path, dir) {
+			return dir
+		}
+	}
+	if l.WorkspaceDir != "" {
+		if dir := l.workspaceExamplesDir(); isUnder(path, dir) {
+			return dir
+		}
+	}
+	for name := range l.ServiceDirs {
+		if dir, ok := l.serviceExamplesDir(name); ok && isUnder(path, dir) {
+			return dir
 		}
 	}
 	return ""

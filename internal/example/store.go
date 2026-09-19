@@ -4,11 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/gs-sinha/sapien/internal/domain"
 	"github.com/gs-sinha/sapien/internal/errs"
+	"github.com/gs-sinha/sapien/internal/folder"
 	"github.com/gs-sinha/sapien/internal/store"
 )
 
@@ -67,8 +69,11 @@ func (s *Store) Create(ctx context.Context, ex domain.SavedExample) (*domain.Sav
 	// caller passed (typically ""): PathFor treats an unset Tier as "local
 	// tier" for workspace scope, so this turns that default into an
 	// explicit domain.TierLocal on the record (PLAN §7b), mirroring
-	// memory.Store.writeFileForScope.
+	// memory.Store.writeFileForScope. Folder (PLAN §34f item 6) is the same
+	// idea: re-derived from the resulting path so the record always carries
+	// the normalized form, even if the caller passed "a/b/" or "/a/b".
 	ex.Tier = s.loc.tierOfPath(path)
+	ex.Folder = s.loc.folderOfPath(path)
 
 	if err := writeFile(&ex); err != nil {
 		return nil, err
@@ -99,6 +104,7 @@ func (s *Store) Get(ctx context.Context, id string) (*domain.SavedExample, error
 		return nil, err
 	}
 	ex.Tier = s.loc.tierOfPath(ex.Path)
+	ex.Folder = s.loc.folderOfPath(ex.Path)
 	return ex, nil
 }
 
@@ -127,6 +133,12 @@ func (s *Store) Update(ctx context.Context, ex domain.SavedExample) (*domain.Sav
 	if ex.Tier == "" {
 		ex.Tier = existing.Tier
 	}
+	// A plain Update never moves an example's file within its directory
+	// (PLAN §34f item 6: "an update rewrites the file IN PLACE, keeps its
+	// folder"): whatever the caller passed for Folder is discarded in favor
+	// of where the file already is. Store.MoveFolder is the one place that
+	// deliberately changes it.
+	ex.Folder = existing.Folder
 	if ex.Operation == "" {
 		ex.Operation = existing.Operation
 	}
@@ -145,12 +157,19 @@ func (s *Store) Update(ctx context.Context, ex domain.SavedExample) (*domain.Sav
 	}
 	ex.Path = newPath
 	ex.Tier = s.loc.tierOfPath(newPath)
+	ex.Folder = s.loc.folderOfPath(newPath)
 
 	if err := writeFile(&ex); err != nil {
 		return nil, err
 	}
 	if oldPath != "" && oldPath != ex.Path {
 		_ = os.Remove(oldPath)
+		// A tier move that leaves a folder behind (PLAN §34f item 2) cleans
+		// up what it emptied, bounded by the OLD path's own tier root so a
+		// move across tiers never reaches into the tier it's headed to.
+		if root := s.loc.rootForPath(oldPath); root != "" {
+			folder.CleanEmptyDirs(filepath.Dir(oldPath), root)
+		}
 	}
 
 	if err := s.index(ctx, ex); err != nil {
@@ -173,12 +192,80 @@ func (s *Store) Delete(ctx context.Context, id string) error {
 	return s.deindex(ctx, id)
 }
 
+// MoveFolder places example id's file at newFolder within its current
+// directory, keeping its scope, tier, and file name (PLAN §34f item 6, the
+// counterpart to Move's tier-only change): normalizes and validates
+// newFolder, is a no-op success when newFolder is where the example already
+// is, and refuses (errs.Conflict) when a file already exists at the
+// destination -- including a read-only destination, via the same
+// errs.Invalid PathFor already returns for a service read from a managed
+// clone. The file is moved, not rewritten, and any directory the move
+// leaves empty on the source side is cleaned up, up to (never including)
+// the kind's root directory. Mirrors memory.Store.MoveFolder.
+func (s *Store) MoveFolder(ctx context.Context, id, newFolder string) (*domain.SavedExample, error) {
+	existing, err := s.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	norm, err := folder.NormalizeAndValidate(newFolder)
+	if err != nil {
+		return nil, err
+	}
+	if existing.Folder == norm {
+		return existing, nil
+	}
+
+	target := *existing
+	target.Folder = norm
+	newPath, err := s.loc.PathFor(target)
+	if err != nil {
+		return nil, err
+	}
+	if newPath == existing.Path {
+		return existing, nil
+	}
+	if _, statErr := os.Stat(newPath); statErr == nil {
+		return nil, errs.New(errs.Conflict, "an example file already exists at %s", newPath).
+			WithHint("remove or rename the file at the destination first; MoveFolder never overwrites")
+	} else if !os.IsNotExist(statErr) {
+		return nil, errs.Wrap(errs.Internal, statErr, "checking destination %s", newPath)
+	}
+	if err := os.MkdirAll(filepath.Dir(newPath), 0o755); err != nil {
+		return nil, errs.Wrap(errs.Internal, err, "creating %s", filepath.Dir(newPath))
+	}
+	if err := folder.MoveFile(existing.Path, newPath); err != nil {
+		return nil, err
+	}
+
+	target.Path = newPath
+	target.Tier = s.loc.tierOfPath(newPath)
+	target.Folder = s.loc.folderOfPath(newPath)
+	if err := s.index(ctx, target); err != nil {
+		return nil, err
+	}
+
+	rootOnly := *existing
+	rootOnly.Folder = ""
+	if root, rerr := s.loc.PathFor(rootOnly); rerr == nil {
+		folder.CleanEmptyDirs(filepath.Dir(existing.Path), filepath.Dir(root))
+	}
+
+	out := target
+	return &out, nil
+}
+
 // List returns examples matching q, ordered by Updated descending then ID
 // ascending, up to q.Limit (default 50). Filters: Operation and Service
 // match exactly, Tag matches exactly against one of the example's tags,
-// Text is a case-insensitive substring match over id, description, and
-// tags. Matching files that can no longer be read or parsed are skipped
-// (mirrors Reindex's "skip bad files" policy).
+// Text is a case-insensitive substring match over id, description, tags,
+// and folder (PLAN §34f item 7: a query for the folder name surfaces its
+// items, the same as a query for a tag would), Folder restricts to that
+// folder and everything below it (PLAN §34f item 4). Neither Text nor
+// Folder is a column (folder is derived from the path, never stored), so
+// both are applied in Go once the operation/service/tag-filtered rows are
+// hydrated, and the SQL LIMIT moves there with them. Matching files that can
+// no longer be read or parsed are skipped (mirrors Reindex's "skip bad
+// files" policy).
 func (s *Store) List(ctx context.Context, q domain.ExampleQuery) ([]domain.SavedExample, error) {
 	limit := q.Limit
 	if limit <= 0 {
@@ -199,24 +286,69 @@ func (s *Store) List(ctx context.Context, q domain.ExampleQuery) ([]domain.Saved
 		where = append(where, "tags LIKE ?")
 		args = append(args, `%"`+q.Tag+`"%`)
 	}
-	if q.Text != "" {
-		where = append(where, "(LOWER(id) LIKE LOWER(?) OR LOWER(description) LIKE LOWER(?) OR LOWER(tags) LIKE LOWER(?))")
-		pat := "%" + q.Text + "%"
-		args = append(args, pat, pat, pat)
-	}
 
 	query := `SELECT ` + exampleCols + ` FROM examples`
 	if len(where) > 0 {
 		query += " WHERE " + strings.Join(where, " AND ")
 	}
-	query += " ORDER BY updated DESC, id ASC LIMIT ?"
-	args = append(args, limit)
+	query += " ORDER BY updated DESC, id ASC"
+	needsGoFilter := q.Text != "" || q.Folder != ""
+	if !needsGoFilter {
+		query += " LIMIT ?"
+		args = append(args, limit)
+	}
 
 	rows, err := s.readIndexRows(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
-	return s.hydrate(rows), nil
+	out := s.hydrate(rows)
+	if q.Text != "" {
+		out = filterExamplesByText(out, q.Text)
+	}
+	if q.Folder != "" {
+		out = filterExamplesByFolder(out, q.Folder)
+	}
+	if needsGoFilter && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+// filterExamplesByText keeps only the examples whose id, description, tags,
+// or folder contain text (case-insensitive substring); see List's doc
+// comment.
+func filterExamplesByText(exs []domain.SavedExample, text string) []domain.SavedExample {
+	q := strings.ToLower(text)
+	out := exs[:0]
+	for _, ex := range exs {
+		if strings.Contains(strings.ToLower(ex.ID), q) ||
+			strings.Contains(strings.ToLower(ex.Description), q) ||
+			strings.Contains(strings.ToLower(ex.Folder), q) {
+			out = append(out, ex)
+			continue
+		}
+		for _, t := range ex.Tags {
+			if strings.Contains(strings.ToLower(t), q) {
+				out = append(out, ex)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// filterExamplesByFolder keeps only the examples in prefix's folder or
+// below it (PLAN §34f item 4's prefix semantics: internal/folder.HasPrefix).
+func filterExamplesByFolder(exs []domain.SavedExample, prefix string) []domain.SavedExample {
+	norm := folder.Normalize(prefix)
+	out := exs[:0]
+	for _, ex := range exs {
+		if folder.HasPrefix(ex.Folder, norm) {
+			out = append(out, ex)
+		}
+	}
+	return out
 }
 
 // ForOperations returns up to limit (default 50) examples of the given
@@ -421,6 +553,7 @@ func (s *Store) hydrate(rows []indexRow) []domain.SavedExample {
 			continue
 		}
 		ex.Tier = s.loc.tierOfPath(ex.Path)
+		ex.Folder = s.loc.folderOfPath(ex.Path)
 		out = append(out, *ex)
 	}
 	return out

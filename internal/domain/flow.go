@@ -26,6 +26,11 @@ type Flow struct {
 	OwnerKind string `yaml:"-" json:"owner_kind,omitempty"` // FlowOwnerLocal | FlowOwnerWorkspace | FlowOwnerService
 	OwnerID   string `yaml:"-" json:"owner_id,omitempty"`
 	Source    string `yaml:"-" json:"source,omitempty"` // raw YAML; carried over the daemon API so Remote, the MCP bridge, and the UI see it
+	// Folder is the subfolder of the owning tier's flows directory Path sits
+	// in (PLAN §34f item 6): "" at the root, "/"-separated otherwise. Derived
+	// from Path, never written to the file; not omitempty so "" (root)
+	// always shows up on the wire rather than being silently absent.
+	Folder string `yaml:"-" json:"folder"`
 }
 
 // InputSpec declares a flow input.
@@ -117,6 +122,10 @@ type FlowSummary struct {
 	// ShipUntracked, ShipModified, ShipUnpushed or ShipShipped. Empty for
 	// the local and service tiers, and when the workspace is not in git.
 	Shipped string `json:"shipped,omitempty"`
+	// Folder is the subfolder of the owning tier's flows directory the flow
+	// sits in (PLAN §34f item 6): "" at the root, "/"-separated otherwise.
+	// Derived from Path; not omitempty so "" (root) always shows on the wire.
+	Folder string `json:"folder"`
 }
 
 // Ship states for FlowSummary.Shipped (PLAN §7b). Promotion moves a file

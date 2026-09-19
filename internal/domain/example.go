@@ -43,6 +43,12 @@ type SavedExample struct {
 	// Shipped is the workspace-tier file's state in the workspace repository
 	// (the Ship* constants); "" for other tiers.
 	Shipped string `yaml:"-" json:"shipped,omitempty"`
+	// Folder is the subfolder of the owning directory Path sits in (PLAN
+	// §34f item 6): "" at the root, "/"-separated otherwise. Derived from
+	// Path when the file is read; not omitempty so "" (root) always shows
+	// up on the wire. A plain Update never changes it -- only Store.MoveFolder
+	// does.
+	Folder string `yaml:"-" json:"folder"`
 }
 
 // ExampleExpect is the response the example produced when it was saved:
@@ -69,8 +75,11 @@ type ExampleQuery struct {
 	Operation string `json:"operation,omitempty"`
 	Service   string `json:"service,omitempty"`
 	Tag       string `json:"tag,omitempty"`
-	Text      string `json:"text,omitempty"` // substring over id, description, tags
+	Text      string `json:"text,omitempty"` // substring over id, description, tags, folder
 	Limit     int    `json:"limit,omitempty"`
+	// Folder restricts results to that folder and everything below it
+	// (PLAN §34f item 4): "" (the default) applies no folder filter.
+	Folder string `json:"folder,omitempty"`
 }
 
 // RequestExampleSource says where a RequestExample's payload came from, so a
