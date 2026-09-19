@@ -370,7 +370,13 @@ first pass. After the loop, `steps.<block>.count` is the number of
 iterations that actually ran (`0` for an empty list, or a `repeat.while`
 already false up front) and `steps.<block>.iterations` is a list, one entry
 per iteration, each a map from nested step id to that iteration's
-`{request, status, headers, body, latency_ms, out}`.
+`{request, status, headers, body, latency_ms, out}` -- except that
+`iterations` keeps request/response bodies only up to a total 4MB per
+block; once that's spent, later iterations there keep just
+status/headers/latency_ms/out (never bodies), so a long loop over large
+responses can't balloon a run's memory. That cap is specific to this
+in-memory expression value; the run's own persisted per-step records are
+capped independently by `get_run`/`run_flow`.
 
 Loop blocks cannot nest, and are not allowed inside `setup:`/`teardown:`.
 Step ids stay unique across the whole flow, blocks included, so `patch_flow`

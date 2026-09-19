@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/gs-sinha/sapien/internal/domain"
@@ -14,6 +15,41 @@ import (
 // itself already bound to 1..1000): it exists only so a flow built
 // programmatically and never validated cannot spin forever.
 const blockIterationCap = 1000
+
+// blockIterationsBudgetBytes bounds the total size of request/response
+// bodies steps.<block>.iterations keeps in memory across every iteration
+// (PLAN §34f.8): once the running total for a block passes this, later
+// iterations' entries in the CEL-facing iterations value keep only
+// status/headers/latency_ms/out -- never bodies -- so a long-running loop
+// over a large or many-body response cannot balloon a run's memory. This
+// only affects that in-memory value; the persisted StepResult for each
+// nested execution (what get_run/run_flow's own body-capping already
+// governs) is unaffected.
+const blockIterationsBudgetBytes = 4 * 1024 * 1024
+
+// approxStepValueSize estimates a StepValue's contribution to the
+// iterations budget: its request and response bodies, which dominate real
+// cost; everything else (status, headers, timing, out) is small and
+// roughly fixed-size, so it's not worth the cost of measuring exactly.
+func approxStepValueSize(sv expr.StepValue) int {
+	n := 0
+	if b, err := json.Marshal(sv.Body); err == nil {
+		n += len(b)
+	}
+	if b, err := json.Marshal(sv.Request); err == nil {
+		n += len(b)
+	}
+	return n
+}
+
+// trimStepValueBody drops a StepValue's request/response body (keeping
+// status/headers/latency_ms/out) once a block's iterations budget is
+// spent.
+func trimStepValueBody(sv expr.StepValue) expr.StepValue {
+	sv.Body = nil
+	sv.Request = nil
+	return sv
+}
 
 // kindOf returns a loop block's Kind ("foreach" or "repeat", PLAN §34f.8).
 func kindOf(block domain.Step) string {
@@ -118,6 +154,7 @@ func (r *Runner) executeBlock(ctx context.Context, ec *execCtx, block domain.Ste
 	var iterations []map[string]expr.StepValue
 	var anyFailed bool
 	count := 0
+	iterationsBudgetUsed := 0
 
 	for i := 0; i < max; i++ {
 		if block.Repeat != nil && block.Repeat.While != "" {
@@ -142,6 +179,20 @@ func (r *Runner) executeBlock(ctx context.Context, ec *execCtx, block domain.Ste
 
 		iterVals, iterFailed, iterCancelled := r.runBlockIteration(ctx, ec, block, opsByID, stepsSoFar, iter, engineErr)
 		count++
+		if iterationsBudgetUsed >= blockIterationsBudgetBytes {
+			// PLAN §34f.8: past the budget, keep status/out but drop
+			// bodies for steps.<block>.iterations from here on -- the
+			// persisted StepResult for each nested execution is unaffected.
+			trimmed := make(map[string]expr.StepValue, len(iterVals))
+			for id, sv := range iterVals {
+				trimmed[id] = trimStepValueBody(sv)
+			}
+			iterVals = trimmed
+		} else {
+			for _, sv := range iterVals {
+				iterationsBudgetUsed += approxStepValueSize(sv)
+			}
+		}
 		iterations = append(iterations, iterVals)
 		if iterFailed {
 			anyFailed = true

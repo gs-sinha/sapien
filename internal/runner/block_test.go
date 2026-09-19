@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/gs-sinha/sapien/internal/domain"
+	"github.com/gs-sinha/sapien/internal/expr"
 )
 
 // createEachBody builds the body of an order-service.createOrder step that
@@ -553,4 +555,115 @@ func TestRun_Block_MonotonicIndex(t *testing.T) {
 	nested1 := findStepResult(t, run, "create", intp(1))
 	assert.Less(t, block.Index, nested0.Index, "a block's own Index must precede its nested executions'")
 	assert.Less(t, block.Index, nested1.Index)
+}
+
+// ---- iterations memory budget (PLAN §34f.8) --------------------------------
+
+func TestApproxStepValueSize_CountsBodyAndRequestOnly(t *testing.T) {
+	sv := expr.StepValue{
+		Status:  200,
+		Headers: map[string]string{"content-type": "application/json"},
+		Body:    map[string]any{"x": strings.Repeat("a", 1000)},
+		Request: map[string]any{"body": strings.Repeat("b", 500)},
+		Out:     map[string]any{"y": 1},
+	}
+	// Both Body and Request are marshaled; the exact byte count depends on
+	// JSON quoting, but it must be in the right ballpark and far larger
+	// than a StepValue with no body/request at all.
+	assert.Greater(t, approxStepValueSize(sv), 1400)
+
+	empty := expr.StepValue{Status: 200, Out: map[string]any{"y": 1}}
+	assert.Less(t, approxStepValueSize(empty), 10)
+}
+
+func TestTrimStepValueBody_DropsBodyAndRequestKeepsRest(t *testing.T) {
+	sv := expr.StepValue{
+		Status: 201, LatencyMs: 12.5,
+		Headers: map[string]string{"content-type": "application/json"},
+		Body:    map[string]any{"orderId": "ord_1"},
+		Request: map[string]any{"method": "POST"},
+		Out:     map[string]any{"orderId": "ord_1"},
+	}
+	trimmed := trimStepValueBody(sv)
+	assert.Nil(t, trimmed.Body)
+	assert.Nil(t, trimmed.Request)
+	assert.Equal(t, 201, trimmed.Status)
+	assert.Equal(t, 12.5, trimmed.LatencyMs)
+	assert.Equal(t, sv.Headers, trimmed.Headers)
+	assert.Equal(t, sv.Out, trimmed.Out)
+}
+
+// TestRun_Foreach_IterationsBudget_TrimsBodiesPastLimit runs enough
+// iterations with a large enough per-iteration response body to cross
+// blockIterationsBudgetBytes partway through, and confirms:
+// steps.<block>.iterations keeps full bodies for the early iterations
+// (under budget) and only status/out (no body) for the later ones -- all
+// while every iteration's own StepResult (the persisted one, read back via
+// run.Steps, not the CEL-facing iterations value) keeps its real body
+// regardless, since the budget is specific to that in-memory value.
+func TestRun_Foreach_IterationsBudget_TrimsBodiesPastLimit(t *testing.T) {
+	ops, e, _ := startFixtures(t)
+	r := New(ops)
+
+	// ~300KB echoed back per response (order-service.createOrder echoes
+	// customerId); 16 iterations is enough to cross the 4MB budget partway
+	// through (14 * 300KB > 4MB) while still finishing quickly.
+	big := strings.Repeat("x", 300*1024)
+	const n = 16
+
+	f := &domain.Flow{
+		Version: 1,
+		ID:      "iterations-budget",
+		Steps: []domain.Step{
+			{
+				ID:      "each",
+				Foreach: "[" + strings.Repeat("0,", n-1) + "0]", // n items; the value itself is unused
+				Steps: []domain.Step{{
+					ID:   "create",
+					Call: "order-service.createOrder",
+					Body: map[string]any{
+						"customerId": big,
+						"type":       "QCOM",
+						"pickup":     map[string]any{"lat": 1, "lng": 2},
+						"drop":       map[string]any{"lat": 1, "lng": 2},
+					},
+					Extract: map[string]string{"orderId": "body.orderId"},
+					Assert:  []domain.Assertion{{Status: intp(201)}},
+				}},
+			},
+			{
+				ID:   "verify",
+				Call: "allocation-service.allocate",
+				Body: map[string]any{"orderId": "o1"},
+				Assert: []domain.Assertion{
+					// The first iteration is well under budget: its body
+					// (the echoed customerId) must still be present.
+					{Expr: "steps.each.iterations[0].create.body.customerId.size() > 100000"},
+					// The last iteration is past budget: body is trimmed to
+					// null (stepValueToNative always sets the "body" key,
+					// so has() alone can't tell "trimmed" from "present but
+					// null" -- checking the value itself can), but
+					// status/out must still be there.
+					{Expr: "steps.each.iterations[15].create.body == null"},
+					{Expr: "steps.each.iterations[15].create.status == 201"},
+					{Expr: "steps.each.iterations[15].create.out.orderId != ''"},
+				},
+			},
+		},
+	}
+
+	run, err := r.Run(context.Background(), f, nil, Options{Env: e})
+	require.NoError(t, err)
+	require.Equal(t, domain.RunPassed, run.Status, "%+v", run.Steps)
+
+	verify := findStepResult(t, run, "verify", nil)
+	for _, a := range verify.Assertions {
+		assert.True(t, a.Passed, "assertion %q: %s %s", a.Expr, a.Message, a.Error)
+	}
+
+	// The PERSISTED StepResult for the last iteration keeps its real body
+	// regardless -- the budget only trims the CEL-facing iterations value.
+	last := findStepResult(t, run, "create", intp(n-1))
+	require.NotNil(t, last.Response)
+	assert.NotEmpty(t, last.Response.Body)
 }
