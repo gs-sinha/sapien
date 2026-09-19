@@ -28,6 +28,36 @@ func TestRenderFlowOutline_ShowsWhen(t *testing.T) {
 	assert.NotContains(t, out, "b: svc.op2 when:")
 }
 
+// TestRenderFlowOutline_IndentsBlocks confirms a loop block and its nested
+// steps show up compactly and indented one level deeper (PLAN §34f.8).
+func TestRenderFlowOutline_IndentsBlocks(t *testing.T) {
+	f := &domain.Flow{
+		ID: "f",
+		Steps: []domain.Step{
+			{
+				ID:      "each",
+				Foreach: "inputs.ids",
+				Max:     50,
+				Steps: []domain.Step{
+					{ID: "create", Call: "svc.op"},
+				},
+			},
+			{
+				ID:     "page",
+				Repeat: &domain.Repeat{Until: "steps.fetch.out.done", Max: 10},
+				Steps: []domain.Step{
+					{ID: "fetch", Call: "svc.op2"},
+				},
+			},
+		},
+	}
+	out := renderFlowOutline(f)
+	assert.Contains(t, out, "  - each: foreach:inputs.ids max:50\n")
+	assert.Contains(t, out, "    - create: svc.op\n", "a nested step is indented one level deeper than its block")
+	assert.Contains(t, out, "  - page: repeat: until:steps.fetch.out.done max:10\n")
+	assert.Contains(t, out, "    - fetch: svc.op2\n")
+}
+
 func TestTool_ListFlows(t *testing.T) {
 	cs := newTestSession(t, Config{Default: DefaultPermissions()}, "claude-code")
 	res := callTool(t, cs, "list_flows", map[string]any{})
