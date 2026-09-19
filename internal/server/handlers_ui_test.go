@@ -47,6 +47,10 @@ func TestUISession_SetsCookieAndRedirects(t *testing.T) {
 	assert.Equal(t, http.SameSiteStrictMode, cookie.SameSite)
 	assert.Equal(t, "/", cookie.Path)
 	assert.False(t, cookie.Secure)
+	// PLAN §34f item 3: a restart persists the daemon's bearer token, so
+	// the cookie itself should now outlive the browser's own session
+	// rather than expiring with it.
+	assert.Equal(t, sessionCookieMaxAge, cookie.MaxAge)
 }
 
 func TestUISession_WrongTokenIs401(t *testing.T) {

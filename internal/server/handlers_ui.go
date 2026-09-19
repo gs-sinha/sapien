@@ -12,6 +12,16 @@ import (
 // Authorization header (PLAN §34c).
 const sessionCookieName = "sapien_session"
 
+// sessionCookieMaxAge is how long the browser keeps sapien_session before
+// dropping it on its own. It used to have none, so the cookie was
+// session-scoped: it died with the tab's browser session, forcing a
+// re-visit to /ui/session (a fresh token exchange) far more often than the
+// server-side token itself ever changed. PLAN §34f item 3 makes that token
+// persist across a daemon restart (daemon.LoadOrCreateToken), so there is
+// no longer a reason for the cookie to expire sooner than a long-lived
+// session should -- 90 days.
+const sessionCookieMaxAge = 90 * 24 * 60 * 60 // seconds
+
 // handleUISession implements GET /ui/session?token=<bearer>: it exchanges
 // the daemon's bearer token, presented as a query parameter because
 // that's the one credential `sapien ui` can hand the browser before any
@@ -33,6 +43,7 @@ func (s *Server) handleUISession(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
+		MaxAge:   sessionCookieMaxAge,
 		// No Secure: the daemon only ever listens on 127.0.0.1 in plain
 		// HTTP (PLAN §28's loopback-only guard is the actual security
 		// boundary here); marking the cookie Secure on a non-TLS origin

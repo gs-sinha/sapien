@@ -15,9 +15,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/gs-sinha/sapien/internal/config"
 	"github.com/gs-sinha/sapien/internal/domain"
 	"github.com/gs-sinha/sapien/internal/errs"
 )
@@ -113,6 +115,52 @@ func NewToken() string {
 		panic("daemon: crypto/rand unavailable: " + err.Error())
 	}
 	return hex.EncodeToString(b)
+}
+
+// TokenPath returns the daemon's persisted bearer token file:
+// "~/.sapien/daemon-token" (config.UserDir). It is machine-wide, not
+// per-workspace: a daemon serving several workspaces (internal/workspaces)
+// already hands out one token for all of them, and using the same
+// persisted token across every workspace's daemon on this machine is what
+// lets `sapien daemon restart` (PLAN §34f item 3) hand off to its successor
+// without invalidating a browser session or MCP bridge that is already
+// holding it.
+func TokenPath() string {
+	return filepath.Join(config.UserDir(), "daemon-token")
+}
+
+// LoadOrCreateToken reads TokenPath's persisted bearer token, minting one
+// with NewToken and writing it (mode 0600) if the file is missing or
+// empty. `sapien serve` calls this instead of NewToken directly so that a
+// restart -- this build's own `serve --restart`, or the daemon's own
+// POST /v1/daemon/restart successor -- reuses the same token rather than
+// invalidating every session and bridge that already has it.
+func LoadOrCreateToken() (string, error) {
+	path := TokenPath()
+
+	data, err := os.ReadFile(path)
+	if err == nil {
+		if tok := strings.TrimSpace(string(data)); tok != "" {
+			return tok, nil
+		}
+		// An empty file is treated like a missing one and overwritten below.
+	} else if !os.IsNotExist(err) {
+		return "", errs.Wrap(errs.Internal, err, "reading %s", path)
+	}
+
+	tok := NewToken()
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", errs.Wrap(errs.Internal, err, "creating %s", dir)
+	}
+	// Written directly, not via a temp-file-then-rename dance like
+	// Write/daemon.json: this file is read by at most one process at a
+	// time (the next `sapien serve` to start), and a torn write here would
+	// just be treated as empty and regenerated on the very next call.
+	if err := os.WriteFile(path, []byte(tok+"\n"), 0o600); err != nil {
+		return "", errs.Wrap(errs.Internal, err, "writing %s", path)
+	}
+	return tok, nil
 }
 
 // processAlive reports whether pid names a process that still exists, via
