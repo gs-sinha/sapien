@@ -98,7 +98,7 @@ func (l *Local) resolvePackageRootForWatch(ref domain.ServiceRef) (string, error
 		if l.gitMgr == nil {
 			return "", errNotFingerprintable
 		}
-		checkout, err := l.gitMgr.Ensure(context.Background(), ref.Source)
+		checkout, err := l.gitMgr.Ensure(context.Background(), ref.EffectiveSource())
 		if err != nil {
 			return "", err
 		}

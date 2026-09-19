@@ -159,6 +159,64 @@ func (s *Server) handleServiceUnbind(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+// setRefRequest is PUT /v1/services/{id}/ref's body (PLAN §34f item 2).
+// Scope "" defaults to domain.RefScopeLocal, matching the engine's own
+// default.
+type setRefRequest struct {
+	Ref   string `json:"ref"`
+	Scope string `json:"scope,omitempty"`
+}
+
+// handleServiceSetRef is PUT /v1/services/{id}/ref: switches a git-sourced
+// service's ref, either just for this machine (sapien.workspace.local.yaml)
+// or for the team (source.ref in the committed sapien.workspace.yaml). The
+// engine refuses (errs.Invalid, mapped to 400) a non-git service or a ref
+// the remote does not have.
+func (s *Server) handleServiceSetRef(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var req setRefRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, err)
+		return
+	}
+	if strings.TrimSpace(req.Ref) == "" {
+		writeError(w, errs.New(errs.Invalid, "ref is required").
+			WithHint("pass the branch, tag, or commit to switch to"))
+		return
+	}
+	out, err := engineFrom(r.Context()).Services().SetRef(r.Context(), id, req.Ref, req.Scope)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// handleServiceClearRef is DELETE /v1/services/{id}/ref: clears this
+// machine's local ref override. The engine refuses (errs.Invalid, mapped to
+// 400) when there is none to clear.
+func (s *Server) handleServiceClearRef(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	out, err := engineFrom(r.Context()).Services().ClearRef(r.Context(), id)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// handleServiceBranches is GET /v1/services/{id}/branches: a git-sourced
+// service's branches and tags from `ls-remote`.
+func (s *Server) handleServiceBranches(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	out, err := engineFrom(r.Context()).Services().Branches(r.Context(), id)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 // handleServiceBrowseCheckouts is GET /v1/services/{id}/checkouts?path=: a
 // daemon-side directory picker, because a web page cannot learn an
 // absolute path from a file dialog. A missing path lists the home

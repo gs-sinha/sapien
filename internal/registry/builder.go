@@ -299,14 +299,27 @@ func (b *Builder) Build(ctx context.Context, ref domain.ServiceRef) (*Snapshot, 
 // DiscoverPackage a build already runs on root.
 func BindingFor(ctx context.Context, git *gitsrc.Manager, ref domain.ServiceRef, root string) *domain.ServiceBinding {
 	if ref.Source.Kind == domain.SourceGit {
+		// ref.Team, when set, is the committed source: ref.Source is then a
+		// machine-local ref override (PLAN §34f item 2), which must not be
+		// reported as the team source itself.
 		team := ref.Source
-		return &domain.ServiceBinding{Mode: domain.BindingTeam, Team: &team}
+		if ref.Team != nil {
+			team = *ref.Team
+		}
+		b := &domain.ServiceBinding{Mode: domain.BindingTeam, Team: &team}
+		if ref.LocalRef != "" {
+			b.RefOverride = &domain.RefOverride{Ref: ref.LocalRef, Scope: domain.RefScopeLocal}
+		}
+		return b
 	}
 
 	b := &domain.ServiceBinding{Mode: domain.BindingLocal, Writable: true}
 	if ref.Team != nil {
 		team := *ref.Team
 		b.Team = &team
+	}
+	if ref.LocalRef != "" {
+		b.RefOverride = &domain.RefOverride{Ref: ref.LocalRef, Scope: domain.RefScopeLocal}
 	}
 
 	if root == "" {

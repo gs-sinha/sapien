@@ -221,6 +221,87 @@ func (s *serviceAPI) BrowseCheckouts(ctx context.Context, name, dir string) (*en
 	return &engine.DirListing{Path: dir, Entries: []engine.DirEntry{}}, nil
 }
 
+// SetRef switches name's ref: scope domain.RefScopeTeam rewrites the
+// committed (Binding.Team) ref and, when the service is currently read
+// straight from it, the effective Source.Ref too; anything else (including
+// "", the default) records a local override that leaves Binding.Team
+// alone.
+func (s *serviceAPI) SetRef(ctx context.Context, name, ref string, scope string) (*domain.Service, error) {
+	f := s.f()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.recordLocked("Services.SetRef", map[string]any{"name": name, "ref": ref, "scope": scope})
+
+	svc, ok := f.services[name]
+	if !ok {
+		return nil, errs.New(errs.ServiceNotFound, "service %q not found", name).WithDetail("name", name)
+	}
+	team := svc.Source
+	if svc.Binding != nil && svc.Binding.Team != nil {
+		team = *svc.Binding.Team
+	}
+	if team.Kind != domain.SourceGit {
+		return nil, errs.New(errs.Invalid, "service %q is not git-sourced", name).WithDetail("name", name)
+	}
+
+	if scope == domain.RefScopeTeam {
+		team.Ref = ref
+		if svc.Source.Kind == domain.SourceGit {
+			svc.Source.Ref = ref
+		}
+		svc.Binding = &domain.ServiceBinding{Mode: domain.BindingTeam, Team: &team}
+	} else {
+		svc.Source = domain.Source{Kind: domain.SourceGit, URL: team.URL, Ref: ref, Subdir: team.Subdir, Contract: team.Contract}
+		svc.Binding = &domain.ServiceBinding{
+			Mode:        domain.BindingTeam,
+			Team:        &team,
+			RefOverride: &domain.RefOverride{Ref: ref, Scope: domain.RefScopeLocal},
+		}
+	}
+	f.services[name] = svc
+	cp := svc
+	return &cp, nil
+}
+
+// ClearRef removes the local ref override SetRef recorded, restoring the
+// committed ref.
+func (s *serviceAPI) ClearRef(ctx context.Context, name string) (*domain.Service, error) {
+	f := s.f()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.recordLocked("Services.ClearRef", name)
+
+	svc, ok := f.services[name]
+	if !ok {
+		return nil, errs.New(errs.ServiceNotFound, "service %q not found", name).WithDetail("name", name)
+	}
+	if svc.Binding == nil || svc.Binding.RefOverride == nil {
+		return nil, errs.New(errs.Invalid, "service %q has no local ref override", name).WithDetail("name", name)
+	}
+	team := *svc.Binding.Team
+	svc.Source = team
+	svc.Binding = &domain.ServiceBinding{Mode: domain.BindingTeam, Team: &team}
+	f.services[name] = svc
+	cp := svc
+	return &cp, nil
+}
+
+// Branches reports a single-branch "main" fixture; a test that needs
+// specific branches/tags has no seam yet since nothing currently exercises
+// it against the fake.
+func (s *serviceAPI) Branches(ctx context.Context, name string) (*engine.BranchList, error) {
+	f := s.f()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.recordLocked("Services.Branches", name)
+
+	svc, ok := f.services[name]
+	if !ok {
+		return nil, errs.New(errs.ServiceNotFound, "service %q not found", name).WithDetail("name", name)
+	}
+	return &engine.BranchList{Current: svc.Source.Ref, Default: "main", Branches: []string{"main"}}, nil
+}
+
 // AddFromCheckout registers a git source named after the path's last
 // element and binds the path, mirroring what the real engine does with the
 // checkout's origin.

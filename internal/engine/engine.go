@@ -76,6 +76,35 @@ type ServiceAPI interface {
 	// read while this machine reads the working copy at once. name ""
 	// derives the name from the contract, as Add does.
 	AddFromCheckout(ctx context.Context, name, path string, opts AddFromCheckoutOptions) (*domain.Service, error)
+
+	// SetRef switches name's ref (PLAN §34f item 2): scope domain.RefScopeLocal
+	// (default) writes only sapien.workspace.local.yaml (this machine);
+	// domain.RefScopeTeam rewrites source.ref in the committed
+	// sapien.workspace.yaml. Refused (errs.Invalid) when name is not
+	// git-sourced, or when ref does not exist on the remote (checked via
+	// ls-remote before anything is written; the error names close matches
+	// when Branches was cheap to compute). Resyncs through the normal Sync
+	// path afterward (fetch, move the managed clone if the ref carries a
+	// new local override, reindex).
+	SetRef(ctx context.Context, name, ref string, scope string) (*domain.Service, error)
+	// ClearRef removes this machine's local ref override, resyncing back to
+	// whatever ref is now effective (the committed one, unless a path
+	// override is also active). Refused (errs.Invalid) when there is no
+	// local ref override to clear.
+	ClearRef(ctx context.Context, name string) (*domain.Service, error)
+	// Branches lists a git-sourced service's branches and tags from
+	// `ls-remote`, current naming the ref this machine actually reads
+	// (Source.Ref, "" meaning the remote's default branch) and default
+	// naming the remote's default branch.
+	Branches(ctx context.Context, name string) (*BranchList, error)
+}
+
+// BranchList is ServiceAPI.Branches' answer (PLAN §34f item 2).
+type BranchList struct {
+	Current  string   `json:"current"`
+	Default  string   `json:"default"`
+	Branches []string `json:"branches"`
+	Tags     []string `json:"tags"`
 }
 
 // BindingInfo is Services().Binding's answer: the service's current binding
@@ -394,6 +423,24 @@ type RepoAPI interface {
 	// since a pull must come first, and a no-op success when nothing is
 	// ahead. The returned status carries Pushed and PushedCount.
 	Push(ctx context.Context) (*domain.RepoStatus, error)
+
+	// Changes lists every changed file the workspace repository knows about
+	// (PLAN §34f item 1): the source-control-panel view behind the Changes
+	// page. Every workspace-tier file (flows, memories, examples,
+	// environments, sapien.workspace.yaml, .gitignore) is covered, classified
+	// into a kind/id/title where the catalog recognizes the path; bound
+	// local service checkouts are listed too (branch, changed files under
+	// the API package), read-only.
+	Changes(ctx context.Context) (*domain.RepoChanges, error)
+	// Diff reports one file's diff or (for an untracked file) content.
+	// path is repo-root-relative, as Changes reports it.
+	Diff(ctx context.Context, path string) (*domain.RepoDiff, error)
+	// Commit stages and commits exactly paths (repo-root-relative) in the
+	// workspace repository with one commit, never pushes, never amends,
+	// never passes --no-verify. Refused (errs.Invalid) when message is
+	// empty, when paths is empty, or when nothing in paths has a change to
+	// commit. Emits EventWorkspaceRepo so the status bar refreshes.
+	Commit(ctx context.Context, paths []string, message string) (*domain.RepoCommitResult, error)
 }
 
 // SettingsAPI manages daemon/workspace-level settings exposed to a UI or

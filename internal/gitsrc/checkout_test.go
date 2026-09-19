@@ -342,12 +342,12 @@ func TestRemove(t *testing.T) {
 	require.NoError(t, err)
 	require.DirExists(t, co.Dir)
 
-	require.NoError(t, m.Remove(url))
+	require.NoError(t, m.Remove(gitSource(url)))
 	assert.NoDirExists(t, co.Dir)
 
 	// Removing an already-absent (or never-cloned) URL is not an error.
-	assert.NoError(t, m.Remove(url))
-	assert.NoError(t, m.Remove("git@example.com:nope/nope.git"))
+	assert.NoError(t, m.Remove(gitSource(url)))
+	assert.NoError(t, m.Remove(gitSource("git@example.com:nope/nope.git")))
 }
 
 func TestList(t *testing.T) {
@@ -390,6 +390,85 @@ func TestList(t *testing.T) {
 
 	// Sorted by URL.
 	assert.True(t, list[0].URL < list[1].URL)
+}
+
+// TestDirFor_NoOverride_SameAsDir: a Source with no ref override resolves
+// to the same directory as Dir(url) -- unaffected by DirFor's introduction.
+func TestDirFor_NoOverride_SameAsDir(t *testing.T) {
+	m := testManager(t, hermeticGitEnv(t))
+	src := gitSource("git@example.com:org/repo.git")
+	src.Ref = "main"
+	assert.Equal(t, m.Dir(src.URL), m.DirFor(src))
+}
+
+// TestDirFor_Override_SeparateDirectory: a Source whose ref carries a local
+// override resolves to a different directory than the plain URL clone, and
+// two different overridden refs of the same URL resolve to two different
+// directories from each other too.
+func TestDirFor_Override_SeparateDirectory(t *testing.T) {
+	m := testManager(t, hermeticGitEnv(t))
+	url := "git@example.com:org/repo.git"
+
+	plain := gitSource(url)
+	plain.Ref = "main"
+
+	overrideA := gitSource(url)
+	overrideA.Ref = "feature-a"
+	overrideA.RefOverridden = true
+
+	overrideB := gitSource(url)
+	overrideB.Ref = "feature-b"
+	overrideB.RefOverridden = true
+
+	dirPlain := m.DirFor(plain)
+	dirA := m.DirFor(overrideA)
+	dirB := m.DirFor(overrideB)
+
+	assert.Equal(t, m.Dir(url), dirPlain)
+	assert.NotEqual(t, dirPlain, dirA)
+	assert.NotEqual(t, dirPlain, dirB)
+	assert.NotEqual(t, dirA, dirB)
+}
+
+// TestEnsureSync_RefOverride_UsesSeparateClone: Ensure/Sync with an
+// overridden ref clone into DirFor's directory, leaving the plain (team)
+// clone of the same URL untouched under its own directory -- two refs of
+// one URL never thrash one clone (PLAN §34f item 2).
+func TestEnsureSync_RefOverride_UsesSeparateClone(t *testing.T) {
+	env := hermeticGitEnv(t)
+	bareDir, url := newBareRepo(t, env)
+	commitAndPush(t, bareDir, env, map[string]string{"api/openapi.yaml": "main\n"}, "init")
+	createBranch(t, bareDir, env, "feature", "main", map[string]string{"api/openapi.yaml": "feature\n"}, "feature branch")
+
+	m := testManager(t, env)
+
+	team := gitSource(url)
+	team.Ref = "main"
+	teamCo, err := m.Ensure(context.Background(), team)
+	require.NoError(t, err)
+
+	override := gitSource(url)
+	override.Ref = "feature"
+	override.RefOverridden = true
+	overrideCo, err := m.Ensure(context.Background(), override)
+	require.NoError(t, err)
+
+	assert.NotEqual(t, teamCo.Dir, overrideCo.Dir)
+
+	teamData, err := os.ReadFile(filepath.Join(teamCo.PackageDir, "openapi.yaml"))
+	require.NoError(t, err)
+	assert.Equal(t, "main\n", string(teamData))
+
+	overrideData, err := os.ReadFile(filepath.Join(overrideCo.PackageDir, "openapi.yaml"))
+	require.NoError(t, err)
+	assert.Equal(t, "feature\n", string(overrideData))
+
+	// Syncing the override must never disturb the team clone.
+	_, _, err = m.Sync(context.Background(), override)
+	require.NoError(t, err)
+	teamData, err = os.ReadFile(filepath.Join(teamCo.PackageDir, "openapi.yaml"))
+	require.NoError(t, err)
+	assert.Equal(t, "main\n", string(teamData))
 }
 
 func TestEnsure_Errors_BadURL(t *testing.T) {

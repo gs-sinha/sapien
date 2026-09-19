@@ -3,10 +3,13 @@ package local
 import (
 	"context"
 	"fmt"
+	"path/filepath"
+	"strings"
 
 	"github.com/gs-sinha/sapien/internal/domain"
 	"github.com/gs-sinha/sapien/internal/engine"
 	"github.com/gs-sinha/sapien/internal/errs"
+	"github.com/gs-sinha/sapien/internal/workspace"
 )
 
 // repoAPI implements engine.RepoAPI over a Local (PLAN §7b): the
@@ -288,4 +291,258 @@ func (r *repoAPI) Push(ctx context.Context) (*domain.RepoStatus, error) {
 	final.PushedCount = count
 	l.emit(domain.EventWorkspaceRepo, final)
 	return final, nil
+}
+
+// Changes lists every changed file the workspace repository knows about
+// (PLAN §34f item 1): gitsrc.Manager.Changes for the raw list -- one
+// `status` plus, when there is an upstream, one `log` -- classified into a
+// kind/id/title by buildChangeIndex, plus one entry per registered service
+// (serviceChanges). A workspace that is not a git repository at all comes
+// back with an empty Files/Services, not an error: Changes is a read, and
+// "nothing to show" is what a plain (non-git) workspace's Changes page
+// should say.
+func (r *repoAPI) Changes(ctx context.Context) (*domain.RepoChanges, error) {
+	l := r.l
+	status, err := r.Status(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := &domain.RepoChanges{Status: *status, Files: []domain.RepoFileChange{}}
+	if !status.InGit {
+		return out, nil
+	}
+
+	raw, err := l.gitMgr.Changes(ctx, l.ws.Dir)
+	if err != nil {
+		return nil, err
+	}
+
+	// wsRelPrefix is l.ws.Dir's own repo-root-relative path (with a
+	// trailing "/"), "" when the workspace directory is the repository
+	// root itself -- the case that matters everywhere except a monorepo
+	// workspace. Stripping it from a change's Path is what lets
+	// classifyPath recognize sapien.workspace.yaml, .gitignore and
+	// environments/ by their workspace-relative spelling even when the
+	// repository holds more than this one workspace.
+	wsRelPrefix := ""
+	if rel, ok := repoRelative(status.Root, resolvedOrSelf(l.ws.Dir)); ok && rel != "" {
+		wsRelPrefix = rel + "/"
+	}
+
+	idx := l.buildChangeIndex(ctx, status.Root)
+	for i := range raw {
+		classifyPath(&raw[i], idx, strings.TrimPrefix(raw[i].Path, wsRelPrefix))
+	}
+	out.Files = raw
+	out.Services = r.serviceChanges(ctx)
+	return out, nil
+}
+
+// serviceChanges builds the Changes page's services array (PLAN §34f item
+// 1): a service bound to a local checkout (Source.Kind local, whether from
+// an override or a native local source) reports its path, branch, dirty
+// count and changed files under its API package directory -- a read-only
+// gitsrc.Changes scoped to that directory, never a fetch, commit or
+// checkout there; a team-sourced service reports its effective ref
+// (Source.Ref, already reflecting any local ref override -- PLAN §34f item
+// 2) and no files, since a managed clone is not the developer's own work.
+// Any one service's lookup failing (an unresolvable local path, a git
+// query erroring) drops only that service's detail, never the whole list.
+func (r *repoAPI) serviceChanges(ctx context.Context) []domain.RepoServiceChanges {
+	l := r.l
+	out := make([]domain.RepoServiceChanges, 0, len(l.ws.Services))
+	for _, ref := range l.ws.Services {
+		if ref.Source.Kind != domain.SourceLocal {
+			out = append(out, domain.RepoServiceChanges{
+				Name: ref.Name,
+				Mode: domain.BindingTeam,
+				Ref:  ref.Source.Ref,
+			})
+			continue
+		}
+
+		sc := domain.RepoServiceChanges{Name: ref.Name, Mode: domain.BindingLocal}
+		root, err := workspace.ResolveSourcePath(l.ws, ref.Source)
+		if err != nil {
+			out = append(out, sc)
+			continue
+		}
+		sc.Path = root
+		if co, err := l.gitMgr.Describe(ctx, root); err == nil {
+			sc.Branch = co.Branch
+			sc.Dirty = co.Dirty > 0
+		}
+		if svc, err := l.cat.GetService(ctx, ref.Name); err == nil && svc != nil && svc.PackageDir != "" {
+			if files, ferr := l.gitMgr.Changes(ctx, svc.PackageDir); ferr == nil {
+				sc.Files = files
+			}
+		}
+		out = append(out, sc)
+	}
+	return out
+}
+
+// catalogPathEntry is one workspace-tier item buildChangeIndex indexes by
+// its repo-root-relative path.
+type catalogPathEntry struct {
+	kind, id, title string
+}
+
+// buildChangeIndex indexes every workspace-tier flow, memory and example by
+// its repo-root-relative path under root (PLAN §34f item 1's Changes
+// classification). A lookup failure for any one kind degrades to no
+// entries for that kind rather than failing Changes outright -- a listing
+// must never fail because one store's List did.
+func (l *Local) buildChangeIndex(ctx context.Context, root string) map[string]catalogPathEntry {
+	idx := map[string]catalogPathEntry{}
+
+	if flows, err := l.cat.ListFlows(ctx, domain.FlowOwnerWorkspace, ""); err == nil {
+		for _, fs := range flows {
+			rel, ok := repoRelative(root, fs.Path)
+			if !ok {
+				continue
+			}
+			title := fs.Name
+			if title == "" {
+				title = fs.ID
+			}
+			idx[rel] = catalogPathEntry{kind: domain.RepoKindFlow, id: fs.ID, title: title}
+		}
+	}
+
+	if mems, err := l.memStore.List(ctx, domain.MemoryQuery{}); err == nil {
+		for _, m := range mems {
+			if m.Tier != domain.TierWorkspace || m.FilePath == "" {
+				continue
+			}
+			rel, ok := repoRelative(root, m.FilePath)
+			if !ok {
+				continue
+			}
+			idx[rel] = catalogPathEntry{kind: domain.RepoKindMemory, id: m.ID, title: memoryTitle(m)}
+		}
+	}
+
+	if exs, err := l.exStore.List(ctx, domain.ExampleQuery{}); err == nil {
+		for _, ex := range exs {
+			if ex.Tier != domain.TierWorkspace || ex.Path == "" {
+				continue
+			}
+			rel, ok := repoRelative(root, ex.Path)
+			if !ok {
+				continue
+			}
+			title := ex.Description
+			if title == "" {
+				title = ex.ID
+			}
+			idx[rel] = catalogPathEntry{kind: domain.RepoKindExample, id: ex.ID, title: title}
+		}
+	}
+
+	return idx
+}
+
+// repoRelative resolves abs (an absolute file path) to a repo-root-relative,
+// "/"-separated path under root, or ok=false when it is not under root at
+// all. Both sides are compared symlink-resolved (resolvedOrSelf), matching
+// what git's own output (gitMgr.Changes, via root's Toplevel) is already
+// relative to -- see gitsrc/describe_test.go's TestManager_Toplevel for why
+// that matters on a symlinked temp or home directory.
+func repoRelative(root, abs string) (string, bool) {
+	rel, err := filepath.Rel(resolvedOrSelf(root), resolvedOrSelf(abs))
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return filepath.ToSlash(rel), true
+}
+
+// memoryTitle derives a short label for a memory, which has no Name field
+// of its own: the first non-empty line of its Markdown body, a leading
+// heading marker trimmed and length capped, falling back to its ID when
+// the body is empty.
+func memoryTitle(m domain.Memory) string {
+	for _, line := range strings.Split(m.Text, "\n") {
+		line = strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(line), "#"))
+		if line == "" {
+			continue
+		}
+		if len(line) > 80 {
+			line = line[:80]
+		}
+		return line
+	}
+	return m.ID
+}
+
+// classifyPath fills Kind/ID/Title on c in place: a flow/memory/example
+// match from idx (keyed by c.Path, repo-root-relative) first; otherwise
+// workspaceRel -- c.Path with the workspace directory's own repo-relative
+// prefix stripped, so this recognizes sapien.workspace.yaml, .gitignore and
+// environments/ by their workspace-relative spelling even inside a
+// monorepo -- against the well-known workspace files; RepoKindOther
+// otherwise.
+func classifyPath(c *domain.RepoFileChange, idx map[string]catalogPathEntry, workspaceRel string) {
+	if entry, ok := idx[c.Path]; ok {
+		c.Kind, c.ID, c.Title = entry.kind, entry.id, entry.title
+		return
+	}
+	switch {
+	case workspaceRel == domain.WorkspaceFileName, workspaceRel == ".gitignore":
+		c.Kind = domain.RepoKindWorkspace
+	case strings.HasPrefix(workspaceRel, domain.EnvironmentsDir+"/"):
+		c.Kind = domain.RepoKindEnvironment
+	default:
+		c.Kind = domain.RepoKindOther
+	}
+}
+
+// Diff reports one file's diff or (for an untracked file) content
+// (PLAN §34f item 1). path is repo-root-relative, as Changes reports it;
+// gitsrc.Manager.Diff enforces the path safety rule (cleaned, no absolute
+// or escaping path, refuses an ignored file) and does the actual git work.
+func (r *repoAPI) Diff(ctx context.Context, path string) (*domain.RepoDiff, error) {
+	return r.l.gitMgr.Diff(ctx, r.l.ws.Dir, path)
+}
+
+// Commit stages and commits exactly paths (repo-root-relative, as Changes
+// reports them) in the workspace repository with one commit (PLAN §34f item
+// 1): never pushes, never amends, never passes --no-verify (gitsrc.
+// CommitPaths). Each path is validated with the same rule Diff applies
+// (gitsrc.Manager.SafePath: cleaned, no absolute or escaping path, refused
+// if git ignores it) before anything is staged. message is required
+// (CommitPaths trims and checks it); paths must contain at least one
+// changed file (CommitPaths refuses otherwise). Emits EventWorkspaceRepo
+// with the refreshed status so the status bar (and, on the next read, every
+// flow/memory/example listing's Shipped state -- computed live from git,
+// never cached) reflects the commit immediately.
+func (r *repoAPI) Commit(ctx context.Context, paths []string, message string) (*domain.RepoCommitResult, error) {
+	l := r.l
+	if len(paths) == 0 {
+		return nil, errs.New(errs.Invalid, "no paths given")
+	}
+
+	abs := make([]string, 0, len(paths))
+	committed := make([]string, 0, len(paths))
+	for _, p := range paths {
+		rel, a, err := l.gitMgr.SafePath(ctx, l.ws.Dir, p)
+		if err != nil {
+			return nil, err
+		}
+		abs = append(abs, a)
+		committed = append(committed, rel)
+	}
+
+	sha, err := l.gitMgr.CommitPaths(ctx, l.ws.Dir, abs, message)
+	if err != nil {
+		return nil, err
+	}
+
+	status, err := r.Status(ctx)
+	if err != nil {
+		return nil, err
+	}
+	l.emit(domain.EventWorkspaceRepo, status)
+
+	return &domain.RepoCommitResult{Commit: sha, Committed: committed, Status: *status}, nil
 }

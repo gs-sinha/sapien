@@ -52,6 +52,7 @@ type Fake struct {
 	secrets      map[string]string       // name -> value; never returned by any API
 	repo         domain.RepoStatus       // what Repo() reports; see SetRepoStatus
 	semantic     domain.SemanticSettings // what Settings().GetSemantic reports; see SetSemanticSettings
+	repoChanges  []domain.RepoFileChange // what Repo().Changes reports; see SetRepoChanges
 
 	reindexedServices bool
 	reindexedMemories bool

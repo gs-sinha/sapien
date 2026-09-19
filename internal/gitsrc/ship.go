@@ -149,16 +149,60 @@ func unquoteGitPath(p string) string {
 }
 
 // CommitPaths stages and commits exactly paths (absolute, inside repo) --
-// `add -- <paths>` then `commit -m message -- <paths>`, so only these paths
-// are committed even when the index already holds other staged changes --
-// and returns the new HEAD sha. Never pushes (PLAN §7b: opt-in, never
-// pushing). Errors are classified through the same gitError as every other
-// git invocation in this package.
+// `add -A -- <paths>` (so a deletion or a rename among paths stages
+// correctly, not just a content edit) then `commit -m message -- <paths>`,
+// so only these paths are committed even when the index already holds other
+// staged changes -- and returns the new HEAD sha. Never pushes (PLAN §7b:
+// opt-in, never pushing), never amends, never passes --no-verify: a
+// developer's commit hooks run exactly as if they had typed the commit
+// themselves.
+//
+// message is required (trimmed, non-empty) and paths must contain at least
+// one path FileStates reports as ShipUntracked or ShipModified -- otherwise
+// CommitPaths refuses with errs.Invalid rather than letting `git commit`
+// fail with its own "nothing to commit" (PLAN §34f item 1): a path that is
+// already ShipUnpushed or ShipShipped has nothing left for a commit to do.
+// Errors are classified through the same gitError as every other git
+// invocation in this package.
 func (m *Manager) CommitPaths(ctx context.Context, repo string, paths []string, message string) (string, error) {
 	if len(paths) == 0 {
 		return "", errs.New(errs.Invalid, "CommitPaths: no paths given")
 	}
-	addArgs := append([]string{"add", "--"}, paths...)
+	message = strings.TrimSpace(message)
+	if message == "" {
+		return "", errs.New(errs.Invalid, "CommitPaths: message is required")
+	}
+
+	// Resolved symlink-consistently on both sides before FileStates, which
+	// matches repo against each path with plain string math
+	// (filepath.Rel): repo (every existing caller's l.ws.Dir) and paths
+	// (this package's own SafePath, unlike every existing caller, resolves
+	// symlinks when it builds an absolute path -- see gitsrc/describe_test.go's
+	// TestManager_Toplevel) would otherwise disagree on a symlinked temp or
+	// home directory (macOS: /tmp -> /private/tmp) for two spellings of the
+	// identical file.
+	resolvedRepo := resolvedOrSelfPath(repo)
+	resolvedPaths := make([]string, len(paths))
+	for i, p := range paths {
+		resolvedPaths[i] = resolvedOrSelfPath(p)
+	}
+	states, err := m.FileStates(ctx, resolvedRepo, resolvedPaths)
+	if err != nil {
+		return "", err
+	}
+	hasChange := false
+	for _, p := range resolvedPaths {
+		if s := states[p]; s == domain.ShipUntracked || s == domain.ShipModified {
+			hasChange = true
+			break
+		}
+	}
+	if !hasChange {
+		return "", errs.New(errs.Invalid, "nothing to commit in the given paths").
+			WithDetail("paths", paths)
+	}
+
+	addArgs := append([]string{"add", "-A", "--"}, paths...)
 	if _, err := m.run(ctx, repo, addArgs...); err != nil {
 		return "", err
 	}

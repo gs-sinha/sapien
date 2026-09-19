@@ -18,6 +18,14 @@ type Source struct {
 	Ref      string     `yaml:"ref,omitempty" json:"ref,omitempty"`           // git: branch, tag, or commit
 	Subdir   string     `yaml:"subdir,omitempty" json:"subdir,omitempty"`     // git: package dir inside the repo (default "api")
 	Contract string     `yaml:"contract,omitempty" json:"contract,omitempty"` // explicit contract file override
+	// RefOverridden marks that Ref reflects this machine's local override
+	// (sapien.workspace.local.yaml's `ref:`, ServiceRef.LocalRef) rather than
+	// the committed workspace file (PLAN §34f item 2). Never persisted
+	// (yaml/json "-"): callers set it on a copy of Source just before handing
+	// it to gitsrc, whose Manager.DirFor uses it to give an overridden ref
+	// its own managed-clone cache directory so two refs of one URL never
+	// thrash a single clone.
+	RefOverridden bool `yaml:"-" json:"-"`
 }
 
 // SyncStatus is the indexing state of a service.
@@ -153,7 +161,26 @@ type ServiceBinding struct {
 	// can be written for this service here: true for a local checkout,
 	// false for a managed clone.
 	Writable bool `json:"writable"`
+	// RefOverride is set when this machine reads a different ref than the
+	// committed one (PLAN §34f item 2): ServiceRef.LocalRef, alongside the
+	// scope it was set at. nil when this machine reads the committed ref.
+	RefOverride *RefOverride `json:"ref_override,omitempty"`
 }
+
+// RefOverride is ServiceBinding.RefOverride's shape, and the scope argument
+// ServiceAPI.SetRef takes (PLAN §34f item 2): "local" writes
+// sapien.workspace.local.yaml only (this machine); "team" rewrites
+// source.ref in the committed sapien.workspace.yaml.
+type RefOverride struct {
+	Ref   string `json:"ref"`
+	Scope string `json:"scope"` // RefScopeLocal | RefScopeTeam
+}
+
+// Ref override scopes (PLAN §34f item 2).
+const (
+	RefScopeLocal = "local"
+	RefScopeTeam  = "team"
+)
 
 // LocalCheckout describes a local git checkout of a service: the path this
 // machine reads, and what git says about it (read-only queries; Sapien

@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -55,6 +56,8 @@ func newWorkspaceCmd(app *App) *cobra.Command {
 		newWorkspacePullCmd(app),
 		newWorkspaceSyncCmd(app),
 		newWorkspacePushCmd(app),
+		newWorkspaceChangesCmd(app),
+		newWorkspaceCommitCmd(app),
 	)
 	return cmd
 }
@@ -552,4 +555,245 @@ func closeOnDaemon(ctx context.Context, app *App, dir string) (bool, error) {
 		return false, envelope.Error
 	}
 	return false, errs.New(errs.Internal, "closing %s on the daemon: HTTP %d", dir, resp.StatusCode)
+}
+
+// newWorkspaceChangesCmd is `sapien workspace changes` (PLAN §34f item 1):
+// the CLI's view of the Changes page -- every changed file the workspace
+// repository (and any bound local service checkout) knows about.
+func newWorkspaceChangesCmd(app *App) *cobra.Command {
+	return &cobra.Command{
+		Use:   "changes",
+		Short: "Show every changed file the workspace repository (and bound service checkouts) knows about",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			eng, err := app.Engine()
+			if err != nil {
+				return err
+			}
+			defer eng.Close()
+
+			out, err := eng.Repo().Changes(cmd.Context())
+			if err != nil {
+				return err
+			}
+			if app.Printer.IsJSON() {
+				return app.Printer.JSON(out)
+			}
+			printRepoChanges(app.Printer, out)
+			return nil
+		},
+	}
+}
+
+// repoKindOrder is the group order printRepoChanges renders Files in.
+var repoKindOrder = []string{
+	domain.RepoKindFlow, domain.RepoKindMemory, domain.RepoKindExample,
+	domain.RepoKindEnvironment, domain.RepoKindWorkspace, domain.RepoKindOther,
+}
+
+// printRepoChanges renders `workspace changes`' grouped, tree-ish plain
+// output: every file grouped by kind (flow, memory, example, environment,
+// workspace, other; PLAN §34f item 1's rollup, folder -> repository, one
+// level flatter than the UI's tree since a terminal has no fold state),
+// then one entry per registered service.
+func printRepoChanges(p *Printer, out *domain.RepoChanges) {
+	if !out.Status.InGit {
+		p.Line("not a git repository")
+		return
+	}
+	if len(out.Files) == 0 {
+		p.Line("nothing changed")
+	} else {
+		byKind := map[string][]domain.RepoFileChange{}
+		for _, f := range out.Files {
+			byKind[f.Kind] = append(byKind[f.Kind], f)
+		}
+		for _, kind := range repoKindOrder {
+			files := byKind[kind]
+			if len(files) == 0 {
+				continue
+			}
+			p.Line("%s:", repoKindLabel(kind))
+			for _, f := range files {
+				p.Line("  %s", repoFileChangeLine(p, f))
+			}
+		}
+	}
+
+	for _, svc := range out.Services {
+		switch svc.Mode {
+		case domain.BindingLocal:
+			line := fmt.Sprintf("service %s: local %s", svc.Name, svc.Path)
+			if svc.Branch != "" {
+				line += " (branch " + svc.Branch + ")"
+			}
+			if svc.Dirty {
+				line += ", dirty"
+			}
+			p.Line("%s", line)
+			for _, f := range svc.Files {
+				p.Line("  %s  %s", repoChangeStateLabel(f.State), f.Path)
+			}
+		case domain.BindingTeam:
+			ref := svc.Ref
+			if ref == "" {
+				ref = "default"
+			}
+			p.Line("service %s: team @ %s", svc.Name, ref)
+		}
+	}
+}
+
+// repoFileChangeLine renders one Files entry: state, path (and, for a
+// rename, the path it came from), and a dimmed title when the catalog
+// recognized it.
+func repoFileChangeLine(p *Printer, f domain.RepoFileChange) string {
+	line := repoChangeStateLabel(f.State) + "  " + f.Path
+	if f.OldPath != "" {
+		line += " (was " + f.OldPath + ")"
+	}
+	if f.Title != "" {
+		line += "  " + p.Dim(f.Title)
+	}
+	return line
+}
+
+func repoKindLabel(kind string) string {
+	switch kind {
+	case domain.RepoKindFlow:
+		return "flows"
+	case domain.RepoKindMemory:
+		return "memories"
+	case domain.RepoKindExample:
+		return "examples"
+	case domain.RepoKindEnvironment:
+		return "environments"
+	case domain.RepoKindWorkspace:
+		return "workspace"
+	default:
+		return "other"
+	}
+}
+
+func repoChangeStateLabel(state string) string {
+	switch state {
+	case domain.ChangeUntracked:
+		return "untracked"
+	case domain.ChangeModified:
+		return "modified"
+	case domain.ChangeDeleted:
+		return "deleted"
+	case domain.ChangeRenamed:
+		return "renamed"
+	case domain.ChangeConflicted:
+		return "conflicted"
+	case domain.ChangeUnpushed:
+		return "unpushed"
+	default:
+		return state
+	}
+}
+
+// newWorkspaceCommitCmd is `sapien workspace commit -m <msg> [--all |
+// <paths>...]` (PLAN §34f item 1): the standalone commit for the workspace
+// repository, covering every file in it -- including sapien.workspace.yaml,
+// environments/ and .gitignore, which no per-kind (flow/memory/example)
+// commit reaches. Never pushes, never amends, never passes --no-verify.
+func newWorkspaceCommitCmd(app *App) *cobra.Command {
+	var message string
+	var all bool
+	cmd := &cobra.Command{
+		Use:   "commit [-m <msg>] [--all | <paths>...]",
+		Short: "Commit paths in the workspace repository with one commit; never pushes",
+		Long: `Commit stages and commits exactly the given paths -- or, with --all, every
+untracked, modified, deleted or renamed file "workspace changes" reports --
+in the workspace repository, with one commit. Never pushes, never amends,
+never passes --no-verify.
+
+Paths are resolved against the current directory, like any other path a
+shell command takes; a path outside the workspace repository, or one git
+ignores, is refused.`,
+		Args: cobra.ArbitraryArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			switch {
+			case all && len(args) > 0:
+				return errs.New(errs.Invalid, "workspace commit: pass paths or --all, not both")
+			case !all && len(args) == 0:
+				return errs.New(errs.Invalid, "workspace commit: requires at least one path, or --all")
+			}
+
+			eng, err := app.Engine()
+			if err != nil {
+				return err
+			}
+			defer eng.Close()
+
+			status, err := eng.Repo().Status(cmd.Context())
+			if err != nil {
+				return err
+			}
+			if !status.InGit {
+				return errs.New(errs.Invalid, "workspace is not a git repository")
+			}
+
+			var paths []string
+			if all {
+				changes, err := eng.Repo().Changes(cmd.Context())
+				if err != nil {
+					return err
+				}
+				for _, f := range changes.Files {
+					switch f.State {
+					case domain.ChangeUntracked, domain.ChangeModified, domain.ChangeDeleted, domain.ChangeRenamed:
+						paths = append(paths, f.Path)
+					}
+				}
+				if len(paths) == 0 {
+					if app.Printer.IsJSON() {
+						return app.Printer.JSON(domain.RepoCommitResult{Status: *status})
+					}
+					app.Printer.Line("nothing to commit")
+					return nil
+				}
+			} else {
+				for _, a := range args {
+					rel, err := repoRelativePath(status.Root, a)
+					if err != nil {
+						return err
+					}
+					paths = append(paths, rel)
+				}
+			}
+
+			out, err := eng.Repo().Commit(cmd.Context(), paths, message)
+			if err != nil {
+				return err
+			}
+			if app.Printer.IsJSON() {
+				return app.Printer.JSON(out)
+			}
+			app.Printer.Line("committed %s (%d file(s))", out.Commit[:min(len(out.Commit), 12)], len(out.Committed))
+			for _, p := range out.Committed {
+				app.Printer.Line("  %s", p)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVarP(&message, "message", "m", "", "commit message (required)")
+	cmd.Flags().BoolVar(&all, "all", false, "commit every untracked, modified, deleted or renamed file 'workspace changes' reports")
+	return cmd
+}
+
+// repoRelativePath resolves arg (a path typed relative to the current
+// working directory, or absolute) against root (the workspace repository's
+// root, RepoStatus.Root) to the repo-root-relative, "/"-separated form
+// Repo().Commit expects.
+func repoRelativePath(root, arg string) (string, error) {
+	abs := absolutizeAgainstCwd(arg)
+	rel, err := filepath.Rel(root, abs)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", errs.New(errs.Invalid, "%s is outside the workspace repository at %s", arg, root).
+			WithDetail("path", arg)
+	}
+	return filepath.ToSlash(rel), nil
 }

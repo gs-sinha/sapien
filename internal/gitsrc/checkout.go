@@ -48,7 +48,7 @@ func (m *Manager) Ensure(ctx context.Context, src domain.Source) (*Checkout, err
 		return nil, err
 	}
 
-	dir := m.Dir(src.URL)
+	dir := m.DirFor(src)
 	fresh := !isGitRepo(dir)
 
 	if fresh {
@@ -109,7 +109,7 @@ func (m *Manager) Sync(ctx context.Context, src domain.Source) (*Checkout, bool,
 		return nil, false, err
 	}
 
-	dir := m.Dir(src.URL)
+	dir := m.DirFor(src)
 
 	if !isGitRepo(dir) {
 		co, err := m.Ensure(ctx, src)
@@ -194,10 +194,12 @@ func (m *Manager) Sync(ctx context.Context, src domain.Source) (*Checkout, bool,
 	}, before != after, nil
 }
 
-// Remove deletes the managed clone for url, if any. Removing a clone that
+// Remove deletes the managed clone for src (DirFor(src), PLAN §34f item 2 --
+// so removing an override-keyed clone never touches the one every other ref
+// of the same URL shares, and vice versa), if any. Removing a clone that
 // does not exist is not an error.
-func (m *Manager) Remove(url string) error {
-	dir := m.Dir(url)
+func (m *Manager) Remove(src domain.Source) error {
+	dir := m.DirFor(src)
 	if err := os.RemoveAll(dir); err != nil {
 		return errs.Wrap(errs.Internal, err, "removing managed clone %s", dir)
 	}

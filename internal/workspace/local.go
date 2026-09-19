@@ -22,9 +22,11 @@ type localFile struct {
 }
 
 // localOverride is one entry: the local checkout this machine reads the
-// service from, and optionally the contract file inside it.
+// service from, its ref override, or both (PLAN §34f item 2). At least one
+// of Path or Ref is set; Contract only ever applies alongside Path.
 type localOverride struct {
-	Path     string `yaml:"path"`
+	Path     string `yaml:"path,omitempty"`
+	Ref      string `yaml:"ref,omitempty"`
 	Contract string `yaml:"contract,omitempty"`
 }
 
@@ -74,31 +76,63 @@ func LoadLocal(ws *domain.Workspace) error {
 		if !ok {
 			continue
 		}
-		if entry.Path == "" {
-			return errs.New(errs.Invalid, "service %q in %s has no path", ref.Name, path).
+		if entry.Path == "" && entry.Ref == "" {
+			return errs.New(errs.Invalid, "service %q in %s has neither path nor ref", ref.Name, path).
 				WithDetail("file", path).WithDetail("name", ref.Name)
 		}
-		applyOverride(ref, entry.Path, entry.Contract)
+		applyOverride(ref, entry.Path, entry.Ref, entry.Contract)
 	}
 	return nil
 }
 
-// applyOverride makes ref read from the local checkout at path, keeping the
-// committed source in Team. Applying a second override to an already
-// overridden ref replaces the path but keeps the original Team: the
-// committed source is the one thing an override must never overwrite,
-// because it is what Save writes back.
-func applyOverride(ref *domain.ServiceRef, path, contract string) {
-	committed := ref.Source
+// committedSourceOf returns the source every other machine reads ref from:
+// ref.Team when this machine already overrides it, else ref.Source itself.
+func committedSourceOf(ref domain.ServiceRef) domain.Source {
 	if ref.Team != nil {
-		committed = *ref.Team
+		return *ref.Team
 	}
-	if contract == "" {
-		contract = committed.Contract
+	return ref.Source
+}
+
+// serviceRefPtr returns a pointer to ws's service named name, so Bind,
+// Unbind, SetLocalRef and ClearLocalRef can all mutate it in place.
+func serviceRefPtr(ws *domain.Workspace, name string) (*domain.ServiceRef, bool) {
+	for i := range ws.Services {
+		if ws.Services[i].Name == name {
+			return &ws.Services[i], true
+		}
 	}
+	return nil, false
+}
+
+// applyOverride makes ref read from path (a local checkout), refOverride (a
+// ref override with no path), or both -- path wins for reading when both
+// are given, per sapien.workspace.local.yaml's contract (PLAN §34f item 2):
+// an entry may carry only path, only ref, or both, and refOverride is kept
+// even when path makes it moot, so it becomes effective again if the path
+// override is later removed (Unbind). Applying a second override to an
+// already overridden ref keeps the original Team: the committed source is
+// the one thing an override must never overwrite, because it is what Save
+// writes back.
+func applyOverride(ref *domain.ServiceRef, path, refOverride, contract string) {
+	committed := committedSourceOf(*ref)
 	team := committed
 	ref.Team = &team
-	ref.Source = domain.Source{Kind: domain.SourceLocal, Path: path, Contract: contract}
+	ref.LocalRef = refOverride
+
+	if path != "" {
+		if contract == "" {
+			contract = committed.Contract
+		}
+		ref.Source = domain.Source{Kind: domain.SourceLocal, Path: path, Contract: contract}
+		return
+	}
+
+	src := committed
+	if refOverride != "" {
+		src.Ref = refOverride
+	}
+	ref.Source = src
 }
 
 // SaveLocal writes sapien.workspace.local.yaml from every service that
@@ -114,15 +148,20 @@ func SaveLocal(ws *domain.Workspace) error {
 
 	lf := localFile{Version: 1, Services: map[string]localOverride{}}
 	for _, ref := range ws.Services {
-		if ref.Team == nil {
+		hasPath := ref.Team != nil && ref.Source.Kind == domain.SourceLocal
+		hasRef := ref.LocalRef != ""
+		if !hasPath && !hasRef {
 			continue
 		}
-		entry := localOverride{Path: ref.Source.Path}
-		// The contract is only an override when it differs from the
-		// committed one; writing it otherwise would pin the local file to a
-		// value the committed file may later change.
-		if ref.Source.Contract != ref.Team.Contract {
-			entry.Contract = ref.Source.Contract
+		entry := localOverride{Ref: ref.LocalRef}
+		if hasPath {
+			entry.Path = ref.Source.Path
+			// The contract is only an override when it differs from the
+			// committed one; writing it otherwise would pin the local file
+			// to a value the committed file may later change.
+			if ref.Source.Contract != ref.Team.Contract {
+				entry.Contract = ref.Source.Contract
+			}
 		}
 		lf.Services[ref.Name] = entry
 	}
@@ -141,38 +180,91 @@ func SaveLocal(ws *domain.Workspace) error {
 	return atomicWrite(path, data)
 }
 
-// Bind makes ws read the named service from the local checkout at path,
-// in memory only; SaveLocal persists it. Binding an already bound service
-// moves it to the new path and keeps the original committed source.
+// Bind makes ws read the named service from the local checkout at path, in
+// memory only; SaveLocal persists it. Binding an already bound service
+// moves it to the new path and keeps the original committed source. Any
+// existing ref override (LocalRef) is kept, not cleared -- it becomes
+// effective again if the path override is later removed (Unbind).
 func Bind(ws *domain.Workspace, name, path string) error {
 	if path == "" {
 		return errs.New(errs.Invalid, "bind: path must not be empty").WithDetail("name", name)
 	}
-	for i := range ws.Services {
-		if ws.Services[i].Name == name {
-			applyOverride(&ws.Services[i], path, "")
-			return nil
-		}
+	ref, ok := serviceRefPtr(ws, name)
+	if !ok {
+		return errs.New(errs.ServiceNotFound, "service %q not found", name).WithDetail("name", name)
 	}
-	return errs.New(errs.ServiceNotFound, "service %q not found", name).WithDetail("name", name)
+	applyOverride(ref, path, ref.LocalRef, "")
+	return nil
 }
 
-// Unbind restores the named service's committed source, in memory only;
-// SaveLocal persists it. A service without an override is left alone, so
-// an unbind is safe to repeat.
+// Unbind removes the named service's local-checkout (path) override, in
+// memory only; SaveLocal persists it. A ref override, if any, is left
+// alone: it was independent of the path override and becomes effective
+// again now that the checkout no longer wins for reading. A service with no
+// path override -- never bound, or overridden by ref alone -- is left
+// alone, so an unbind is safe to repeat.
 func Unbind(ws *domain.Workspace, name string) error {
-	for i := range ws.Services {
-		ref := &ws.Services[i]
-		if ref.Name != name {
-			continue
-		}
-		if ref.Team != nil {
-			ref.Source = *ref.Team
-			ref.Team = nil
-		}
+	ref, ok := serviceRefPtr(ws, name)
+	if !ok {
+		return errs.New(errs.ServiceNotFound, "service %q not found", name).WithDetail("name", name)
+	}
+	if ref.Team == nil || ref.Source.Kind != domain.SourceLocal {
 		return nil
 	}
-	return errs.New(errs.ServiceNotFound, "service %q not found", name).WithDetail("name", name)
+	team := *ref.Team
+	if ref.LocalRef == "" {
+		ref.Source = team
+		ref.Team = nil
+		return nil
+	}
+	src := team
+	src.Ref = ref.LocalRef
+	ref.Source = src
+	return nil
+}
+
+// SetLocalRef sets this machine's ref override for name (sapien.workspace.
+// local.yaml's `ref:`, PLAN §34f item 2), in memory only; SaveLocal
+// persists it. A path override, if any, is preserved untouched: the
+// checkout still wins for reading, and the ref becomes effective again if
+// the path override is later removed (Unbind).
+func SetLocalRef(ws *domain.Workspace, name, ref string) error {
+	if ref == "" {
+		return errs.New(errs.Invalid, "ref must not be empty").WithDetail("name", name)
+	}
+	r, ok := serviceRefPtr(ws, name)
+	if !ok {
+		return errs.New(errs.ServiceNotFound, "service %q not found", name).WithDetail("name", name)
+	}
+	path, contract := "", ""
+	if r.Team != nil && r.Source.Kind == domain.SourceLocal {
+		path = r.Source.Path
+		if r.Source.Contract != r.Team.Contract {
+			contract = r.Source.Contract
+		}
+	}
+	applyOverride(r, path, ref, contract)
+	return nil
+}
+
+// ClearLocalRef removes this machine's ref override for name, in memory
+// only; SaveLocal persists it. A path override, if any, is left alone.
+func ClearLocalRef(ws *domain.Workspace, name string) error {
+	r, ok := serviceRefPtr(ws, name)
+	if !ok {
+		return errs.New(errs.ServiceNotFound, "service %q not found", name).WithDetail("name", name)
+	}
+	if r.LocalRef == "" {
+		return errs.New(errs.Invalid, "service %q has no local ref override", name).WithDetail("name", name)
+	}
+	r.LocalRef = ""
+	if r.Source.Kind != domain.SourceLocal {
+		if r.Team != nil {
+			r.Source = *r.Team
+			r.Team = nil
+		}
+	}
+	return nil
 }
 
 // EnsureLocalIgnored makes sure ws's root .gitignore lists the two things

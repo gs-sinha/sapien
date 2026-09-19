@@ -64,6 +64,8 @@ func TestMalformedBodyIsInvalid(t *testing.T) {
 		{http.MethodPost, "/v1/daemon/restart"},
 		{http.MethodPost, "/v1/update/apply"},
 		{http.MethodPut, "/v1/settings/updates"},
+		{http.MethodPost, "/v1/workspace/repo/commit"},
+		{http.MethodPut, "/v1/services/order-service/ref"},
 	}
 
 	for _, rt := range routes {

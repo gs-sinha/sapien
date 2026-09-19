@@ -231,6 +231,78 @@ func TestRemoveService_Missing(t *testing.T) {
 	assert.Equal(t, errs.ServiceNotFound, errs.CodeOf(err))
 }
 
+// TestSetTeamRef_UpdatesCommittedFile: team-scope SetRef rewrites
+// source.ref in sapien.workspace.yaml, preserving everything else.
+func TestSetTeamRef_UpdatesCommittedFile(t *testing.T) {
+	ws, err := workspace.Init(t.TempDir(), "team")
+	require.NoError(t, err)
+	require.NoError(t, workspace.AddService(ws, domain.ServiceRef{
+		Name:   "rider-service",
+		Source: domain.Source{Kind: domain.SourceGit, URL: "git@github.com:acme/rider-service.git", Ref: "main", Subdir: "api"},
+	}))
+	require.NoError(t, workspace.Save(ws))
+
+	require.NoError(t, workspace.SetTeamRef(ws, "rider-service", "release-2"))
+	require.NoError(t, workspace.Save(ws))
+
+	raw, err := os.ReadFile(ws.File)
+	require.NoError(t, err)
+	assert.Contains(t, string(raw), "ref: release-2")
+	assert.Contains(t, string(raw), "subdir: api", "everything else in the entry survives")
+
+	reloaded, err := workspace.Load(ws.File)
+	require.NoError(t, err)
+	assert.Equal(t, "release-2", reloaded.Services[0].Source.Ref)
+}
+
+// TestSetTeamRef_WithLocalOverride_UpdatesTeamNotEffective: when this
+// machine currently overrides the service with a local checkout, team-scope
+// SetRef still updates the committed ref (ref.Team), leaving the effective
+// (bound) source alone.
+func TestSetTeamRef_WithLocalOverride_UpdatesTeamNotEffective(t *testing.T) {
+	ws, err := workspace.Init(t.TempDir(), "team")
+	require.NoError(t, err)
+	require.NoError(t, workspace.AddService(ws, domain.ServiceRef{
+		Name:   "rider-service",
+		Source: domain.Source{Kind: domain.SourceGit, URL: "git@github.com:acme/rider-service.git", Ref: "main"},
+	}))
+	require.NoError(t, workspace.Save(ws))
+	require.NoError(t, workspace.Bind(ws, "rider-service", "/tmp/rider-service"))
+
+	require.NoError(t, workspace.SetTeamRef(ws, "rider-service", "release-2"))
+
+	ref := ws.Services[0]
+	assert.Equal(t, domain.SourceLocal, ref.Source.Kind, "the bound checkout keeps reading, unaffected")
+	require.NotNil(t, ref.Team)
+	assert.Equal(t, "release-2", ref.Team.Ref)
+
+	require.NoError(t, workspace.Save(ws))
+	raw, err := os.ReadFile(ws.File)
+	require.NoError(t, err)
+	assert.Contains(t, string(raw), "ref: release-2")
+}
+
+// TestSetTeamRef_RejectsNonGitService: a ref only means something for a
+// git source.
+func TestSetTeamRef_RejectsNonGitService(t *testing.T) {
+	ws := &domain.Workspace{Version: 1, Name: "logistics"}
+	require.NoError(t, workspace.AddService(ws, domain.ServiceRef{
+		Name:   "rider-service",
+		Source: domain.Source{Kind: domain.SourceLocal, Path: "/tmp/rider-service"},
+	}))
+	err := workspace.SetTeamRef(ws, "rider-service", "release-2")
+	require.Error(t, err)
+	assert.Equal(t, errs.Invalid, errs.CodeOf(err))
+}
+
+// TestSetTeamRef_Missing: an unregistered service is refused.
+func TestSetTeamRef_Missing(t *testing.T) {
+	ws := &domain.Workspace{Version: 1, Name: "logistics"}
+	err := workspace.SetTeamRef(ws, "nope", "release-2")
+	require.Error(t, err)
+	assert.Equal(t, errs.ServiceNotFound, errs.CodeOf(err))
+}
+
 func TestResolveSourcePath_Relative(t *testing.T) {
 	root := t.TempDir()
 	wsDir := filepath.Join(root, "workspace")
