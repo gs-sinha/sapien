@@ -39,6 +39,9 @@ func (e *exampleAPI) List(ctx context.Context, q domain.ExampleQuery) ([]domain.
 	if q.Text != "" {
 		query.Set("text", q.Text)
 	}
+	if q.Folder != "" {
+		query.Set("folder", q.Folder)
+	}
 	if q.Limit > 0 {
 		query.Set("limit", strconv.Itoa(q.Limit))
 	}
@@ -104,10 +107,19 @@ func (e *exampleAPI) Reindex(ctx context.Context) error {
 	return e.r().do(ctx, http.MethodPost, "/v1/examples/reindex", nil, nil, nil)
 }
 
-// Move maps to POST /v1/examples/{id}/move.
+// Move maps to POST /v1/examples/{id}/move with tier.
 func (e *exampleAPI) Move(ctx context.Context, id, tier string) (*domain.SavedExample, error) {
 	var out domain.SavedExample
 	if err := e.r().do(ctx, http.MethodPost, "/v1/examples/"+id+"/move", nil, moveTierRequest{Tier: tier}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// MoveFolder maps to POST /v1/examples/{id}/move with folder.
+func (e *exampleAPI) MoveFolder(ctx context.Context, id, newFolder string) (*domain.SavedExample, error) {
+	var out domain.SavedExample
+	if err := e.r().do(ctx, http.MethodPost, "/v1/examples/"+id+"/move", nil, moveTierRequest{Folder: &newFolder}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

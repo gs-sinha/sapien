@@ -91,9 +91,11 @@ func (fl *flowAPI) Reference(ctx context.Context, topic string) (string, error) 
 var _ engine.FlowAPI = (*flowAPI)(nil)
 
 // createFlowRequest is POST /v1/flows' body: the YAML plus where it goes.
+// Folder and Path are mutually exclusive (PLAN §34f item 4).
 type createFlowRequest struct {
 	YAML      string `json:"yaml"`
 	Path      string `json:"path,omitempty"`
+	Folder    string `json:"folder,omitempty"`
 	OwnerKind string `json:"owner_kind,omitempty"`
 	OwnerID   string `json:"owner_id,omitempty"`
 }
@@ -101,7 +103,7 @@ type createFlowRequest struct {
 // CreateIn maps to POST /v1/flows with owner_kind/owner_id.
 func (fl *flowAPI) CreateIn(ctx context.Context, yamlSrc string, opts engine.CreateFlowOptions) (*domain.Flow, error) {
 	var out domain.Flow
-	body := createFlowRequest{YAML: yamlSrc, Path: opts.Path, OwnerKind: opts.OwnerKind, OwnerID: opts.OwnerID}
+	body := createFlowRequest{YAML: yamlSrc, Path: opts.Path, Folder: opts.Folder, OwnerKind: opts.OwnerKind, OwnerID: opts.OwnerID}
 	if err := fl.r().do(ctx, http.MethodPost, "/v1/flows", nil, body, &out); err != nil {
 		return nil, err
 	}
@@ -143,6 +145,22 @@ type commitFlowRequest struct {
 func (fl *flowAPI) Commit(ctx context.Context, id, message string) (*domain.FlowSummary, error) {
 	var out domain.FlowSummary
 	if err := fl.r().do(ctx, http.MethodPost, "/v1/flows/"+id+"/commit", nil, commitFlowRequest{Message: message}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// moveFlowRequest is POST /v1/flows/{id}/move's body (PLAN §34f item 6):
+// the folder to move the flow to within its current tier. The server-side
+// twin is internal/server/handlers_flows.go's own moveFlowRequest.
+type moveFlowRequest struct {
+	Folder string `json:"folder"`
+}
+
+// Move maps to POST /v1/flows/{id}/move.
+func (fl *flowAPI) Move(ctx context.Context, id, folder string) (*domain.Flow, error) {
+	var out domain.Flow
+	if err := fl.r().do(ctx, http.MethodPost, "/v1/flows/"+id+"/move", nil, moveFlowRequest{Folder: folder}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

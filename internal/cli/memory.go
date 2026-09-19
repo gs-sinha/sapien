@@ -32,6 +32,7 @@ func newMemoryCmd(app *App) *cobra.Command {
 		newMemoryPromoteCmd(app),
 		newMemoryRescopeCmd(app),
 		newMemoryMoveCmd(app),
+		newMemoryMvCmd(app),
 		newMemoryCommitCmd(app),
 		newMemoryReindexCmd(app),
 	)
@@ -39,7 +40,7 @@ func newMemoryCmd(app *App) *cobra.Command {
 }
 
 func newMemoryAddCmd(app *App) *cobra.Command {
-	var op, field, service, schema, flow, concept, scope, typ string
+	var op, field, service, schema, flow, concept, scope, typ, folderArg string
 	var tags []string
 
 	cmd := &cobra.Command{
@@ -83,6 +84,7 @@ without losing it.`,
 				Source: domain.MemorySource{Kind: "user"},
 				Status: domain.MemoryActive,
 				Text:   args[0],
+				Folder: folderArg,
 			}
 			if mem.Scope == "" {
 				mem.Scope = domain.ScopeWorkspace
@@ -113,6 +115,7 @@ without losing it.`,
 	cmd.Flags().StringVar(&scope, "scope", "workspace", "personal|workspace|service|flow; see --help for the rule")
 	cmd.Flags().StringVar(&typ, "type", "note", "semantic|behavioral|testing|invariant|environment|gotcha|note")
 	cmd.Flags().StringArrayVar(&tags, "tag", nil, "tag (repeatable)")
+	cmd.Flags().StringVar(&folderArg, "folder", "", "subfolder of the scope's memories directory to save into; default the root")
 	// --env is deliberately not a local flag here: it would shadow the
 	// persistent --env flag already declared on the root command (PLAN §21
 	// lists "--env" for `memory add`'s subject.environment), so this reads
@@ -195,7 +198,7 @@ func displayMemoryPath(path string) string {
 }
 
 func newMemoryListCmd(app *App) *cobra.Command {
-	var op, service, scope, typ string
+	var op, service, scope, typ, folderFilter string
 	var limit int
 
 	cmd := &cobra.Command{
@@ -212,7 +215,7 @@ func newMemoryListCmd(app *App) *cobra.Command {
 			q := domain.MemoryQuery{
 				Operation: op, Service: service,
 				Scope: domain.MemoryScope(scope), Type: domain.MemoryType(typ),
-				Limit: limit,
+				Limit: limit, Folder: folderFilter,
 			}
 			mems, err := eng.Memories().List(cmd.Context(), q)
 			if err != nil {
@@ -222,14 +225,20 @@ func newMemoryListCmd(app *App) *cobra.Command {
 			if app.Printer.IsJSON() {
 				return app.Printer.JSON(mems)
 			}
+			showFolder := anyMemoryHasFolder(mems)
+			header := []string{"ID", "TYPE", "SCOPE", "TIER", "SHIPPED", "SUBJECT", "TEXT"}
+			if showFolder {
+				header = []string{"ID", "TYPE", "SCOPE", "FOLDER", "TIER", "SHIPPED", "SUBJECT", "TEXT"}
+			}
 			rows := make([][]string, 0, len(mems))
 			for _, m := range mems {
-				rows = append(rows, []string{
-					m.ID, string(m.Type), string(m.Scope), tierColumn(m.Tier), shipStateColumn(m.Shipped),
-					subjectString(m.Subject), truncate(m.Text, 60),
-				})
+				row := []string{m.ID, string(m.Type), string(m.Scope), tierColumn(m.Tier), shipStateColumn(m.Shipped), subjectString(m.Subject), truncate(m.Text, 60)}
+				if showFolder {
+					row = []string{m.ID, string(m.Type), string(m.Scope), m.Folder, tierColumn(m.Tier), shipStateColumn(m.Shipped), subjectString(m.Subject), truncate(m.Text, 60)}
+				}
+				rows = append(rows, row)
 			}
-			app.Printer.Table([]string{"ID", "TYPE", "SCOPE", "TIER", "SHIPPED", "SUBJECT", "TEXT"}, rows)
+			app.Printer.Table(header, rows)
 			return nil
 		},
 	}
@@ -238,7 +247,20 @@ func newMemoryListCmd(app *App) *cobra.Command {
 	cmd.Flags().StringVar(&scope, "scope", "", "filter by scope")
 	cmd.Flags().StringVar(&typ, "type", "", "filter by type")
 	cmd.Flags().IntVar(&limit, "limit", 0, "maximum results")
+	cmd.Flags().StringVar(&folderFilter, "folder", "", "restrict to this folder and everything below it")
 	return cmd
+}
+
+// anyMemoryHasFolder reports whether any memory in mems carries a non-root
+// folder, so `memory list`'s table only grows a FOLDER column when it would
+// actually show something (PLAN §34f item 5).
+func anyMemoryHasFolder(mems []domain.Memory) bool {
+	for _, m := range mems {
+		if m.Folder != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func newMemorySearchCmd(app *App) *cobra.Command {
@@ -506,6 +528,53 @@ personal and service scope, whose home is their scope, not a tier.`,
 	}
 	cmd.Flags().StringVar(&to, "to", "", "local|team (required)")
 	return cmd
+}
+
+// newMemoryMvCmd is `sapien memory mv <id> <folder>`: move a memory's file
+// to another folder within its current directory, keeping its scope and
+// tier (PLAN §34f item 6). <folder> "" or "/" moves it to the root.
+// Distinct from `memory move`, which moves between tiers and keeps folder.
+func newMemoryMvCmd(app *App) *cobra.Command {
+	return &cobra.Command{
+		Use:   "mv <id> <folder>",
+		Short: "Move a memory to another folder, keeping its tier",
+		Long: `Move a memory's file to another folder within its current directory,
+keeping its scope and tier. <folder> "" or "/" moves it to the root.
+Refused for personal-scope memories (they have no file) and when a file
+already exists at the destination. Use "sapien memory move" to move
+between tiers instead; it keeps the memory's current folder.`,
+		Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			eng, err := app.Engine()
+			if err != nil {
+				return err
+			}
+			defer eng.Close()
+
+			mem, err := eng.Memories().Get(cmd.Context(), args[0])
+			if err != nil {
+				return err
+			}
+			oldPath := mem.FilePath
+
+			moved, err := eng.Memories().MoveFolder(cmd.Context(), args[0], args[1])
+			if err != nil {
+				return err
+			}
+
+			if app.Printer.IsJSON() {
+				return app.Printer.JSON(map[string]any{
+					"id":       moved.ID,
+					"folder":   moved.Folder,
+					"old_path": oldPath,
+					"new_path": moved.FilePath,
+					"memory":   moved,
+				})
+			}
+			app.Printer.Line("%s -> %s", displayMemoryPath(oldPath), displayMemoryPath(moved.FilePath))
+			return nil
+		},
+	}
 }
 
 // tierFlag turns `--to local|team` into the domain.Tier* constant

@@ -26,8 +26,11 @@ type ListExamplesInput struct {
 	Operation string `json:"operation,omitempty" jsonschema:"restrict to examples of this operation id"`
 	Service   string `json:"service,omitempty" jsonschema:"restrict to examples of this service"`
 	Tag       string `json:"tag,omitempty" jsonschema:"restrict to examples carrying this tag"`
-	Text      string `json:"text,omitempty" jsonschema:"substring match over id, description, and tags"`
+	Text      string `json:"text,omitempty" jsonschema:"substring match over id, description, tags, and folder"`
 	Limit     int    `json:"limit,omitempty" jsonschema:"maximum number of results; default 20"`
+	// Folder restricts to that folder and everything below it (PLAN §34f
+	// item 4).
+	Folder string `json:"folder,omitempty" jsonschema:"restrict to this folder and everything below it"`
 }
 
 // ExampleListItem is one row of list_examples' output.
@@ -38,6 +41,9 @@ type ExampleListItem struct {
 	Verified    bool   `json:"verified"`
 	Env         string `json:"env,omitempty"`
 	Description string `json:"description,omitempty"`
+	// Folder is the subfolder of the scope's examples directory the
+	// example sits in (PLAN §34f item 6); "" at the root.
+	Folder string `json:"folder,omitempty"`
 	// Tier is where the example's file sits (PLAN §7b): local, workspace,
 	// or service. Shipped is the workspace tier's ship state; both empty
 	// for a scope this fake/engine hasn't tiered yet.
@@ -54,7 +60,7 @@ func exampleListItem(ex domain.SavedExample) ExampleListItem {
 	item := ExampleListItem{
 		ID: ex.ID, Operation: ex.Operation, Scope: string(ex.Scope),
 		Verified: ex.Verified != nil, Description: ex.Description,
-		Tier: ex.Tier, Shipped: ex.Shipped,
+		Folder: ex.Folder, Tier: ex.Tier, Shipped: ex.Shipped,
 	}
 	if ex.Verified != nil {
 		item.Env = ex.Verified.Env
@@ -71,7 +77,7 @@ func (s *server) listExamples(ctx context.Context, req *sdkmcp.CallToolRequest, 
 		limit = 20
 	}
 	results, err := s.engine().Examples().List(ctx, domain.ExampleQuery{
-		Operation: in.Operation, Service: in.Service, Tag: in.Tag, Text: in.Text, Limit: limit,
+		Operation: in.Operation, Service: in.Service, Tag: in.Tag, Text: in.Text, Limit: limit, Folder: in.Folder,
 	})
 	if err != nil {
 		return errResult(err), nil, nil
@@ -85,8 +91,12 @@ func (s *server) listExamples(ctx context.Context, req *sdkmcp.CallToolRequest, 
 		if item.Verified {
 			verified = "verified/" + item.Env
 		}
-		fmt.Fprintf(&b, "- %s [%s] %s scope (%s): %s%s\n",
-			ex.ID, ex.Operation, item.Scope, verified, ex.Description, tierShipSuffix(ex.Tier, ex.Shipped))
+		folderNote := ""
+		if item.Folder != "" {
+			folderNote = " folder:" + item.Folder
+		}
+		fmt.Fprintf(&b, "- %s [%s] %s scope%s (%s): %s%s\n",
+			ex.ID, ex.Operation, item.Scope, folderNote, verified, ex.Description, tierShipSuffix(ex.Tier, ex.Shipped))
 	}
 	if len(out.Examples) == 0 {
 		b.WriteString("no matches\n")
@@ -145,6 +155,9 @@ type CreateExampleInput struct {
 	Description string   `json:"description,omitempty" jsonschema:"what makes this example useful"`
 	Scope       string   `json:"scope,omitempty" jsonschema:"workspace|service; default workspace. Scope decides storage and sharing, not subject, exactly as for create_memory: service is committed in <service>/api/examples and shared with everyone who clones it; workspace is local to this workspace unless the workspace itself is a git repo."`
 	Tags        []string `json:"tags,omitempty" jsonschema:"free-form tags"`
+	// Folder places the example in a subfolder of the scope's examples
+	// directory (PLAN §34f item 6); "" (the default) is the root.
+	Folder string `json:"folder,omitempty" jsonschema:"subfolder of the scope's examples directory to save into; default the root"`
 }
 
 // CreateExampleOutput is create_example's structured output.
@@ -167,6 +180,10 @@ func (s *server) createExample(ctx context.Context, req *sdkmcp.CallToolRequest,
 	if haveRun == haveOp {
 		return errResult(errs.New(errs.Invalid, "create_example: give exactly one of run_id or operation, not both or neither")), nil, nil
 	}
+	if haveRun && in.Folder != "" {
+		return errResult(errs.New(errs.Invalid, "create_example: folder is not supported with run_id").
+			WithHint("create the example first, then call rescope_example(id, folder=...) to place it")), nil, nil
+	}
 
 	scope := domain.ExampleScope(in.Scope)
 	if scope == "" {
@@ -183,7 +200,7 @@ func (s *server) createExample(ctx context.Context, req *sdkmcp.CallToolRequest,
 	} else {
 		created, err = s.engine().Examples().Create(ctx, domain.SavedExample{
 			ID: in.ID, Operation: in.Operation, Description: in.Description, Scope: scope,
-			Input: in.Input, Body: in.Body, Headers: in.Headers, Tags: in.Tags,
+			Input: in.Input, Body: in.Body, Headers: in.Headers, Tags: in.Tags, Folder: in.Folder,
 		})
 	}
 	if err != nil {
@@ -217,14 +234,22 @@ func examplePathText(path string) string {
 
 // --- rescope_example -----------------------------------------------------
 
-// RescopeExampleInput is rescope_example's arguments.
+// RescopeExampleInput is rescope_example's arguments. Scope used to be
+// required; it is optional now (PLAN §34f item 6) so a call can change only
+// Folder (or Tier) and leave the example's scope exactly where it is --
+// existing callers that always pass scope see no change in behavior.
 type RescopeExampleInput struct {
 	ID    string `json:"id" jsonschema:"example id"`
-	Scope string `json:"scope" jsonschema:"workspace|service"`
+	Scope string `json:"scope,omitempty" jsonschema:"workspace|service; omit to keep the current scope and only change tier and/or folder"`
 	// Tier is applied after the scope change, via Examples().Move, so one
 	// call can both rescope and place the file in a tier (PLAN §7b).
 	// Meaningful only when the example ends up at workspace scope.
 	Tier string `json:"tier,omitempty" jsonschema:"local|workspace; optional: also move the file to this tier, after the scope change"`
+	// Folder is applied last, via Examples().MoveFolder, so one call can
+	// rescope, retier, and change folder together (PLAN §34f item 6). A
+	// pointer so "move to the root" (an explicit "") can be told apart from
+	// "leave the folder alone" (the key absent).
+	Folder *string `json:"folder,omitempty" jsonschema:"also move the file to this folder within its (new or current) directory, after the scope/tier change; \"\" moves it to the root"`
 }
 
 // RescopeExampleOutput is rescope_example's structured output.
@@ -236,23 +261,28 @@ func (s *server) rescopeExample(ctx context.Context, req *sdkmcp.CallToolRequest
 	if _, _, denied := s.checkPermission(req.Session, classWriteExamples); denied != nil {
 		return denied, nil, nil
 	}
+	if strings.TrimSpace(in.Scope) == "" && in.Tier == "" && in.Folder == nil {
+		return errResult(errs.New(errs.Invalid, "rescope_example requires scope, tier, or folder")), nil, nil
+	}
 
 	ex, err := s.engine().Examples().Get(ctx, in.ID)
 	if err != nil {
 		return errResult(err), nil, nil
 	}
 
-	updated := *ex
 	oldPath := ex.Path
-	updated.Scope = domain.ExampleScope(in.Scope)
-
-	moved, err := s.engine().Examples().Update(ctx, updated)
-	if err != nil {
-		return errResult(err), nil, nil
+	moved := ex
+	text := ""
+	if strings.TrimSpace(in.Scope) != "" {
+		updated := *ex
+		updated.Scope = domain.ExampleScope(in.Scope)
+		moved, err = s.engine().Examples().Update(ctx, updated)
+		if err != nil {
+			return errResult(err), nil, nil
+		}
+		text += fmt.Sprintf("rescoped example %s to %s scope (%s -> %s)\n",
+			moved.ID, moved.Scope, examplePathText(oldPath), examplePathText(moved.Path))
 	}
-
-	text := fmt.Sprintf("rescoped example %s to %s scope (%s -> %s)\n",
-		moved.ID, moved.Scope, examplePathText(oldPath), examplePathText(moved.Path))
 
 	if in.Tier != "" {
 		moved, err = s.engine().Examples().Move(ctx, moved.ID, in.Tier)
@@ -260,6 +290,13 @@ func (s *server) rescopeExample(ctx context.Context, req *sdkmcp.CallToolRequest
 			return errResult(err), nil, nil
 		}
 		text += fmt.Sprintf("moved to the %s tier: %s\n", in.Tier, examplePathText(moved.Path))
+	}
+	if in.Folder != nil {
+		moved, err = s.engine().Examples().MoveFolder(ctx, moved.ID, *in.Folder)
+		if err != nil {
+			return errResult(err), nil, nil
+		}
+		text += fmt.Sprintf("moved to folder %q: %s\n", moved.Folder, examplePathText(moved.Path))
 	}
 
 	out := RescopeExampleOutput{Example: *moved}

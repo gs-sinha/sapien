@@ -18,6 +18,7 @@ import (
 	"github.com/gs-sinha/sapien/internal/errs"
 	"github.com/gs-sinha/sapien/internal/expr"
 	"github.com/gs-sinha/sapien/internal/flow"
+	"github.com/gs-sinha/sapien/internal/folder"
 	"github.com/gs-sinha/sapien/internal/workspace"
 )
 
@@ -106,22 +107,28 @@ func materializeFlow(ctx context.Context, l *Local, f *domain.Flow) *domain.Flow
 }
 
 // List returns every flow (catalog.ListFlows("", "")), filtered by a
-// case-insensitive substring match on id/name/tags when query != "".
-// Workspace-tier summaries carry Shipped (PLAN §7b), from one read-only
-// look at the workspace's git repository; local and service tiers never do.
+// case-insensitive substring match on id/name/tags/folder when query != ""
+// (PLAN §34f item 7: a query for the folder name surfaces its flows, the
+// same as a query for a tag would). Workspace-tier summaries carry Shipped
+// (PLAN §7b), from one read-only look at the workspace's git repository;
+// local and service tiers never do. Every summary carries Folder (PLAN §34f
+// item 6), derived from its Path -- there is no folder column to filter in
+// SQL, so a folder-prefix filter (used by the HTTP/CLI/MCP list surfaces'
+// own `folder` parameter) is applied by the caller against this result.
 func (f *flowAPI) List(ctx context.Context, query string) ([]domain.FlowSummary, error) {
 	all, err := f.l.cat.ListFlows(ctx, "", "")
 	if err != nil {
 		return nil, err
 	}
 	f.l.fillShipped(ctx, all)
+	f.l.fillFlowFolder(ctx, all)
 	if query == "" {
 		return all, nil
 	}
 	q := strings.ToLower(query)
 	out := make([]domain.FlowSummary, 0, len(all))
 	for _, fs := range all {
-		if strings.Contains(strings.ToLower(fs.ID), q) || strings.Contains(strings.ToLower(fs.Name), q) {
+		if strings.Contains(strings.ToLower(fs.ID), q) || strings.Contains(strings.ToLower(fs.Name), q) || strings.Contains(strings.ToLower(fs.Folder), q) {
 			out = append(out, fs)
 			continue
 		}
@@ -133,6 +140,23 @@ func (f *flowAPI) List(ctx context.Context, query string) ([]domain.FlowSummary,
 		}
 	}
 	return out, nil
+}
+
+// fillFlowFolder fills Folder on every summary in summaries, in place (PLAN
+// §34f item 6): derived from each summary's Path relative to its owner's
+// flows directory, via the same resolveFlowPath/ownerFlowsDir this file
+// already uses to read and reindex a flow, so it needs no new state. A
+// summary whose path can't be resolved (a service no longer known to the
+// catalog) is left with Folder "" rather than failing the whole list.
+func (l *Local) fillFlowFolder(ctx context.Context, summaries []domain.FlowSummary) {
+	for i := range summaries {
+		abs, err := l.resolveFlowPath(ctx, &summaries[i])
+		if err != nil {
+			continue
+		}
+		root := ownerFlowsDir(l, summaries[i].OwnerKind, summaries[i].OwnerID)
+		summaries[i].Folder = folder.FromAbs(root, abs)
+	}
 }
 
 // fillShipped fills Shipped on every workspace-tier summary in summaries,
@@ -198,6 +222,7 @@ func (f *flowAPI) Get(ctx context.Context, id string) (*domain.Flow, error) {
 		return nil, err
 	}
 	parsed.OwnerKind, parsed.OwnerID = fs.OwnerKind, fs.OwnerID
+	parsed.Folder = folder.FromAbs(ownerFlowsDir(l, fs.OwnerKind, fs.OwnerID), path)
 	return materializeFlow(ctx, l, parsed), nil
 }
 
@@ -274,6 +299,11 @@ func (f *flowAPI) CreateIn(ctx context.Context, yamlSrc string, opts engine.Crea
 		return nil, err
 	}
 
+	if opts.Path != "" && opts.Folder != "" {
+		return nil, errs.New(errs.Invalid, "flow: pass path or folder, not both").
+			WithHint("folder places the flow at <folder>/<id>.flow.yaml; path is a full destination relative to the tier's flows directory")
+	}
+
 	v := flow.NewValidator(&flowCatalogAdapter{cat: l.cat}, flow.WithExampleResolver(newFlowExampleResolver(l.Examples())))
 	parsed, result := v.ValidateSource(ctx, yamlSrc)
 	if !result.Valid {
@@ -286,7 +316,15 @@ func (f *flowAPI) CreateIn(ctx context.Context, yamlSrc string, opts engine.Crea
 		if id == "" {
 			return nil, errs.New(errs.Invalid, "flow has no `id:`; set one, or pass an explicit path")
 		}
-		path = flow.DefaultPath(flowsDir, id)
+		if opts.Folder != "" {
+			norm, ferr := folder.NormalizeAndValidate(opts.Folder)
+			if ferr != nil {
+				return nil, ferr
+			}
+			path = filepath.Join(flowsDir, filepath.FromSlash(norm), id+domain.FlowFileSuffix)
+		} else {
+			path = flow.DefaultPath(flowsDir, id)
+		}
 	} else {
 		resolved, verr := resolveFlowsPath(flowsDir, path)
 		if verr != nil {
@@ -321,6 +359,7 @@ func (f *flowAPI) CreateIn(ctx context.Context, yamlSrc string, opts engine.Crea
 		return nil, err
 	}
 	saved.OwnerKind, saved.OwnerID = ownerKind, ownerID
+	saved.Folder = folder.FromAbs(flowsDir, path)
 
 	if err := l.reindexOwnerFlows(ctx, ownerKind, ownerID, flowsDir); err != nil {
 		return nil, err
@@ -437,6 +476,7 @@ func (f *flowAPI) RescopeWith(ctx context.Context, id string, ownerKind, ownerID
 		return nil, err
 	}
 	moved.OwnerKind, moved.OwnerID = ownerKind, ownerID
+	moved.Folder = folder.FromAbs(targetDir, newPath)
 	l.emit(domain.EventFlowChanged, flow.Summary(moved))
 	materialized := materializeFlow(ctx, l, moved)
 
@@ -462,6 +502,76 @@ func (f *flowAPI) RescopeWith(ctx context.Context, id string, ownerKind, ownerID
 			WithHint(fmt.Sprintf("the flow is already moved to %s; commit it by hand (git add %s && git commit)", newPath, newPath))
 	}
 	return materialized, nil
+}
+
+// Move places flow id's file at newFolder within its current tier's flows
+// directory (PLAN §34f item 6): the folder-only counterpart to RescopeWith's
+// tier-only move -- it keeps the flow's tier and file name, and RescopeWith
+// keeps a flow's folder (via the rel-path-preserving join it already does).
+// Refuses a read-only service tier with the same error Rescope uses,
+// refuses (errs.Conflict) when a file already exists at the destination,
+// and is a no-op success when newFolder is where the flow already is. Its
+// flow-scoped memories are not moved: they follow the flow's tier
+// (rehomeFlowMemories, used by RescopeWith), not its folder -- PLAN §34f's
+// "do not nest them by the flow's folder" -- so a plain folder move leaves
+// them exactly where they are, same as it always has.
+func (f *flowAPI) Move(ctx context.Context, id, newFolder string) (*domain.Flow, error) {
+	l := f.l
+	existing, err := l.cat.GetFlowSummary(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if existing == nil {
+		return nil, errs.New(errs.FlowNotFound, "flow %q not found", id)
+	}
+	if existing.OwnerKind == domain.FlowOwnerService && l.readOnlyServices[existing.OwnerID] {
+		return nil, readOnlyFlowErr(existing.OwnerID)
+	}
+	norm, ferr := folder.NormalizeAndValidate(newFolder)
+	if ferr != nil {
+		return nil, ferr
+	}
+
+	flowsDir := ownerFlowsDir(l, existing.OwnerKind, existing.OwnerID)
+	oldPath, err := l.resolveFlowPath(ctx, existing)
+	if err != nil {
+		return nil, err
+	}
+	if folder.FromAbs(flowsDir, oldPath) == norm {
+		return f.Get(ctx, id)
+	}
+
+	name := filepath.Base(oldPath)
+	newPath := filepath.Join(flowsDir, filepath.FromSlash(norm), name)
+	if norm == "" {
+		newPath = filepath.Join(flowsDir, name)
+	}
+	if _, statErr := os.Stat(newPath); statErr == nil {
+		return nil, errs.New(errs.Conflict, "a flow already exists at %s", newPath).
+			WithHint("remove or rename the file at the destination first; Move never overwrites")
+	} else if !os.IsNotExist(statErr) {
+		return nil, errs.Wrap(errs.Internal, statErr, "checking destination %s", newPath)
+	}
+	if err := os.MkdirAll(filepath.Dir(newPath), 0o755); err != nil {
+		return nil, errs.Wrap(errs.Internal, err, "creating %s", filepath.Dir(newPath))
+	}
+	if err := moveFile(oldPath, newPath); err != nil {
+		return nil, err
+	}
+
+	if err := l.reindexOwnerFlows(ctx, existing.OwnerKind, existing.OwnerID, flowsDir); err != nil {
+		return nil, err
+	}
+	folder.CleanEmptyDirs(filepath.Dir(oldPath), flowsDir)
+
+	moved, err := flow.ParseFile(newPath)
+	if err != nil {
+		return nil, err
+	}
+	moved.OwnerKind, moved.OwnerID = existing.OwnerKind, existing.OwnerID
+	moved.Folder = norm
+	l.emit(domain.EventFlowChanged, flow.Summary(moved))
+	return materializeFlow(ctx, l, moved), nil
 }
 
 // rehomeFlowMemories rewrites every flow-scoped memory of flowID through
@@ -625,6 +735,7 @@ func (f *flowAPI) Update(ctx context.Context, id string, yamlSrc string) (*domai
 		return nil, err
 	}
 	saved.OwnerKind, saved.OwnerID = existing.OwnerKind, existing.OwnerID
+	saved.Folder = folder.FromAbs(ownerFlowsDir(l, existing.OwnerKind, existing.OwnerID), existingPath)
 
 	if err := l.reindexOwnerFlows(ctx, existing.OwnerKind, existing.OwnerID, ownerFlowsDir(l, existing.OwnerKind, existing.OwnerID)); err != nil {
 		return nil, err
@@ -889,7 +1000,11 @@ under ` + "`<workspace>/memories/<id>.md`" + ` (workspace scope) or
 (personal scope: SQLite only). A flow-scoped memory lives with its flow's
 tier -- ` + "`<workspace>/local/memories`" + ` for a local flow, the workspace's
 or the service's memories directory otherwise -- and moves when the flow
-is promoted.
+is promoted. A memory may sit in a subfolder of its scope's memories
+directory (` + "`folder`" + `, e.g. ` + "`incidents/2026-09`" + `); it is read from the
+path, not stored in the file, and a plain edit never moves it -- use
+` + "`sapien memory mv <id> <folder>`" + ` or ` + "`rescope_memory(folder=...)`" + ` to
+change it.
 
 ## File format
 
@@ -1034,6 +1149,7 @@ func (f *flowAPI) Commit(ctx context.Context, id, message string) (*domain.FlowS
 		return nil, errs.New(errs.FlowNotFound, "flow %q not found after commit", id)
 	}
 	sum.Shipped = domain.ShipUnpushed
+	sum.Folder = folder.FromAbs(ownerFlowsDir(l, sum.OwnerKind, sum.OwnerID), path)
 	l.emit(domain.EventFlowChanged, *sum)
 	return sum, nil
 }

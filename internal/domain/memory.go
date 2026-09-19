@@ -103,6 +103,13 @@ type Memory struct {
 	// (the Ship* constants); "" for other tiers.
 	Shipped string `yaml:"-" json:"shipped,omitempty"`
 	Hash    string `yaml:"-" json:"hash,omitempty"`
+	// Folder is the subfolder of the owning directory FilePath sits in
+	// (PLAN §34f item 6): "" at the root, "/"-separated otherwise, "" (and
+	// meaningless) for personal scope, which has no file. Derived from
+	// FilePath when the file is read; not omitempty so "" (root) always
+	// shows up on the wire. A plain Update never changes it -- see
+	// internal/memory.Store.Update -- only Store.MoveFolder does.
+	Folder string `yaml:"-" json:"folder"`
 }
 
 // MemoryQuery selects memories.
@@ -116,6 +123,9 @@ type MemoryQuery struct {
 	Flow      string
 	Limit     int
 	MinScore  float64
+	// Folder restricts results to that folder and everything below it
+	// (PLAN §34f item 4): "" (the default) applies no folder filter.
+	Folder string
 }
 
 // ScoredMemory is a retrieval result.

@@ -131,6 +131,8 @@ var routeTable = []routeDef{
 		func(s *Server) http.HandlerFunc { return s.handleFlowRescope }},
 	{http.MethodPost, "/v1/flows/{id}/commit", "commitFlow", "Commit a workspace-tier flow's file in the workspace repository", true,
 		func(s *Server) http.HandlerFunc { return s.handleFlowCommit }},
+	{http.MethodPost, "/v1/flows/{id}/move", "moveFlow", "Move a flow to another folder, keeping its tier and file name", true,
+		func(s *Server) http.HandlerFunc { return s.handleFlowMove }},
 
 	{http.MethodPost, "/v1/runs/source", "runFlowSource", "Run an unsaved flow", true,
 		func(s *Server) http.HandlerFunc { return s.handleRunFlowSource }},

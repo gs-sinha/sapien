@@ -29,13 +29,14 @@ func newExampleCmd(app *App) *cobra.Command {
 		newExampleRmCmd(app),
 		newExampleRescopeCmd(app),
 		newExampleMoveCmd(app),
+		newExampleMvCmd(app),
 		newExampleCommitCmd(app),
 	)
 	return cmd
 }
 
 func newExampleListCmd(app *App) *cobra.Command {
-	var operation, service, tag, text string
+	var operation, service, tag, text, folderFilter string
 
 	cmd := &cobra.Command{
 		Use:   "list",
@@ -48,7 +49,7 @@ func newExampleListCmd(app *App) *cobra.Command {
 			}
 			defer eng.Close()
 
-			q := domain.ExampleQuery{Operation: operation, Service: service, Tag: tag, Text: text}
+			q := domain.ExampleQuery{Operation: operation, Service: service, Tag: tag, Text: text, Folder: folderFilter}
 			examples, err := eng.Examples().List(cmd.Context(), q)
 			if err != nil {
 				return err
@@ -57,22 +58,47 @@ func newExampleListCmd(app *App) *cobra.Command {
 			if app.Printer.IsJSON() {
 				return app.Printer.JSON(examples)
 			}
+			showFolder := anyExampleHasFolder(examples)
+			header := []string{"ID", "OPERATION", "SCOPE", "TIER", "SHIPPED", "VERIFIED", "UPDATED", "DESCRIPTION"}
+			if showFolder {
+				header = []string{"ID", "OPERATION", "SCOPE", "FOLDER", "TIER", "SHIPPED", "VERIFIED", "UPDATED", "DESCRIPTION"}
+			}
 			rows := make([][]string, 0, len(examples))
 			for _, ex := range examples {
-				rows = append(rows, []string{
+				row := []string{
 					ex.ID, ex.Operation, string(ex.Scope), tierColumn(ex.Tier), shipStateColumn(ex.Shipped),
 					verifiedEnvString(ex.Verified), formatExampleTime(ex.Updated), truncate(ex.Description, 60),
-				})
+				}
+				if showFolder {
+					row = []string{
+						ex.ID, ex.Operation, string(ex.Scope), ex.Folder, tierColumn(ex.Tier), shipStateColumn(ex.Shipped),
+						verifiedEnvString(ex.Verified), formatExampleTime(ex.Updated), truncate(ex.Description, 60),
+					}
+				}
+				rows = append(rows, row)
 			}
-			app.Printer.Table([]string{"ID", "OPERATION", "SCOPE", "TIER", "SHIPPED", "VERIFIED", "UPDATED", "DESCRIPTION"}, rows)
+			app.Printer.Table(header, rows)
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&operation, "operation", "", "filter by operation id")
 	cmd.Flags().StringVar(&service, "service", "", "filter by service")
 	cmd.Flags().StringVar(&tag, "tag", "", "filter by tag")
-	cmd.Flags().StringVar(&text, "text", "", "filter: substring over id, description, tags")
+	cmd.Flags().StringVar(&text, "text", "", "filter: substring over id, description, tags, folder")
+	cmd.Flags().StringVar(&folderFilter, "folder", "", "restrict to this folder and everything below it")
 	return cmd
+}
+
+// anyExampleHasFolder reports whether any example in exs carries a
+// non-root folder, so `example list`'s table only grows a FOLDER column
+// when it would actually show something (PLAN §34f item 5).
+func anyExampleHasFolder(exs []domain.SavedExample) bool {
+	for _, ex := range exs {
+		if ex.Folder != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // verifiedEnvString renders the VERIFIED column of `example list`: the
@@ -222,7 +248,7 @@ repo.`,
 }
 
 func newExampleAddCmd(app *App) *cobra.Command {
-	var id, description, scope string
+	var id, description, scope, folderArg string
 	var tags []string
 	var params []string
 	var headers []string
@@ -276,6 +302,7 @@ who clones that repo; workspace scope keeps it local under
 				Body:        bodyVal,
 				Headers:     headerMap,
 				Tags:        tags,
+				Folder:      folderArg,
 			}
 
 			created, err := eng.Examples().Create(cmd.Context(), ex)
@@ -298,6 +325,7 @@ who clones that repo; workspace scope keeps it local under
 	cmd.Flags().StringArrayVarP(&params, "param", "p", nil, "operation parameter key=value; JSON-decoded when it parses (repeatable)")
 	cmd.Flags().StringVar(&body, "body", "", "request body: inline JSON, or @file to read it from a file")
 	cmd.Flags().StringArrayVarP(&headers, "header", "H", nil, "extra request header key:value (repeatable)")
+	cmd.Flags().StringVar(&folderArg, "folder", "", "subfolder of the scope's examples directory to save into; default the root")
 	return cmd
 }
 
@@ -352,6 +380,54 @@ service scope, whose home is the service's own repo, not a tier.`,
 	}
 	cmd.Flags().StringVar(&to, "to", "", "local|team (required)")
 	return cmd
+}
+
+// newExampleMvCmd is `sapien example mv <id> <folder>`: move an example's
+// file to another folder within its current directory, keeping its scope
+// and tier (PLAN §34f item 6). <folder> "" or "/" moves it to the root.
+// Distinct from `example move`, which moves between tiers and keeps folder.
+func newExampleMvCmd(app *App) *cobra.Command {
+	return &cobra.Command{
+		Use:   "mv <id> <folder>",
+		Short: "Move a saved example to another folder, keeping its tier",
+		Long: `Move a saved example's file to another folder within its current
+directory, keeping its scope and tier. <folder> "" or "/" moves it to the
+root. Refused when a file already exists at the destination, or for a
+service-scope example read from a managed git clone. Use
+"sapien example move" to move between tiers instead; it keeps the
+example's current folder.`,
+		Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			eng, err := app.Engine()
+			if err != nil {
+				return err
+			}
+			defer eng.Close()
+
+			ex, err := eng.Examples().Get(cmd.Context(), args[0])
+			if err != nil {
+				return err
+			}
+			oldPath := ex.Path
+
+			moved, err := eng.Examples().MoveFolder(cmd.Context(), args[0], args[1])
+			if err != nil {
+				return err
+			}
+
+			if app.Printer.IsJSON() {
+				return app.Printer.JSON(map[string]any{
+					"id":       moved.ID,
+					"folder":   moved.Folder,
+					"old_path": oldPath,
+					"new_path": moved.Path,
+					"example":  moved,
+				})
+			}
+			app.Printer.Line("%s -> %s", oldPath, moved.Path)
+			return nil
+		},
+	}
 }
 
 // newExampleCommitCmd is `sapien example commit <id> [-m <message>]` or

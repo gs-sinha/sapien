@@ -164,6 +164,12 @@ type FlowAPI interface {
 	// not inside a git repository, and when the file has nothing to commit.
 	// The returned summary carries the new Shipped state.
 	Commit(ctx context.Context, id, message string) (*domain.FlowSummary, error)
+	// Move places the flow's file at folder within its current tier's flows
+	// directory (PLAN §34f item 6): keeps tier and file name; refused for a
+	// read-only service tier, or (errs.Conflict) when the destination file
+	// already exists; a no-op success when folder is where the flow already
+	// is. See RescopeWith for the tier-only move, which itself keeps folder.
+	Move(ctx context.Context, id, folder string) (*domain.Flow, error)
 	Update(ctx context.Context, id string, yamlSrc string) (*domain.Flow, error)
 	Delete(ctx context.Context, id string) error
 	// Reference returns the DSL reference text for agents (PLAN §23): topic is sapien|flow|memory|expressions|service.
@@ -241,6 +247,12 @@ type MemoryAPI interface {
 	// local tier is this machine's, the workspace tier is the team's repo.
 	// Refused for personal and service scope, whose home is their scope.
 	Move(ctx context.Context, id, tier string) (*domain.Memory, error)
+	// MoveFolder places the memory's file at folder within its current
+	// directory (PLAN §34f item 6): keeps scope and tier; refused for
+	// personal scope (no file) and a read-only service, or (errs.Conflict)
+	// when the destination file already exists; a no-op success when folder
+	// is where the memory already is.
+	MoveFolder(ctx context.Context, id, folder string) (*domain.Memory, error)
 	// Commit records a workspace-tier memory's file in the workspace
 	// repository with one commit of that file (message "" picks a default),
 	// never a push; refused for other tiers, a workspace outside git, or a
@@ -285,6 +297,12 @@ type ExampleAPI interface {
 	// (domain.TierLocal or TierWorkspace), keeping its id and scope.
 	// Refused for service scope.
 	Move(ctx context.Context, id, tier string) (*domain.SavedExample, error)
+	// MoveFolder places the example's file at folder within its current
+	// directory (PLAN §34f item 6): keeps scope and tier; refused for a
+	// read-only service, or (errs.Conflict) when the destination file
+	// already exists; a no-op success when folder is where the example
+	// already is.
+	MoveFolder(ctx context.Context, id, folder string) (*domain.SavedExample, error)
 	// Commit records a workspace-tier example's file in the workspace
 	// repository with one commit of that file, never a push; refused for
 	// other tiers, a workspace outside git, or nothing to commit.
@@ -331,8 +349,13 @@ var _ io.Closer = (Engine)(nil)
 // CreateFlowOptions says where FlowAPI.CreateIn saves a new flow.
 type CreateFlowOptions struct {
 	// Path is the destination relative to the chosen tier's flows
-	// directory; default "<id>.flow.yaml" from the flow's own id.
+	// directory; default "<id>.flow.yaml" from the flow's own id. Mutually
+	// exclusive with Folder.
 	Path string
+	// Folder places the flow at <folder>/<id>.flow.yaml within the chosen
+	// tier's flows directory (PLAN §34f item 6); "" is the root. Mutually
+	// exclusive with Path.
+	Folder string
 	// OwnerKind is the tier: domain.FlowOwnerLocal (default when empty),
 	// domain.FlowOwnerWorkspace, or domain.FlowOwnerService.
 	OwnerKind string

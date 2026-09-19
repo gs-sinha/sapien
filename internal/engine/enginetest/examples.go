@@ -9,6 +9,7 @@ import (
 	"github.com/gs-sinha/sapien/internal/domain"
 	"github.com/gs-sinha/sapien/internal/engine"
 	"github.com/gs-sinha/sapien/internal/errs"
+	"github.com/gs-sinha/sapien/internal/folder"
 )
 
 // The example API keeps examples in memory, keyed by id, recording every
@@ -33,10 +34,13 @@ func (x *exampleAPI) List(ctx context.Context, q domain.ExampleQuery) ([]domain.
 			continue
 		}
 		if q.Text != "" {
-			hay := strings.ToLower(ex.ID + " " + ex.Description + " " + strings.Join(ex.Tags, " "))
+			hay := strings.ToLower(ex.ID + " " + ex.Description + " " + strings.Join(ex.Tags, " ") + " " + ex.Folder)
 			if !strings.Contains(hay, strings.ToLower(q.Text)) {
 				continue
 			}
+		}
+		if q.Folder != "" && !folder.HasPrefix(ex.Folder, folder.Normalize(q.Folder)) {
+			continue
 		}
 		out = append(out, ex)
 	}
@@ -260,6 +264,27 @@ func (x *exampleAPI) Move(ctx context.Context, id, tier string) (*domain.SavedEx
 	} else {
 		stored.Shipped = ""
 	}
+	f.examples[id] = stored
+	cp := stored
+	return &cp, nil
+}
+
+// MoveFolder re-stamps the stored example's Folder; the fake has no files,
+// so there is no conflict or read-only check to make, and no cleanup to do.
+func (x *exampleAPI) MoveFolder(ctx context.Context, id, newFolder string) (*domain.SavedExample, error) {
+	f := x.f()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.recordLocked("Examples.MoveFolder", map[string]string{"id": id, "folder": newFolder})
+	stored, ok := f.examples[id]
+	if !ok {
+		return nil, errs.New(errs.ExampleNotFound, "example %q not found", id).WithDetail("id", id)
+	}
+	norm, err := folder.NormalizeAndValidate(newFolder)
+	if err != nil {
+		return nil, err
+	}
+	stored.Folder = norm
 	f.examples[id] = stored
 	cp := stored
 	return &cp, nil

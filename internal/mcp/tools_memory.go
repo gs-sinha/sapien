@@ -17,10 +17,13 @@ import (
 
 // SearchMemoriesInput is search_memories' arguments.
 type SearchMemoriesInput struct {
-	Query     string `json:"query" jsonschema:"full-text query over memory text, tags, and subject"`
+	Query     string `json:"query" jsonschema:"full-text query over memory text, tags, subject, and folder"`
 	Operation string `json:"operation,omitempty" jsonschema:"restrict to memories about this operation"`
 	Service   string `json:"service,omitempty" jsonschema:"restrict to memories about this service"`
 	Limit     int    `json:"limit,omitempty" jsonschema:"maximum number of results; default 10"`
+	// Folder restricts to that folder and everything below it (PLAN §34f
+	// item 4/7): "" (the default) applies no folder filter.
+	Folder string `json:"folder,omitempty" jsonschema:"restrict to this folder and everything below it"`
 }
 
 // SearchMemoriesOutput is search_memories' structured output.
@@ -37,7 +40,7 @@ func (s *server) searchMemories(ctx context.Context, req *sdkmcp.CallToolRequest
 		limit = 10
 	}
 	results, err := s.engine().Memories().Search(ctx, domain.MemoryQuery{
-		Text: in.Query, Operation: in.Operation, Service: in.Service, Limit: limit,
+		Text: in.Query, Operation: in.Operation, Service: in.Service, Limit: limit, Folder: in.Folder,
 	})
 	if err != nil {
 		return errResult(err), nil, nil
@@ -49,8 +52,12 @@ func (s *server) searchMemories(ctx context.Context, req *sdkmcp.CallToolRequest
 func renderMemories(results []domain.ScoredMemory) string {
 	var b strings.Builder
 	for _, r := range results {
-		fmt.Fprintf(&b, "- [%s/%s] %s (score %.2f): %s%s\n",
-			r.Memory.Type, r.Memory.Scope, r.Memory.ID, r.Score, r.Memory.Text, tierShipSuffix(r.Memory.Tier, r.Memory.Shipped))
+		folderNote := ""
+		if r.Memory.Folder != "" {
+			folderNote = " folder:" + r.Memory.Folder
+		}
+		fmt.Fprintf(&b, "- [%s/%s]%s %s (score %.2f): %s%s\n",
+			r.Memory.Type, r.Memory.Scope, folderNote, r.Memory.ID, r.Score, r.Memory.Text, tierShipSuffix(r.Memory.Tier, r.Memory.Shipped))
 	}
 	if len(results) == 0 {
 		b.WriteString("no matches\n")
@@ -131,6 +138,10 @@ type CreateMemoryInput struct {
 	Type    string          `json:"type,omitempty" jsonschema:"note|semantic|behavioral|testing|invariant|environment|gotcha"`
 	Scope   string          `json:"scope,omitempty" jsonschema:"personal|workspace|service|flow; default workspace. Scope decides storage and sharing, not subject: service is committed in the service repo and shared; workspace is local to this workspace. If it would still be true in a fresh environment with empty databases, use service."`
 	Tags    []string        `json:"tags,omitempty" jsonschema:"free-form tags"`
+	// Folder places the memory in a subfolder of the scope's memories
+	// directory (PLAN §34f item 6); "" (the default) is the root.
+	// Meaningless for personal scope, which has no file.
+	Folder string `json:"folder,omitempty" jsonschema:"subfolder of the scope's memories directory to save into; default the root"`
 }
 
 // CreateMemoryOutput is create_memory's structured output.
@@ -154,6 +165,7 @@ func (s *server) createMemory(ctx context.Context, req *sdkmcp.CallToolRequest, 
 		Tags:   in.Tags,
 		Text:   in.Text,
 		Source: domain.MemorySource{Kind: "agent", Client: client},
+		Folder: in.Folder,
 	}
 	if in.Subject != nil {
 		m.Subject = *in.Subject
@@ -285,15 +297,23 @@ func (s *server) getPromotionTarget(ctx context.Context, req *sdkmcp.CallToolReq
 
 // --- rescope_memory ---------------------------------------------------
 
-// RescopeMemoryInput is rescope_memory's arguments.
+// RescopeMemoryInput is rescope_memory's arguments. Scope used to be
+// required; it is optional now (PLAN §34f item 6) so a call can change only
+// Folder (or Tier) and leave the memory's scope exactly where it is --
+// existing callers that always pass scope see no change in behavior.
 type RescopeMemoryInput struct {
 	ID      string `json:"id" jsonschema:"memory id"`
-	Scope   string `json:"scope" jsonschema:"personal|workspace|service|flow"`
+	Scope   string `json:"scope,omitempty" jsonschema:"personal|workspace|service|flow; omit to keep the current scope and only change tier and/or folder"`
 	Service string `json:"service,omitempty" jsonschema:"service name; required for service scope when the memory has no service subject"`
 	// Tier is applied after the scope change, via Memories().Move, so one
 	// call can both rescope and place the file in a tier (PLAN §7b).
 	// Meaningful only when the memory ends up at workspace scope.
 	Tier string `json:"tier,omitempty" jsonschema:"local|workspace; optional: also move the file to this tier, after the scope change"`
+	// Folder is applied last, via Memories().MoveFolder, so one call can
+	// rescope, retier, and change folder together (PLAN §34f item 6). A
+	// pointer so "move to the root" (an explicit "") can be told apart from
+	// "leave the folder alone" (the key absent).
+	Folder *string `json:"folder,omitempty" jsonschema:"also move the file to this folder within its (new or current) directory, after the scope/tier change; \"\" moves it to the root"`
 }
 
 // RescopeMemoryOutput is rescope_memory's structured output.
@@ -305,31 +325,36 @@ func (s *server) rescopeMemory(ctx context.Context, req *sdkmcp.CallToolRequest,
 	if _, _, denied := s.checkPermission(req.Session, classWriteMemories); denied != nil {
 		return denied, nil, nil
 	}
+	if strings.TrimSpace(in.Scope) == "" && in.Tier == "" && in.Folder == nil {
+		return errResult(errs.New(errs.Invalid, "rescope_memory requires scope, tier, or folder")), nil, nil
+	}
 
 	mem, err := s.engine().Memories().Get(ctx, in.ID)
 	if err != nil {
 		return errResult(err), nil, nil
 	}
 
-	updated := *mem
 	oldPath := mem.FilePath
-	updated.Scope = domain.MemoryScope(in.Scope)
-	if in.Service != "" {
-		updated.Subject.Service = in.Service
+	moved := mem
+	text := ""
+	if strings.TrimSpace(in.Scope) != "" {
+		updated := *mem
+		updated.Scope = domain.MemoryScope(in.Scope)
+		if in.Service != "" {
+			updated.Subject.Service = in.Service
+		}
+		if updated.Scope == domain.ScopeService && updated.Subject.Service == "" {
+			err := errs.New(errs.Invalid, "rescope_memory: service scope requires a service subject").
+				WithHint("pass service, or give the memory a service subject first")
+			return errResult(err), nil, nil
+		}
+		moved, err = s.engine().Memories().Update(ctx, updated)
+		if err != nil {
+			return errResult(err), nil, nil
+		}
+		text += fmt.Sprintf("rescoped memory %s to %s scope (%s -> %s)\n",
+			moved.ID, moved.Scope, memoryPathOrSQLite(oldPath), memoryPathOrSQLite(moved.FilePath))
 	}
-	if updated.Scope == domain.ScopeService && updated.Subject.Service == "" {
-		err := errs.New(errs.Invalid, "rescope_memory: service scope requires a service subject").
-			WithHint("pass service, or give the memory a service subject first")
-		return errResult(err), nil, nil
-	}
-
-	moved, err := s.engine().Memories().Update(ctx, updated)
-	if err != nil {
-		return errResult(err), nil, nil
-	}
-
-	text := fmt.Sprintf("rescoped memory %s to %s scope (%s -> %s)\n",
-		moved.ID, moved.Scope, memoryPathOrSQLite(oldPath), memoryPathOrSQLite(moved.FilePath))
 
 	if in.Tier != "" {
 		moved, err = s.engine().Memories().Move(ctx, moved.ID, in.Tier)
@@ -337,6 +362,13 @@ func (s *server) rescopeMemory(ctx context.Context, req *sdkmcp.CallToolRequest,
 			return errResult(err), nil, nil
 		}
 		text += fmt.Sprintf("moved to the %s tier: %s\n", in.Tier, memoryPathOrSQLite(moved.FilePath))
+	}
+	if in.Folder != nil {
+		moved, err = s.engine().Memories().MoveFolder(ctx, moved.ID, *in.Folder)
+		if err != nil {
+			return errResult(err), nil, nil
+		}
+		text += fmt.Sprintf("moved to folder %q: %s\n", moved.Folder, memoryPathOrSQLite(moved.FilePath))
 	}
 
 	out := RescopeMemoryOutput{Memory: *moved}

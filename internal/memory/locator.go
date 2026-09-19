@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/gs-sinha/sapien/internal/domain"
 	"github.com/gs-sinha/sapien/internal/errs"
+	"github.com/gs-sinha/sapien/internal/folder"
 )
 
 // Locator resolves where a memory's canonical Markdown file lives, per its
@@ -51,18 +53,39 @@ type Locator struct {
 // themselves (Store.Update does, from the existing row) -- DirFor has no
 // memory of where a memory used to live.
 func (l Locator) DirFor(m domain.Memory) (string, error) {
+	var dir string
+	var err error
 	switch m.Scope {
 	case domain.ScopePersonal:
 		return "", nil
 	case domain.ScopeWorkspace:
-		return l.workspaceDirForTier(m.Tier), nil
+		dir = l.workspaceDirForTier(m.Tier)
 	case domain.ScopeService:
-		return l.serviceDirForSubject(m.Subject)
+		dir, err = l.serviceDirForSubject(m.Subject)
 	case domain.ScopeFlow:
-		return l.flowDir(m.Subject)
+		dir, err = l.flowDir(m.Subject)
 	default:
 		return "", errs.New(errs.Invalid, "memory: unknown scope %q", m.Scope)
 	}
+	if err != nil {
+		return "", err
+	}
+	return withFolder(dir, m.Folder)
+}
+
+// withFolder resolves dir/folderVal, normalizing and validating folderVal
+// first (PLAN §34f item 6's folder rules, via internal/folder): "" (the
+// default -- Create's caller left Folder unset, or a plain Update carrying
+// it forward from the existing file) returns dir unchanged.
+func withFolder(dir, folderVal string) (string, error) {
+	norm, err := folder.NormalizeAndValidate(folderVal)
+	if err != nil {
+		return "", err
+	}
+	if norm == "" {
+		return dir, nil
+	}
+	return filepath.Join(dir, filepath.FromSlash(norm)), nil
 }
 
 // workspaceDirForTier resolves the memories directory for scope=workspace,
@@ -143,11 +166,15 @@ func serviceFromOperation(opID string) string {
 	return ""
 }
 
-// Files returns every "*.md" file under every memory directory Locator
-// knows about (the workspace's, its local tier's, and every known
-// service's), sorted lexicographically. Missing directories are skipped
-// rather than treated as errors (a workspace or service with no memories
-// yet has none, and most workspaces never grow a local tier).
+// Files returns every "*.md" file anywhere under every memory directory
+// Locator knows about (the workspace's, its local tier's, and every known
+// service's) -- at any depth, so a memory saved into a subfolder is indexed
+// exactly like one at the root (PLAN §34f item 6) -- sorted
+// lexicographically. A directory whose name starts with "." (the same rule
+// the file watcher and reindexOwnerFlows apply) is skipped entirely, and a
+// missing directory is skipped rather than treated as an error (a workspace
+// or service with no memories yet has none, and most workspaces never grow
+// a local tier).
 func (l Locator) Files() ([]string, error) {
 	var dirs []string
 	if l.WorkspaceDir != "" {
@@ -168,21 +195,44 @@ func (l Locator) Files() ([]string, error) {
 
 	var files []string
 	for _, dir := range dirs {
-		entries, err := os.ReadDir(dir)
+		found, err := walkMDFiles(dir)
 		if err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
 			return nil, errs.Wrap(errs.Internal, err, "list memory files in %s", dir)
 		}
-		for _, e := range entries {
-			if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
-				continue
-			}
-			files = append(files, filepath.Join(dir, e.Name()))
-		}
+		files = append(files, found...)
 	}
 	sort.Strings(files)
+	return files, nil
+}
+
+// walkMDFiles returns every "*.md" file under dir, at any depth, skipping
+// directories whose name starts with ".". A missing dir yields (nil, nil).
+func walkMDFiles(dir string) ([]string, error) {
+	var files []string
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		if d.IsDir() {
+			if path != dir && strings.HasPrefix(d.Name(), ".") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if strings.HasSuffix(d.Name(), ".md") {
+			files = append(files, path)
+		}
+		return nil
+	})
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
 	return files, nil
 }
 
@@ -215,6 +265,61 @@ func (l Locator) tierOfPath(path string) string {
 	for _, dir := range l.ServiceDirs {
 		if isUnderDir(path, filepath.Join(dir, domain.MemoriesDir)) {
 			return domain.TierService
+		}
+	}
+	return ""
+}
+
+// folderOfPath reports the folder segment of the memory file at path,
+// relative to whichever known memories directory it lives under -- the same
+// directory match tierOfPath makes, just also keeping the remainder as a
+// folder instead of collapsing it to a tier name. "" (the root) for a path
+// directly inside a known directory, and for one matching none of them
+// (including "" -- personal scope has no file).
+func (l Locator) folderOfPath(path string) string {
+	if path == "" {
+		return ""
+	}
+	if l.LocalDir != "" {
+		if dir := filepath.Join(l.LocalDir, domain.MemoriesDir); isUnderDir(path, dir) {
+			return folder.FromAbs(dir, path)
+		}
+	}
+	if l.WorkspaceDir != "" {
+		if dir := l.workspaceMemoriesDir(); isUnderDir(path, dir) {
+			return folder.FromAbs(dir, path)
+		}
+	}
+	for _, dir := range l.ServiceDirs {
+		if d := filepath.Join(dir, domain.MemoriesDir); isUnderDir(path, d) {
+			return folder.FromAbs(d, path)
+		}
+	}
+	return ""
+}
+
+// rootForPath returns the known memories directory (LocalDir/memories,
+// WorkspaceDir/memories, or a known service's memories dir) that path lives
+// under, or "" if none matches. Mirrors tierOfPath/folderOfPath's own
+// directory matching; used to bound folder.CleanEmptyDirs so a cleanup
+// after a move never walks above the kind's root for that tier.
+func (l Locator) rootForPath(path string) string {
+	if path == "" {
+		return ""
+	}
+	if l.LocalDir != "" {
+		if dir := filepath.Join(l.LocalDir, domain.MemoriesDir); isUnderDir(path, dir) {
+			return dir
+		}
+	}
+	if l.WorkspaceDir != "" {
+		if dir := l.workspaceMemoriesDir(); isUnderDir(path, dir) {
+			return dir
+		}
+	}
+	for _, dir := range l.ServiceDirs {
+		if d := filepath.Join(dir, domain.MemoriesDir); isUnderDir(path, d) {
+			return d
 		}
 	}
 	return ""

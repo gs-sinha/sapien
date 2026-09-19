@@ -10,6 +10,7 @@ import (
 
 	"github.com/gs-sinha/sapien/internal/domain"
 	"github.com/gs-sinha/sapien/internal/errs"
+	"github.com/gs-sinha/sapien/internal/folder"
 	"github.com/gs-sinha/sapien/internal/store"
 )
 
@@ -81,6 +82,7 @@ func (s *Store) Get(ctx context.Context, id string) (*domain.Memory, error) {
 		return nil, errs.New(errs.MemoryNotFound, "memory %s not found", id)
 	}
 	m.Tier = s.loc.tierOfPath(m.FilePath)
+	m.Folder = s.loc.folderOfPath(m.FilePath)
 	return &m, nil
 }
 
@@ -115,6 +117,12 @@ func (s *Store) Update(ctx context.Context, m domain.Memory) (*domain.Memory, er
 	if m.Tier == "" {
 		m.Tier = existing.Tier
 	}
+	// A plain Update never moves a memory's file within its directory (PLAN
+	// §34f item 6: "an update rewrites the file IN PLACE, keeps its
+	// folder"): whatever the caller passed for Folder is discarded in favor
+	// of where the file already is. Store.MoveFolder is the one place that
+	// deliberately changes it.
+	m.Folder = existing.Folder
 	if m.Source.Kind == "" {
 		m.Source = existing.Source
 	}
@@ -155,6 +163,7 @@ func (s *Store) writeFileForScope(m *domain.Memory, oldPath string) error {
 	if m.Scope == domain.ScopePersonal {
 		m.FilePath = ""
 		m.Tier = ""
+		m.Folder = ""
 	} else {
 		dir, err := s.loc.DirFor(*m)
 		if err != nil {
@@ -162,12 +171,19 @@ func (s *Store) writeFileForScope(m *domain.Memory, oldPath string) error {
 		}
 		m.FilePath = filepath.Join(dir, FileName(m.ID))
 		m.Tier = s.loc.tierOfPath(m.FilePath)
+		m.Folder = s.loc.folderOfPath(m.FilePath)
 		if err := WriteFile(*m); err != nil {
 			return err
 		}
 	}
 	if oldPath != "" && oldPath != m.FilePath {
 		_ = os.Remove(oldPath)
+		// A tier move that leaves a folder behind (PLAN §34f item 2) cleans
+		// up what it emptied, bounded by the OLD path's own tier root so a
+		// move across tiers never reaches into the tier it's headed to.
+		if root := s.loc.rootForPath(oldPath); root != "" {
+			folder.CleanEmptyDirs(filepath.Dir(oldPath), root)
+		}
 	}
 	return nil
 }
@@ -183,6 +199,78 @@ func (s *Store) Delete(ctx context.Context, id string) error {
 		_ = os.Remove(existing.FilePath)
 	}
 	return s.deindex(ctx, id)
+}
+
+// MoveFolder places memory id's file at newFolder within its current
+// directory, keeping its scope, tier, and file name (PLAN §34f item 6, the
+// counterpart to Move's tier-only change): normalizes and validates
+// newFolder, refuses a personal-scope memory (it has no file to move) and a
+// read-only destination (the same errs.Invalid DirFor already returns for a
+// service read from a managed clone), is a no-op success when newFolder is
+// where the memory already is, and refuses (errs.Conflict) when a file
+// already exists at the destination. The file is moved, not rewritten --
+// same rationale as internal/engine/local's flow Rescope -- and any
+// directory the move leaves empty on the source side is cleaned up, up to
+// (never including) the kind's root directory.
+func (s *Store) MoveFolder(ctx context.Context, id, newFolder string) (*domain.Memory, error) {
+	existing, err := s.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	norm, err := folder.NormalizeAndValidate(newFolder)
+	if err != nil {
+		return nil, err
+	}
+	if existing.Scope == domain.ScopePersonal {
+		return nil, errs.New(errs.Invalid, "memory %q is personal scope, kept in SQLite only; it has no file to move", id).
+			WithHint("move a workspace-, service-, or flow-scoped memory instead")
+	}
+	if existing.Folder == norm {
+		return existing, nil
+	}
+
+	target := *existing
+	target.Folder = norm
+	dir, err := s.loc.DirFor(target)
+	if err != nil {
+		return nil, err
+	}
+	newPath := filepath.Join(dir, FileName(target.ID))
+	if newPath == existing.FilePath {
+		return existing, nil
+	}
+	if _, statErr := os.Stat(newPath); statErr == nil {
+		return nil, errs.New(errs.Conflict, "a memory file already exists at %s", newPath).
+			WithHint("remove or rename the file at the destination first; MoveFolder never overwrites")
+	} else if !os.IsNotExist(statErr) {
+		return nil, errs.Wrap(errs.Internal, statErr, "checking destination %s", newPath)
+	}
+	if err := os.MkdirAll(filepath.Dir(newPath), 0o755); err != nil {
+		return nil, errs.Wrap(errs.Internal, err, "creating %s", filepath.Dir(newPath))
+	}
+	if err := folder.MoveFile(existing.FilePath, newPath); err != nil {
+		return nil, err
+	}
+
+	target.FilePath = newPath
+	target.Tier = s.loc.tierOfPath(newPath)
+	target.Folder = s.loc.folderOfPath(newPath)
+	if err := s.index(ctx, target); err != nil {
+		return nil, err
+	}
+
+	// Clean up the directory the file just left, up to (never including)
+	// the kind's root for this scope/subject/tier -- recomputed with
+	// Folder="" rather than reusing dir's ancestor arithmetic, since dir
+	// already has the destination's folder joined onto it, not the source's.
+	rootOnly := *existing
+	rootOnly.Folder = ""
+	if root, rerr := s.loc.DirFor(rootOnly); rerr == nil {
+		folder.CleanEmptyDirs(filepath.Dir(existing.FilePath), root)
+	}
+
+	out := target
+	return &out, nil
 }
 
 // List returns memories matching q, ordered by Updated descending, up to
@@ -225,8 +313,15 @@ func (s *Store) List(ctx context.Context, q domain.MemoryQuery) ([]domain.Memory
 	if len(where) > 0 {
 		query += " WHERE " + strings.Join(where, " AND ")
 	}
-	query += " ORDER BY updated DESC LIMIT ?"
-	args = append(args, limit)
+	query += " ORDER BY updated DESC"
+	// Folder isn't a column (PLAN §34f item 6: derived from the path, no DB
+	// column), so it is filtered in Go after the query -- which means the
+	// SQL LIMIT has to move there too, or a folder match past the first
+	// `limit` rows would never be seen.
+	if q.Folder == "" {
+		query += " LIMIT ?"
+		args = append(args, limit)
+	}
 
 	var out []domain.Memory
 	err := s.db.Read(ctx, func(conn *sql.Conn) error {
@@ -241,12 +336,26 @@ func (s *Store) List(ctx context.Context, q domain.MemoryQuery) ([]domain.Memory
 				return err
 			}
 			m.Tier = s.loc.tierOfPath(m.FilePath)
+			m.Folder = s.loc.folderOfPath(m.FilePath)
 			out = append(out, m)
 		}
 		return rows.Err()
 	})
 	if err != nil {
 		return nil, errs.Wrap(errs.Internal, err, "list memories")
+	}
+	if q.Folder != "" {
+		norm := folder.Normalize(q.Folder)
+		filtered := out[:0]
+		for _, m := range out {
+			if folder.HasPrefix(m.Folder, norm) {
+				filtered = append(filtered, m)
+			}
+		}
+		out = filtered
+		if len(out) > limit {
+			out = out[:limit]
+		}
 	}
 	return out, nil
 }
@@ -273,6 +382,7 @@ func (s *Store) Reindex(ctx context.Context) (int, error) {
 			continue
 		}
 		m.Resolved = s.resolveSubject(ctx, m.Subject)
+		m.Folder = s.loc.folderOfPath(m.FilePath)
 		if err := s.index(ctx, m); err != nil {
 			return count, err
 		}
@@ -318,6 +428,7 @@ func (s *Store) IndexOne(ctx context.Context, path string) error {
 		return err
 	}
 	m.Resolved = s.resolveSubject(ctx, m.Subject)
+	m.Folder = s.loc.folderOfPath(m.FilePath)
 	return s.index(ctx, m)
 }
 

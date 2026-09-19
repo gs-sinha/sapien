@@ -12,6 +12,7 @@ import (
 	"github.com/gs-sinha/sapien/internal/domain"
 	"github.com/gs-sinha/sapien/internal/engine"
 	"github.com/gs-sinha/sapien/internal/errs"
+	"github.com/gs-sinha/sapien/internal/folder"
 )
 
 const (
@@ -165,7 +166,7 @@ func (fl *flowAPI) List(ctx context.Context, query string) ([]domain.FlowSummary
 	q := strings.ToLower(strings.TrimSpace(query))
 	var out []domain.FlowSummary
 	for _, flow := range f.flows {
-		if q != "" && !strings.Contains(strings.ToLower(flow.ID+" "+flow.Name), q) {
+		if q != "" && !strings.Contains(strings.ToLower(flow.ID+" "+flow.Name+" "+flow.Folder), q) {
 			continue
 		}
 		ops := make([]string, 0, len(flow.Steps))
@@ -176,6 +177,7 @@ func (fl *flowAPI) List(ctx context.Context, query string) ([]domain.FlowSummary
 			ID:         flow.ID,
 			Name:       flow.Name,
 			Path:       flow.Path,
+			Folder:     flow.Folder,
 			OwnerKind:  flow.OwnerKind,
 			OwnerID:    flow.OwnerID,
 			Tags:       flow.Tags,
@@ -206,22 +208,34 @@ func (fl *flowAPI) Get(ctx context.Context, id string) (*domain.Flow, error) {
 var _ engine.FlowAPI = (*flowAPI)(nil)
 
 // CreateIn is Create with the owner recorded: the fake has no tiers on
-// disk, so the owner is simply stamped on the stored flow.
+// disk, so the owner is simply stamped on the stored flow. opts.Folder
+// (mutually exclusive with opts.Path, same as the real engine) builds a
+// synthetic path so Folder can be derived from it the same way
+// internal/folder.Of would from a real file path.
 func (fl *flowAPI) CreateIn(ctx context.Context, yamlSrc string, opts engine.CreateFlowOptions) (*domain.Flow, error) {
 	kind := opts.OwnerKind
 	if kind == "" {
 		kind = domain.FlowOwnerLocal
 	}
-	created, err := fl.Create(ctx, yamlSrc, opts.Path)
+	path := opts.Path
+	if path == "" && opts.Folder != "" {
+		id := stemOf(opts.Path)
+		if parsed, perr := parseFlow(yamlSrc); perr == nil && parsed.ID != "" {
+			id = parsed.ID
+		}
+		path = folder.Join(folder.Normalize(opts.Folder), id+domain.FlowFileSuffix)
+	}
+	created, err := fl.Create(ctx, yamlSrc, path)
 	if err != nil {
 		return nil, err
 	}
 	f := fl.f()
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.recordLocked("Flows.CreateIn", map[string]string{"id": created.ID, "owner_kind": kind, "owner_id": opts.OwnerID})
+	f.recordLocked("Flows.CreateIn", map[string]string{"id": created.ID, "owner_kind": kind, "owner_id": opts.OwnerID, "folder": opts.Folder})
 	stored := f.flows[created.ID]
 	stored.OwnerKind, stored.OwnerID = kind, opts.OwnerID
+	stored.Folder = folder.Of(stored.Path)
 	f.flows[created.ID] = stored
 	cp := stored
 	return &cp, nil
@@ -253,6 +267,31 @@ func (fl *flowAPI) RescopeWith(ctx context.Context, id string, ownerKind, ownerI
 	f.recordLocked("Flows.RescopeWith", map[string]any{"id": id, "owner_kind": ownerKind, "owner_id": ownerID, "commit": opts.Commit, "message": opts.Message})
 	f.mu.Unlock()
 	return fl.Rescope(ctx, id, ownerKind, ownerID)
+}
+
+// Move re-stamps a stored flow's Folder; the fake has no files, so there is
+// no conflict or read-only check to make, and no cleanup to do.
+func (fl *flowAPI) Move(ctx context.Context, id, newFolder string) (*domain.Flow, error) {
+	f := fl.f()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.recordLocked("Flows.Move", map[string]string{"id": id, "folder": newFolder})
+
+	stored, ok := f.flows[id]
+	if !ok {
+		return nil, errs.New(errs.FlowNotFound, "flow %q not found", id).WithDetail("id", id)
+	}
+	norm, err := folder.NormalizeAndValidate(newFolder)
+	if err != nil {
+		return nil, err
+	}
+	stored.Folder = norm
+	stored.Path = folder.Join(norm, stemOf(stored.Path)+domain.FlowFileSuffix)
+	f.flows[id] = stored
+	f.flowUpdated[id] = time.Now().UTC()
+	f.events.publish(domain.Event{Type: domain.EventFlowChanged, Time: time.Now().UTC(), Payload: id})
+	cp := stored
+	return &cp, nil
 }
 
 // Commit marks the stored flow's summary as unpushed: the fake has no

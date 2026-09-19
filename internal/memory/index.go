@@ -245,13 +245,22 @@ func tagsFTSTokens(tags []string) string {
 	return textutil.Join(textutil.Tokens(strings.Join(tags, " ")))
 }
 
+// folderFTSTokens tokenizes m's folder segments (PLAN §34f item 7: "add the
+// folder's segments as lexical search text") so a query for the folder name
+// surfaces every memory in it, the same as a query for a tag or a subject
+// value does. "" (the root) tokenizes to "".
+func folderFTSTokens(folderVal string) string {
+	return textutil.Join(textutil.Tokens(strings.ReplaceAll(folderVal, "/", " ")))
+}
+
 func reindexFTS(ctx context.Context, tx *sql.Tx, m domain.Memory) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM memories_fts WHERE id = ?`, m.ID); err != nil {
 		return fmt.Errorf("memory: delete memories_fts row: %w", err)
 	}
+	subjectText := strings.TrimSpace(subjectFTSTokens(m.Subject) + " " + folderFTSTokens(m.Folder))
 	_, err := tx.ExecContext(ctx,
 		`INSERT INTO memories_fts (id, body, tags, subject_text) VALUES (?,?,?,?)`,
-		m.ID, m.Text, tagsFTSTokens(m.Tags), subjectFTSTokens(m.Subject),
+		m.ID, m.Text, tagsFTSTokens(m.Tags), subjectText,
 	)
 	if err != nil {
 		return fmt.Errorf("memory: insert memories_fts row: %w", err)
