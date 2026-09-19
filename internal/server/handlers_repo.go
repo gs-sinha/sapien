@@ -2,6 +2,58 @@ package server
 
 import "net/http"
 
+// handleWorkspaceRepoChanges implements GET /v1/workspace/repo/changes
+// (PLAN §34f item 1): every changed file the workspace repository (and any
+// bound local service checkout) knows about.
+func (s *Server) handleWorkspaceRepoChanges(w http.ResponseWriter, r *http.Request) {
+	out, err := engineFrom(r.Context()).Repo().Changes(r.Context())
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// handleWorkspaceRepoDiff implements GET /v1/workspace/repo/diff?path=: one
+// file's diff (or content, for an untracked file). The engine refuses
+// (errs.Invalid, mapped to 400) an absolute path, one that escapes the
+// repository, or one git ignores.
+func (s *Server) handleWorkspaceRepoDiff(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Query().Get("path")
+	out, err := engineFrom(r.Context()).Repo().Diff(r.Context(), path)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// commitRepoRequest is POST /v1/workspace/repo/commit's body: Paths
+// repo-root-relative, as GET .../changes reports them.
+type commitRepoRequest struct {
+	Paths   []string `json:"paths"`
+	Message string   `json:"message"`
+}
+
+// handleWorkspaceRepoCommit implements POST /v1/workspace/repo/commit:
+// stages and commits exactly Paths with one commit, never pushes. The
+// engine refuses (errs.Invalid, mapped to 400) an empty message, an empty
+// Paths, a path outside the repository or ignored, or paths with nothing
+// to commit.
+func (s *Server) handleWorkspaceRepoCommit(w http.ResponseWriter, r *http.Request) {
+	var req commitRepoRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, err)
+		return
+	}
+	out, err := engineFrom(r.Context()).Repo().Commit(r.Context(), req.Paths, req.Message)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 // handleWorkspaceRepoStatus implements GET /v1/workspace/repo: the
 // workspace's own git repository (PLAN §7b), read from refs already on
 // disk -- no network.

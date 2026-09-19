@@ -34,6 +34,14 @@ var routeTable = []routeDef{
 		func(s *Server) http.HandlerFunc { return s.handleWorkspaceRepoSync }},
 	{http.MethodPost, "/v1/workspace/repo/push", "pushWorkspaceRepo", "Push the workspace repository's unpushed commits to its upstream", true,
 		func(s *Server) http.HandlerFunc { return s.handleWorkspaceRepoPush }},
+	// Changes/Diff/Commit (PLAN §34f item 1): source-control-panel view of
+	// the workspace repository, beside the fetch/pull/sync/push above.
+	{http.MethodGet, "/v1/workspace/repo/changes", "getWorkspaceChanges", "Every changed file the workspace repository (and bound service checkouts) knows about", true,
+		func(s *Server) http.HandlerFunc { return s.handleWorkspaceRepoChanges }},
+	{http.MethodGet, "/v1/workspace/repo/diff", "getWorkspaceDiff", "One file's diff or content (path query parameter)", true,
+		func(s *Server) http.HandlerFunc { return s.handleWorkspaceRepoDiff }},
+	{http.MethodPost, "/v1/workspace/repo/commit", "commitWorkspaceRepo", "Commit paths in the workspace repository with one commit; never pushes", true,
+		func(s *Server) http.HandlerFunc { return s.handleWorkspaceRepoCommit }},
 	{http.MethodGet, "/v1/workspaces", "listWorkspaces", "List workspaces this daemon can serve", true,
 		func(s *Server) http.HandlerFunc { return s.handleWorkspacesList }},
 	{http.MethodPost, "/v1/workspaces", "registerWorkspace", "Register and open another workspace", true,
@@ -70,6 +78,14 @@ var routeTable = []routeDef{
 		func(s *Server) http.HandlerFunc { return s.handleServiceUnbind }},
 	{http.MethodGet, "/v1/services/{id}/checkouts", "browseCheckouts", "Browse a directory for checkouts of this service's repository", true,
 		func(s *Server) http.HandlerFunc { return s.handleServiceBrowseCheckouts }},
+	// Ref/branches (PLAN §34f item 2): switching a git-sourced service's ref
+	// from the UI, beside the binding routes above.
+	{http.MethodPut, "/v1/services/{id}/ref", "setServiceRef", "Switch a git-sourced service's ref, locally or for the team", true,
+		func(s *Server) http.HandlerFunc { return s.handleServiceSetRef }},
+	{http.MethodDelete, "/v1/services/{id}/ref", "clearServiceRef", "Clear this machine's local ref override", true,
+		func(s *Server) http.HandlerFunc { return s.handleServiceClearRef }},
+	{http.MethodGet, "/v1/services/{id}/branches", "getServiceBranches", "List a git-sourced service's branches and tags", true,
+		func(s *Server) http.HandlerFunc { return s.handleServiceBranches }},
 	{http.MethodPost, "/v1/services/reindex", "reindexServices", "Rebuild the catalog", true,
 		func(s *Server) http.HandlerFunc { return s.handleServicesReindex }},
 

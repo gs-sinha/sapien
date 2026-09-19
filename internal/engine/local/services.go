@@ -12,6 +12,7 @@ import (
 	"github.com/gs-sinha/sapien/internal/engine"
 	"github.com/gs-sinha/sapien/internal/errs"
 	"github.com/gs-sinha/sapien/internal/events"
+	"github.com/gs-sinha/sapien/internal/flow"
 	"github.com/gs-sinha/sapien/internal/gitsrc"
 	"github.com/gs-sinha/sapien/internal/registry"
 	"github.com/gs-sinha/sapien/internal/workspace"
@@ -414,6 +415,131 @@ func (s *serviceAPI) Unbind(ctx context.Context, name string) (*domain.Service, 
 		return nil, err
 	}
 	return s.resyncRebound(ctx, name)
+}
+
+// SetRef switches name's ref (PLAN §34f item 2): scope domain.RefScopeLocal
+// (default, "") writes only sapien.workspace.local.yaml (this machine);
+// domain.RefScopeTeam rewrites source.ref in the committed
+// sapien.workspace.yaml. Refused (errs.Invalid) when the service is not
+// git-sourced, or when ref is neither a branch nor a tag the remote has
+// (validateRemoteRef, via LsRemote, before anything is written -- naming
+// close matches, since the branch/tag list was already fetched to check).
+// Resyncs through the normal resyncRebound path afterward, same as
+// Bind/Unbind: fetch (a local ref override's own managed clone, via
+// domain.ServiceRef.EffectiveSource, so it never disturbs the one every
+// other ref of the URL shares), reindex, restart the file watcher.
+func (s *serviceAPI) SetRef(ctx context.Context, name, ref string, scope string) (*domain.Service, error) {
+	l := s.l
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return nil, errs.New(errs.Invalid, "ref must not be empty").WithDetail("name", name)
+	}
+
+	wsRef, ok := findRef(l.ws, name)
+	if !ok {
+		return nil, errs.New(errs.ServiceNotFound, "service %q not found", name).WithDetail("name", name)
+	}
+	team := teamSourceOf(wsRef)
+	if team.Kind != domain.SourceGit {
+		return nil, errs.New(errs.Invalid, "service %q is not git-sourced; only a git source has a ref", name).
+			WithDetail("name", name)
+	}
+
+	if err := l.validateRemoteRef(ctx, team.URL, ref); err != nil {
+		return nil, err
+	}
+
+	switch scope {
+	case "", domain.RefScopeLocal:
+		if err := workspace.SetLocalRef(l.ws, name, ref); err != nil {
+			return nil, err
+		}
+		if err := workspace.SaveLocal(l.ws); err != nil {
+			return nil, err
+		}
+		if err := workspace.EnsureLocalIgnored(l.ws); err != nil {
+			return nil, err
+		}
+	case domain.RefScopeTeam:
+		if err := workspace.SetTeamRef(l.ws, name, ref); err != nil {
+			return nil, err
+		}
+		if err := workspace.Save(l.ws); err != nil {
+			return nil, err
+		}
+	default:
+		return nil, errs.New(errs.Invalid, "unknown ref scope %q (want %q or %q)", scope, domain.RefScopeLocal, domain.RefScopeTeam).
+			WithDetail("scope", scope)
+	}
+
+	return s.resyncRebound(ctx, name)
+}
+
+// validateRemoteRef refuses ref with errs.Invalid unless url's remote has
+// it as a branch or a tag (LsRemote), naming the closest branch/tag names
+// as a hint when it doesn't -- the same list LsRemote fetched to check the
+// ref, so a suggestion costs nothing extra. A raw commit sha is not
+// validated this way (ls-remote only advertises named refs); SetRef is
+// meant to drive the Branches picker, not pin an arbitrary commit.
+func (l *Local) validateRemoteRef(ctx context.Context, url, ref string) error {
+	refs, err := l.gitMgr.LsRemote(ctx, url)
+	if err != nil {
+		return err
+	}
+	all := append(append([]string{}, refs.Branches...), refs.Tags...)
+	for _, r := range all {
+		if r == ref {
+			return nil
+		}
+	}
+	e := errs.New(errs.Invalid, "%q is not a branch or tag on %s", ref, url).
+		WithDetail("ref", ref).WithDetail("url", url)
+	if suggestions := flow.NearestSuggestions(ref, all, 3); len(suggestions) > 0 {
+		e = e.WithHint("did you mean: " + strings.Join(suggestions, ", "))
+	}
+	return e
+}
+
+// ClearRef removes this machine's local ref override, resyncing back to
+// whatever ref is now effective (the committed one, unless a path override
+// is also active). Refused (errs.Invalid) when there is no local ref
+// override to clear.
+func (s *serviceAPI) ClearRef(ctx context.Context, name string) (*domain.Service, error) {
+	l := s.l
+	if err := workspace.ClearLocalRef(l.ws, name); err != nil {
+		return nil, err
+	}
+	if err := workspace.SaveLocal(l.ws); err != nil {
+		return nil, err
+	}
+	return s.resyncRebound(ctx, name)
+}
+
+// Branches lists a git-sourced service's branches and tags from
+// `ls-remote` (PLAN §34f item 2): Current is the ref this machine actually
+// reads (Source.Ref, "" meaning the remote's default branch), Default is
+// the remote's own default branch, sorted first among Branches.
+func (s *serviceAPI) Branches(ctx context.Context, name string) (*engine.BranchList, error) {
+	l := s.l
+	ref, ok := findRef(l.ws, name)
+	if !ok {
+		return nil, errs.New(errs.ServiceNotFound, "service %q not found", name).WithDetail("name", name)
+	}
+	team := teamSourceOf(ref)
+	if team.Kind != domain.SourceGit {
+		return nil, errs.New(errs.Invalid, "service %q is not git-sourced; it has no branches to list", name).
+			WithDetail("name", name)
+	}
+	refs, err := l.gitMgr.LsRemote(ctx, team.URL)
+	if err != nil {
+		return nil, err
+	}
+	return &engine.BranchList{
+		Current:  ref.Source.Ref,
+		Default:  refs.Default,
+		Branches: refs.Branches,
+		Tags:     refs.Tags,
+	}, nil
 }
 
 // resyncRebound re-reads name from its now-effective source and refreshes

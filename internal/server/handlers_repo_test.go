@@ -119,3 +119,79 @@ func TestWorkspaceRepoSync_DirtyTreeSkipsWithoutError(t *testing.T) {
 	assert.Equal(t, "uncommitted changes", st.Skipped)
 	assert.True(t, hasRecordedCall(fake, "Repo.Sync"))
 }
+
+// --- GET /v1/workspace/repo/changes -------------------------------------
+
+// TestWorkspaceRepoChanges_RoundTrip proves GET .../changes reports the
+// status and files a test seeds through the fake's SetRepoStatus/
+// SetRepoChanges.
+func TestWorkspaceRepoChanges_RoundTrip(t *testing.T) {
+	fake, ts := newTestServer(t, nil)
+	fake.SetRepoStatus(domain.RepoStatus{InGit: true, Branch: "main"})
+	fake.SetRepoChanges([]domain.RepoFileChange{
+		{Path: "flows/a.flow.yaml", State: domain.ChangeUntracked, Kind: domain.RepoKindFlow, ID: "order-allocation", Title: "Order allocation"},
+		{Path: "sapien.workspace.yaml", State: domain.ChangeModified, Kind: domain.RepoKindWorkspace},
+	})
+
+	resp := doReq(t, ts, http.MethodGet, "/v1/workspace/repo/changes", reqOpts{token: "test-token"})
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var out domain.RepoChanges
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&out))
+	assert.True(t, out.Status.InGit)
+	require.Len(t, out.Files, 2)
+	assert.Equal(t, "flows/a.flow.yaml", out.Files[0].Path)
+	assert.Equal(t, domain.RepoKindFlow, out.Files[0].Kind)
+	assert.Equal(t, "order-allocation", out.Files[0].ID)
+	assert.True(t, hasRecordedCall(fake, "Repo.Changes"))
+}
+
+// --- GET /v1/workspace/repo/diff -----------------------------------------
+
+func TestWorkspaceRepoDiff_PassesPathThrough(t *testing.T) {
+	fake, ts := newTestServer(t, nil)
+
+	resp := doReq(t, ts, http.MethodGet, "/v1/workspace/repo/diff?path=flows%2Fa.flow.yaml", reqOpts{token: "test-token"})
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var out domain.RepoDiff
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&out))
+	assert.Equal(t, "flows/a.flow.yaml", out.Path)
+	assert.Equal(t, "flows/a.flow.yaml", recordedCall(t, fake, "Repo.Diff").Args)
+}
+
+// --- POST /v1/workspace/repo/commit --------------------------------------
+
+func TestWorkspaceRepoCommit_RoundTrip(t *testing.T) {
+	fake, ts := newTestServer(t, nil)
+	fake.SetRepoStatus(domain.RepoStatus{InGit: true, Branch: "main"})
+
+	resp := doReqBodyReal(t, ts, http.MethodPost, "/v1/workspace/repo/commit", "test-token",
+		[]byte(`{"paths":["flows/a.flow.yaml"],"message":"Add flow a"}`))
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var out domain.RepoCommitResult
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&out))
+	assert.Equal(t, "fake-sha", out.Commit)
+	assert.Equal(t, []string{"flows/a.flow.yaml"}, out.Committed)
+	assert.True(t, hasRecordedCall(fake, "Repo.Commit"))
+}
+
+// TestWorkspaceRepoCommit_EmptyMessageIsInvalid: the engine's own message
+// validation reaches the client as a plain 400.
+func TestWorkspaceRepoCommit_EmptyMessageIsInvalid(t *testing.T) {
+	_, ts := newTestServer(t, nil)
+	resp := doReqBodyReal(t, ts, http.MethodPost, "/v1/workspace/repo/commit", "test-token",
+		[]byte(`{"paths":["flows/a.flow.yaml"],"message":""}`))
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	assert.Equal(t, errs.Invalid, decodeErrBody(t, resp).Code)
+}
+
+// TestWorkspaceRepoCommit_NoPathsIsInvalid.
+func TestWorkspaceRepoCommit_NoPathsIsInvalid(t *testing.T) {
+	_, ts := newTestServer(t, nil)
+	resp := doReqBodyReal(t, ts, http.MethodPost, "/v1/workspace/repo/commit", "test-token",
+		[]byte(`{"paths":[],"message":"x"}`))
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	assert.Equal(t, errs.Invalid, decodeErrBody(t, resp).Code)
+}

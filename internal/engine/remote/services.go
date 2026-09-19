@@ -145,3 +145,37 @@ func (s *serviceAPI) AddFromCheckout(ctx context.Context, name, path string, opt
 	}
 	return &out, nil
 }
+
+// setRefRequest is PUT /v1/services/{id}/ref's body.
+type setRefRequest struct {
+	Ref   string `json:"ref"`
+	Scope string `json:"scope,omitempty"`
+}
+
+// SetRef maps to PUT /v1/services/{id}/ref.
+func (s *serviceAPI) SetRef(ctx context.Context, name, ref string, scope string) (*domain.Service, error) {
+	var out domain.Service
+	body := setRefRequest{Ref: ref, Scope: scope}
+	if err := s.r().do(ctx, http.MethodPut, "/v1/services/"+name+"/ref", nil, body, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ClearRef maps to DELETE /v1/services/{id}/ref.
+func (s *serviceAPI) ClearRef(ctx context.Context, name string) (*domain.Service, error) {
+	var out domain.Service
+	if err := s.r().do(ctx, http.MethodDelete, "/v1/services/"+name+"/ref", nil, nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// Branches maps to GET /v1/services/{id}/branches.
+func (s *serviceAPI) Branches(ctx context.Context, name string) (*engine.BranchList, error) {
+	var out engine.BranchList
+	if err := s.r().do(ctx, http.MethodGet, "/v1/services/"+name+"/branches", nil, nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}

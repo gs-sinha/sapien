@@ -58,6 +58,8 @@ func TestMalformedBodyIsInvalid(t *testing.T) {
 		{http.MethodPost, "/v1/context"},
 		{http.MethodPut, "/v1/environments/default"},
 		{http.MethodPut, "/v1/secrets/API_KEY"},
+		{http.MethodPost, "/v1/workspace/repo/commit"},
+		{http.MethodPut, "/v1/services/order-service/ref"},
 	}
 
 	for _, rt := range routes {

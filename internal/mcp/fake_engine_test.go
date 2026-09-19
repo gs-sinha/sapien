@@ -1382,6 +1382,45 @@ func (a fakeServices) AddFromCheckout(ctx context.Context, name, path string, op
 	return a.Bind(ctx, name, path)
 }
 
+// SetRef, ClearRef and Branches satisfy engine.ServiceAPI (PLAN §34f item
+// 2, CLI/HTTP only -- no MCP tool calls any of them); minimal fakes, since
+// nothing in this package's tests exercises them.
+func (a fakeServices) SetRef(_ context.Context, name, ref string, scope string) (*domain.Service, error) {
+	a.st.mu.Lock()
+	defer a.st.mu.Unlock()
+	for i := range a.st.services {
+		if a.st.services[i].Name == name {
+			a.st.services[i].Source.Ref = ref
+			c := a.st.services[i]
+			return &c, nil
+		}
+	}
+	return nil, errs.New(errs.ServiceNotFound, "service %q not found", name).WithDetail("name", name)
+}
+
+func (a fakeServices) ClearRef(_ context.Context, name string) (*domain.Service, error) {
+	a.st.mu.Lock()
+	defer a.st.mu.Unlock()
+	for i := range a.st.services {
+		if a.st.services[i].Name == name {
+			c := a.st.services[i]
+			return &c, nil
+		}
+	}
+	return nil, errs.New(errs.ServiceNotFound, "service %q not found", name).WithDetail("name", name)
+}
+
+func (a fakeServices) Branches(_ context.Context, name string) (*engine.BranchList, error) {
+	a.st.mu.Lock()
+	defer a.st.mu.Unlock()
+	for i := range a.st.services {
+		if a.st.services[i].Name == name {
+			return &engine.BranchList{Current: a.st.services[i].Source.Ref, Default: "main", Branches: []string{"main"}}, nil
+		}
+	}
+	return nil, errs.New(errs.ServiceNotFound, "service %q not found", name).WithDetail("name", name)
+}
+
 func (a fakeFlows) RescopeWith(ctx context.Context, id string, ownerKind, ownerID string, opts engine.RescopeOptions) (*domain.Flow, error) {
 	fl, err := a.Rescope(ctx, id, ownerKind, ownerID)
 	if err != nil {
@@ -1542,4 +1581,29 @@ func (a fakeRepo) Push(context.Context) (*domain.RepoStatus, error) {
 	a.st.repo = s
 	c := s
 	return &c, nil
+}
+
+// Changes, Diff and Commit satisfy engine.RepoAPI (PLAN §34f item 1, CLI/
+// HTTP only -- no MCP tool calls any of them); minimal fakes, since nothing
+// in this package's tests exercises them.
+func (a fakeRepo) Changes(context.Context) (*domain.RepoChanges, error) {
+	a.st.mu.Lock()
+	defer a.st.mu.Unlock()
+	return &domain.RepoChanges{Status: a.st.repo, Files: []domain.RepoFileChange{}}, nil
+}
+
+func (a fakeRepo) Diff(_ context.Context, path string) (*domain.RepoDiff, error) {
+	return &domain.RepoDiff{Path: path}, nil
+}
+
+func (a fakeRepo) Commit(_ context.Context, paths []string, message string) (*domain.RepoCommitResult, error) {
+	if len(paths) == 0 {
+		return nil, errs.New(errs.Invalid, "no paths given")
+	}
+	if strings.TrimSpace(message) == "" {
+		return nil, errs.New(errs.Invalid, "message is required")
+	}
+	a.st.mu.Lock()
+	defer a.st.mu.Unlock()
+	return &domain.RepoCommitResult{Commit: "fake-sha", Committed: paths, Status: a.st.repo}, nil
 }

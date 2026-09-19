@@ -2,6 +2,7 @@ package enginetest
 
 import (
 	"context"
+	"strings"
 
 	"github.com/gs-sinha/sapien/internal/domain"
 	"github.com/gs-sinha/sapien/internal/engine"
@@ -88,6 +89,52 @@ func (r *repoAPI) pullLocked(strict bool) (*domain.RepoStatus, error) {
 	f.repo = s
 	cp := s
 	return &cp, nil
+}
+
+// Changes returns the seeded status alongside whatever files a test seeded
+// via SetRepoChanges (empty by default).
+func (r *repoAPI) Changes(ctx context.Context) (*domain.RepoChanges, error) {
+	f := r.f()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.recordLocked("Repo.Changes", nil)
+	return &domain.RepoChanges{Status: f.repo, Files: append([]domain.RepoFileChange(nil), f.repoChanges...)}, nil
+}
+
+// SetRepoChanges seeds what Repo().Changes reports in Files.
+func (f *Fake) SetRepoChanges(files []domain.RepoFileChange) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.repoChanges = files
+}
+
+// Diff returns an empty diff for path; a test that needs specific diff
+// content has no seam yet since nothing currently exercises it against the
+// fake.
+func (r *repoAPI) Diff(ctx context.Context, path string) (*domain.RepoDiff, error) {
+	f := r.f()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.recordLocked("Repo.Diff", path)
+	return &domain.RepoDiff{Path: path}, nil
+}
+
+// Commit validates message/paths the way the real engine does and echoes
+// paths back as committed; the fake has no filesystem to actually commit
+// anything to.
+func (r *repoAPI) Commit(ctx context.Context, paths []string, message string) (*domain.RepoCommitResult, error) {
+	f := r.f()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.recordLocked("Repo.Commit", map[string]any{"paths": paths, "message": message})
+
+	if len(paths) == 0 {
+		return nil, errs.New(errs.Invalid, "no paths given")
+	}
+	if strings.TrimSpace(message) == "" {
+		return nil, errs.New(errs.Invalid, "message is required")
+	}
+	return &domain.RepoCommitResult{Commit: "fake-sha", Committed: paths, Status: f.repo}, nil
 }
 
 // Push moves the seeded status's Ahead into PushedCount; refused when

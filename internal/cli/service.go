@@ -33,6 +33,8 @@ func newServiceCmd(app *App) *cobra.Command {
 		newServiceSyncCmd(app),
 		newServiceBindCmd(app),
 		newServiceUnbindCmd(app),
+		newServiceSetRefCmd(app),
+		newServiceBranchesCmd(app),
 	)
 	return cmd
 }
@@ -644,5 +646,113 @@ func printMissingEnvHint(app *App, svc *domain.Service) {
 	}
 	if missing := env.MissingForService(ws, *svc); len(missing) > 0 {
 		app.Printer.Line("environments declared by %s but not defined in this workspace: %s; run `sapien env scaffold` to create them", svc.Name, strings.Join(missing, ", "))
+	}
+}
+
+// newServiceSetRefCmd is `sapien service set-ref <name> <ref> [--team]` or
+// `sapien service set-ref <name> --clear` (PLAN §34f item 2): switch a
+// git-sourced service's ref. Without --team the override is local to this
+// machine (sapien.workspace.local.yaml's `ref:`, alongside `path:` when the
+// service is also bound to a checkout -- the checkout still wins for
+// reading, but the ref becomes effective again if it is later unbound);
+// with --team it rewrites source.ref in the committed sapien.workspace.yaml,
+// which then shows on the Changes page like any other edit to that file.
+// Both resync the service afterward (fetch, move the managed clone when the
+// ref carries a new local override, reindex). A bound checkout's own branch
+// is shown elsewhere (`service list`, `service bind`) but never switched by
+// this command.
+func newServiceSetRefCmd(app *App) *cobra.Command {
+	var team, clear bool
+	cmd := &cobra.Command{
+		Use:   "set-ref <name> (<ref> | --clear)",
+		Short: "Switch a git-sourced service's ref, locally or for the team",
+		Args:  cobra.RangeArgs(1, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := args[0]
+			eng, err := app.Engine()
+			if err != nil {
+				return err
+			}
+			defer eng.Close()
+
+			if clear {
+				if len(args) != 1 {
+					return errs.New(errs.Invalid, "service set-ref: pass a ref or --clear, not both")
+				}
+				svc, err := eng.Services().ClearRef(cmd.Context(), name)
+				if err != nil {
+					return err
+				}
+				return printSetRefResult(app, svc, "cleared the local ref override")
+			}
+
+			if len(args) != 2 {
+				return errs.New(errs.Invalid, "service set-ref: requires <name> <ref>, or --clear")
+			}
+			scope := domain.RefScopeLocal
+			verb := "set the local ref override"
+			if team {
+				scope = domain.RefScopeTeam
+				verb = "committed the team ref"
+			}
+			svc, err := eng.Services().SetRef(cmd.Context(), name, args[1], scope)
+			if err != nil {
+				return err
+			}
+			return printSetRefResult(app, svc, verb)
+		},
+	}
+	cmd.Flags().BoolVar(&team, "team", false, "rewrite source.ref in the committed sapien.workspace.yaml instead of this machine's local override")
+	cmd.Flags().BoolVar(&clear, "clear", false, "clear this machine's local ref override")
+	return cmd
+}
+
+func printSetRefResult(app *App, svc *domain.Service, verb string) error {
+	if app.Printer.IsJSON() {
+		return app.Printer.JSON(svc)
+	}
+	app.Printer.Line("%s: %s; %s", svc.Name, verb, sourceString(svc.Source)+" @ "+teamRef(&svc.Source))
+	return nil
+}
+
+// newServiceBranchesCmd is `sapien service branches <name>` (PLAN §34f item
+// 2): a git-sourced service's branches and tags from `ls-remote`, current
+// naming the ref this machine actually reads.
+func newServiceBranchesCmd(app *App) *cobra.Command {
+	return &cobra.Command{
+		Use:   "branches <name>",
+		Short: "List a git-sourced service's branches and tags",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			eng, err := app.Engine()
+			if err != nil {
+				return err
+			}
+			defer eng.Close()
+
+			out, err := eng.Services().Branches(cmd.Context(), args[0])
+			if err != nil {
+				return err
+			}
+			if app.Printer.IsJSON() {
+				return app.Printer.JSON(out)
+			}
+			current := out.Current
+			if current == "" {
+				current = "default (" + out.Default + ")"
+			}
+			app.Printer.Line("current: %s, default: %s", current, out.Default)
+			for _, b := range out.Branches {
+				marker := " "
+				if b == out.Current {
+					marker = "*"
+				}
+				app.Printer.Line("%s %s", marker, b)
+			}
+			for _, tag := range out.Tags {
+				app.Printer.Line("  %s (tag)", tag)
+			}
+			return nil
+		},
 	}
 }
