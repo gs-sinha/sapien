@@ -85,6 +85,11 @@ type Semantic struct {
 	// (semantic.DefaultPrefixes); a set value, including "", is used as is.
 	QueryPrefix    *string `yaml:"query_prefix,omitempty"`
 	DocumentPrefix *string `yaml:"document_prefix,omitempty"`
+	// KeepAlive is how long Ollama keeps the model in memory after a
+	// request ("30s", "5m", "0" to unload at once). Empty leaves it to
+	// Ollama (5 minutes). Shorter frees the model's RAM sooner; the price is
+	// a model load (a second or more) on the first search after it unloads.
+	KeepAlive string `yaml:"keep_alive,omitempty"`
 }
 
 // The kinds semantic search can embed (Semantic.Kinds). "examples" are not
@@ -377,6 +382,7 @@ type rawSemantic struct {
 	// layer's value (or the model default), present -- "" included -- wins.
 	QueryPrefix    *string `yaml:"query_prefix"`
 	DocumentPrefix *string `yaml:"document_prefix"`
+	KeepAlive      *string `yaml:"keep_alive"`
 }
 
 type rawGit struct {
@@ -465,6 +471,9 @@ func applyRaw(cfg *Config, raw rawConfig) {
 	if raw.Semantic.DocumentPrefix != nil {
 		v := *raw.Semantic.DocumentPrefix
 		s.DocumentPrefix = &v
+	}
+	if raw.Semantic.KeepAlive != nil {
+		s.KeepAlive = *raw.Semantic.KeepAlive
 	}
 
 	if raw.Git.CacheDir != nil {

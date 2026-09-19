@@ -1192,6 +1192,8 @@ export interface SemanticSettings {
   default_query_prefix?: string;
   default_document_prefix?: string;
   prefixes_custom?: boolean;
+  /** Ollama's keep_alive ("30s", "5m", "0"); absent = Ollama's own default of 5 minutes. */
+  keep_alive?: string;
   source: SemanticSettingsScope;
   status: SemanticIndexStatus;
 }
@@ -1211,6 +1213,8 @@ export interface UpdateSemanticSettingsRequest {
   query_prefix?: string;
   document_prefix?: string;
   reset_prefixes?: boolean;
+  /** Absent keeps what is stored; "" goes back to Ollama's default. */
+  keep_alive?: string;
   /** Resend a refused PUT with this set to bypass the refusal ("Save anyway"). */
   force?: boolean;
 }

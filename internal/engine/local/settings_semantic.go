@@ -87,6 +87,7 @@ func (l *Local) getSemanticSettings(ctx context.Context) (*domain.SemanticSettin
 		DefaultQueryPrefix:    semantic.DefaultPrefixes(s.Model).Query,
 		DefaultDocumentPrefix: semantic.DefaultPrefixes(s.Model).Document,
 		PrefixesCustom:        s.QueryPrefix != nil || s.DocumentPrefix != nil,
+		KeepAlive:             s.KeepAlive,
 
 		Source: source,
 		Status: status,
@@ -159,6 +160,15 @@ func (l *Local) putSemanticSettings(ctx context.Context, req engine.SemanticPutR
 		if req.DocumentPrefix != nil {
 			write.DocumentPrefix = &req.DocumentPrefix
 		}
+	}
+	if req.KeepAlive != nil {
+		ka := strings.TrimSpace(*req.KeepAlive)
+		if ka != "" {
+			if _, perr := time.ParseDuration(ka); perr != nil {
+				return nil, errs.New(errs.Invalid, "settings: keep_alive %q is not a duration", ka).WithHint(`use "30s", "5m", or "0" to unload the model right after each request`)
+			}
+		}
+		write.KeepAlive = &ka
 	}
 	if err := config.WriteSemantic(path, write); err != nil {
 		return nil, err

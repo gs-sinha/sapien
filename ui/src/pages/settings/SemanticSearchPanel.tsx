@@ -46,6 +46,14 @@ const ALL_KINDS: Array<{ kind: SemanticEmbedKind; label: string; hint: string }>
   { kind: 'docs', label: 'Doc sections', hint: 'title, heading and the first 1,000 characters' },
 ];
 
+// Ollama's keep_alive: how long the model stays loaded after a request.
+const KEEP_ALIVE_CHOICES: Array<{ value: string; label: string }> = [
+  { value: '', label: "Ollama's default (5 minutes)" },
+  { value: '30m', label: '30 minutes — fastest searches' },
+  { value: '1m', label: '1 minute' },
+  { value: '0', label: 'Unload right after each request — least memory' },
+];
+
 const OPENAI_SUGGESTIONS = ['text-embedding-3-small', 'text-embedding-3-large'];
 
 const buttonCls = 'rounded border border-slate-300 px-3 py-1.5 text-sm disabled:opacity-50 dark:border-slate-700';
@@ -101,6 +109,7 @@ function SemanticForm({ initial, onSaved }: { initial: SemanticSettings; onSaved
   const [queryPrefix, setQueryPrefix] = useState(initial.query_prefix ?? '');
   const [documentPrefix, setDocumentPrefix] = useState(initial.document_prefix ?? '');
   const [resetPrefixes, setResetPrefixes] = useState(false);
+  const [keepAlive, setKeepAlive] = useState(initial.keep_alive ?? '');
 
   const [status, setStatus] = useState<SemanticIndexStatus>(initial.status);
   const [saving, setSaving] = useState(false);
@@ -141,6 +150,7 @@ function SemanticForm({ initial, onSaved }: { initial: SemanticSettings; onSaved
     model: model || undefined,
     scope,
     kinds,
+    ...(kind === 'ollama' ? { keep_alive: keepAlive } : {}),
     ...(resetPrefixes
       ? { reset_prefixes: true }
       : prefixesCustom
@@ -267,6 +277,24 @@ function SemanticForm({ initial, onSaved }: { initial: SemanticSettings; onSaved
                 />
               </label>
             </>
+          )}
+
+          {kind === 'ollama' && (
+            <label className="block">
+              <span className="mb-1 block text-xs text-slate-500">Keep the model in memory</span>
+              <select value={keepAlive} onChange={(e) => setKeepAlive(e.target.value)} className={fieldCls}>
+                {KEEP_ALIVE_CHOICES.map((c) => (
+                  <option key={c.value} value={c.value}>
+                    {c.label}
+                  </option>
+                ))}
+                {!KEEP_ALIVE_CHOICES.some((c) => c.value === keepAlive) && <option value={keepAlive}>{keepAlive}</option>}
+              </select>
+              <span className="mt-1 block max-w-2xl text-xs text-slate-500">
+                A loaded embedding model holds roughly 0.3–1.2 GB of RAM in Ollama. Unloading sooner gives that back; the first search after it
+                unloads waits a second or more while it loads again.
+              </span>
+            </label>
           )}
 
           <fieldset className="space-y-1">

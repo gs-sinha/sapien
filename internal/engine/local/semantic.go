@@ -84,6 +84,7 @@ func (l *Local) ApplySemantic(cfg config.Semantic) error {
 			Model:     cfg.Model,
 			APIKey:    cfg.APIKey,
 			BatchSize: cfg.BatchSize,
+			KeepAlive: cfg.KeepAlive,
 		})
 		if err != nil {
 			return err

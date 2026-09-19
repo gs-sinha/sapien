@@ -234,4 +234,12 @@ describe('SemanticSearchPanel', () => {
     await user.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(update).toHaveBeenLastCalledWith(expect.objectContaining({ reset_prefixes: true })));
   });
+  it('sends keep_alive for Ollama, as chosen', async () => {
+    const user = userEvent.setup();
+    render(<SemanticSearchPanel />);
+    const select = await screen.findByRole('combobox', { name: /Keep the model in memory/ });
+    await user.selectOptions(select, '0');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(update).toHaveBeenCalledWith(expect.objectContaining({ keep_alive: '0' })));
+  });
 });

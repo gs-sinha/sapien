@@ -71,6 +71,8 @@ type SemanticSettings struct {
 	DefaultQueryPrefix    string `json:"default_query_prefix"`
 	DefaultDocumentPrefix string `json:"default_document_prefix"`
 	PrefixesCustom        bool   `json:"prefixes_custom"`
+	// KeepAlive is Ollama's keep_alive ("" = Ollama's own default).
+	KeepAlive string `json:"keep_alive,omitempty"`
 	// Source names which file the effective configuration came from:
 	// "user", "workspace", or "default" (neither file sets it).
 	Source string         `json:"source"`

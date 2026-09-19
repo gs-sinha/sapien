@@ -531,6 +531,9 @@ type SemanticPutRequest struct {
 	QueryPrefix    *string `json:"query_prefix,omitempty"`
 	DocumentPrefix *string `json:"document_prefix,omitempty"`
 	ResetPrefixes  bool    `json:"reset_prefixes,omitempty"`
+	// KeepAlive is Ollama's keep_alive ("30s", "5m", "0"); absent keeps
+	// what is stored, "" goes back to Ollama's own default.
+	KeepAlive *string `json:"keep_alive,omitempty"`
 	// Scope is "user" (the default, when empty) or "workspace".
 	Scope string `json:"scope,omitempty"`
 	// Force saves an enabled config even when the pre-save probe (the same

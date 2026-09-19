@@ -38,6 +38,8 @@ type SemanticWrite struct {
 	// string, "" included, writes it.
 	QueryPrefix    **string
 	DocumentPrefix **string
+	// KeepAlive: nil leaves the key alone; "" removes it (Ollama's default).
+	KeepAlive *string
 }
 
 // WriteSemantic writes w into path's top-level `semantic:` block, creating
@@ -85,6 +87,14 @@ func WriteSemantic(path string, w SemanticWrite) error {
 		}
 	}
 
+	if w.KeepAlive != nil {
+		if *w.KeepAlive == "" {
+			yamlDeleteKey(sem, "keep_alive")
+		} else {
+			yamlSetScalar(sem, "keep_alive", *w.KeepAlive)
+		}
+	}
+
 	return saveYAMLDocument(path, doc)
 }
 
@@ -129,7 +139,7 @@ func fileSetsSemantic(path string) (bool, error) {
 	}
 	r := raw.Semantic
 	return r.Enabled != nil || r.Kind != nil || r.BaseURL != nil || r.Model != nil || r.APIKey != nil || r.BatchSize != nil ||
-		r.Kinds != nil || r.QueryPrefix != nil || r.DocumentPrefix != nil, nil
+		r.Kinds != nil || r.QueryPrefix != nil || r.DocumentPrefix != nil || r.KeepAlive != nil, nil
 }
 
 // loadOrNewYAMLDocument reads path as a yaml.Node document, or -- when it
