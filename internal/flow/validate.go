@@ -128,6 +128,7 @@ func (v *Validator) validateMaterialized(ctx context.Context, f *domain.Flow) (*
 		opByStepID:   map[string]*domain.Operation{},
 		fieldCache:   map[string]*fieldIndex{},
 		maybeSkipped: map[string]bool{},
+		hasWhen:      map[string]bool{},
 		blockOf:      map[string]string{},
 	}
 	for _, fs := range combined {
@@ -144,6 +145,9 @@ func (v *Validator) validateMaterialized(ctx context.Context, f *domain.Flow) (*
 		// yet on the first pass. See checkStepRef's MAYBE_SKIPPED check.
 		if st.When != "" || fs.Parent != "" {
 			vd.maybeSkipped[st.ID] = true
+		}
+		if st.When != "" {
+			vd.hasWhen[st.ID] = true
 		}
 	}
 
@@ -407,6 +411,8 @@ type validation struct {
 	// maybeSkipped is the set of step ids a `steps.<id>` reference should be
 	// has()-guarded against (MAYBE_SKIPPED); see its assignment above.
 	maybeSkipped map[string]bool
+	// hasWhen is the subset of maybeSkipped that carries its own `when`.
+	hasWhen map[string]bool
 	// blockOf maps a step id to its immediately enclosing loop block's id,
 	// or "" for a top-level step or a block itself (PLAN §34f.8; blocks
 	// cannot nest). checkStepRef uses it to relax ordering between two
@@ -945,7 +951,14 @@ func (vd *validation) checkStepRef(r expr.Ref, st domain.Step, idx int, line int
 			diags = append(diags, vd.checkFieldPath(refOp, r.Path[1:], st, line)...)
 		}
 	}
-	if vd.maybeSkipped[r.StepID] && !hasSkipGuard(text, r.StepID) {
+	// Inside one iteration an earlier sibling with no `when` of its own has
+	// always run by the time a later sibling reads it (had it failed, the
+	// iteration would have ended there), so that one reference needs no
+	// guard: the block-level reasons a nested step may be absent -- zero
+	// iterations, an early break -- cannot apply to a reader that is itself
+	// running inside the same iteration.
+	ranThisIteration := sameBlock && refIdx < idx && !vd.hasWhen[r.StepID]
+	if vd.maybeSkipped[r.StepID] && !ranThisIteration && !hasSkipGuard(text, r.StepID) {
 		diags = append(diags, domain.Diagnostic{
 			Code: CodeMaybeSkipped, Severity: domain.SeverityWarning,
 			Message: fmt.Sprintf("step `%s` may be skipped; guard this reference with has(steps.%s) or steps.?%s", r.StepID, r.StepID, r.StepID),

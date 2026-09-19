@@ -2,6 +2,7 @@ package flow
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -524,4 +525,35 @@ func TestParse_ParallelStillReserved(t *testing.T) {
 	diags := diagnosticsOf(t, err)
 	found := findCode(diags, CodeReservedKey)
 	require.NotNil(t, found, "%+v", diags)
+}
+
+// TestValidateSource_Block_EarlierSiblingWithoutWhen_NeedsNoGuard: inside
+// one iteration, an earlier sibling that has no `when` of its own has always
+// run by the time a later sibling reads it, so that reference is not a
+// MAYBE_SKIPPED -- while the same read of a sibling that DOES carry a `when`
+// still is.
+func TestValidateSource_Block_EarlierSiblingWithoutWhen_NeedsNoGuard(t *testing.T) {
+	src := `version: 1
+inputs:
+  ids: { type: array, required: true }
+steps:
+  - id: each
+    foreach: inputs.ids
+    steps:
+      - id: a
+        call: allocation-service.allocate
+        body: { orderId: "${iter.item}" }
+        extract: { x: body.orderId }
+      - id: b
+        call: allocation-service.allocate
+        body: { orderId: "${steps.a.out.x}" }
+`
+	_, res := validateSrc(t, src)
+	assert.Nil(t, diag(res, CodeMaybeSkipped), "%+v", res.Diagnostics)
+
+	guarded := strings.Replace(src, "      - id: a\n", "      - id: a\n        when: \"iter.index > 0\"\n", 1)
+	_, res = validateSrc(t, guarded)
+	d := diag(res, CodeMaybeSkipped)
+	require.NotNil(t, d, "a sibling with its own `when` may be skipped: %+v", res.Diagnostics)
+	assert.Equal(t, "b", d.StepID)
 }
