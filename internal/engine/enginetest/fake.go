@@ -47,8 +47,9 @@ type Fake struct {
 	memories     map[string]domain.Memory // by memory id
 	environments map[string]domain.Environment
 	defaultEnv   string
-	secrets      map[string]string // name -> value; never returned by any API
-	repo         domain.RepoStatus // what Repo() reports; see SetRepoStatus
+	secrets      map[string]string       // name -> value; never returned by any API
+	repo         domain.RepoStatus       // what Repo() reports; see SetRepoStatus
+	semantic     domain.SemanticSettings // what Settings().GetSemantic reports; see SetSemanticSettings
 
 	reindexedServices bool
 	reindexedMemories bool

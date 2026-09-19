@@ -117,19 +117,68 @@ type Local struct {
 	repoFetchErr string
 	repoFetchMu  sync.Mutex
 
+	// semSwapMu serializes applyEmbedder/stopSemantic (PLAN §34f item 5):
+	// only one swap -- drain the outgoing worker, install the
+	// replacement -- runs at a time. Held across the whole swap, unlike
+	// semMu below, which a swap's own drain step deliberately does NOT
+	// hold while it waits (see drainSemantic): an in-flight job takes
+	// semMu's read lock too (to publish a status event), so holding the
+	// write lock across that wait would deadlock the very job the drain
+	// is waiting to finish.
+	semSwapMu sync.Mutex
+	// semMu guards every field below it against a concurrent
+	// ApplySemantic hot-swap: every reader (search, via search.Searcher's
+	// own lock on the adapter it was handed; the indexing helpers in
+	// semantic.go; enqueueSemanticIndex/enqueueSemanticMemoryIndex) goes
+	// through an accessor in semantic.go rather than these fields
+	// directly, so a swap is observed as either fully-old or fully-new,
+	// never half-done.
+	semMu sync.RWMutex
 	// semIdx is the semantic vector index (PLAN §16), or nil when semantic
 	// search is disabled (the common case: off by default). semQueue feeds
-	// a single background worker goroutine (started in Open alongside
-	// semIdx) that does the actual embedding/upsert work, so a sync/apply
-	// or memory write is never blocked on an embedding call; semCancel
-	// stops that goroutine on Close.
+	// a single background worker goroutine (started by applyEmbedder
+	// alongside semIdx) that does the actual embedding/upsert work, so a
+	// sync/apply or memory write is never blocked on an embedding call;
+	// semCancel stops that goroutine on a swap or on Close.
 	semIdx    *semantic.Index
 	semQueue  chan semanticJob
 	semCancel context.CancelFunc
-	// semDone is closed by semanticWorker when it exits; stopSemantic waits
-	// on it so Close never closes l.db while the worker might still be
-	// running a job against it.
+	// semDone is closed by semanticWorker when it exits; stopSemantic (and
+	// applyEmbedder, before starting a replacement) wait on it so a swap or
+	// Close never closes l.db, or lets a query see a half-installed
+	// embedder, while the previous worker might still be running a job.
 	semDone chan struct{}
+	// semAppliedCfg is the config.Semantic ApplySemantic most recently
+	// applied, so ReloadSemantic (settings_semantic.go, used by the daemon
+	// to propagate a user-scope change to every other open workspace) can
+	// tell whether what it is about to apply actually changed anything.
+	semAppliedCfg config.Semantic
+
+	// semStatusMu guards semState/semErr -- Local's semantic-search status
+	// snapshot (PLAN §34f item 5), read by SemanticStatus and published as
+	// the semantic.index event. Separate from semMu so a status read is
+	// never blocked behind an in-progress ApplySemantic swap.
+	semStatusMu sync.Mutex
+	semState    domain.SemanticState
+	semErr      string
+
+	// semPullMu guards semPulls: the set of models currently being pulled
+	// via Ollama (PLAN §34f item 5), so a second pull of the same model is
+	// refused (errs.Conflict) instead of racing two NDJSON streams into the
+	// same semantic.pull events.
+	semPullMu sync.Mutex
+	semPulls  map[string]bool
+
+	// semWG tracks background goroutines a settings change spawns outside
+	// the persistent worker -- a reindex just triggered by PutSemantic,
+	// ReindexSemantic, or ReloadSemantic -- all of which touch l.db. Close
+	// waits on it (after stopSemantic), so a one-shot CLI invocation
+	// (`sapien semantic enable`, `... reindex`) never closes l.db out from
+	// under one it just started. An Ollama pull is not tracked here: it
+	// only makes HTTP calls and emits events, so it is safe to outlive a
+	// workspace close, and daemon shutdown must not hang on a long
+	// download.
+	semWG sync.WaitGroup
 
 	watcher     *registry.Watcher
 	watchCancel context.CancelFunc
@@ -305,6 +354,9 @@ func (l *Local) Context() engine.ContextAPI { return &contextAPI{l: l} }
 // Envs returns the environments/secrets API (PLAN §7, §20).
 func (l *Local) Envs() engine.EnvAPI { return &envAPI{l: l} }
 
+// Settings returns the settings API (PLAN §34f item 5).
+func (l *Local) Settings() engine.SettingsAPI { return &settingsAPI{l: l} }
+
 // Stats summarizes the size of the catalog (PLAN §21's `sapien reindex`
 // output). It is not part of engine.Engine (which has no facade for it
 // yet); callers that want it type-assert the concrete *Local (or any future
@@ -314,7 +366,9 @@ func (l *Local) Stats(ctx context.Context) (catalog.Stats, error) {
 }
 
 // Close stops the watcher (if running), the semantic indexing worker (if
-// running), and closes the database.
+// running) and waits for any background reindex a settings change just
+// spawned (semWG, so a one-shot CLI invocation never races l.db.Close
+// against one it started), and closes the database.
 func (l *Local) Close() error {
 	dropRing(l)
 	if l.watcher != nil {
@@ -324,6 +378,7 @@ func (l *Local) Close() error {
 		l.watchCancel()
 	}
 	l.stopSemantic()
+	l.semWG.Wait()
 	return l.db.Close()
 }
 

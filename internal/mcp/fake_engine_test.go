@@ -65,6 +65,7 @@ func (e *fakeEngine) Examples() engine.ExampleAPI  { return fakeExamples{e.st} }
 func (e *fakeEngine) Context() engine.ContextAPI   { return fakeContext{e.st} }
 func (e *fakeEngine) Envs() engine.EnvAPI          { return fakeEnvs{e.st} }
 func (e *fakeEngine) Events() engine.EventAPI      { return fakeEvents{e.st} }
+func (e *fakeEngine) Settings() engine.SettingsAPI { return nil }
 func (e *fakeEngine) Close() error                 { return nil }
 
 var _ engine.Engine = (*fakeEngine)(nil)

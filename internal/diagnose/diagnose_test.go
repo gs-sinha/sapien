@@ -46,6 +46,7 @@ func (s *stubEngine) Context() engine.ContextAPI   { return nil }
 func (s *stubEngine) Envs() engine.EnvAPI          { return nil }
 func (s *stubEngine) Events() engine.EventAPI      { return nil }
 func (s *stubEngine) Repo() engine.RepoAPI         { return nil }
+func (s *stubEngine) Settings() engine.SettingsAPI { return nil }
 func (s *stubEngine) Close() error                 { return nil }
 
 var _ engine.Engine = (*stubEngine)(nil)
