@@ -60,6 +60,7 @@ func TestReference_DocumentsEveryDSLKey(t *testing.T) {
 		reflect.TypeOf(domain.Step{}),
 		reflect.TypeOf(domain.ExplicitParams{}),
 		reflect.TypeOf(domain.Poll{}),
+		reflect.TypeOf(domain.Repeat{}), // PLAN §34f.8: until/while/max/interval, nested under a block's own `repeat:`
 		reflect.TypeOf(domain.Assertion{}),
 		reflect.TypeOf(domain.Range{}),
 	} {
