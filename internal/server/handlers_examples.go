@@ -11,7 +11,9 @@ import (
 )
 
 // exampleQueryFromRequest builds a domain.ExampleQuery from a List request's
-// query string (PLAN §34b): GET /v1/examples?operation=&service=&tag=&text=&limit=.
+// query string (PLAN §34b): GET /v1/examples?operation=&service=&tag=&text=&limit=&folder=.
+// folder restricts results to that folder and everything below it (PLAN
+// §34f item 4).
 func exampleQueryFromRequest(r *http.Request) domain.ExampleQuery {
 	q := r.URL.Query()
 	return domain.ExampleQuery{
@@ -20,6 +22,7 @@ func exampleQueryFromRequest(r *http.Request) domain.ExampleQuery {
 		Tag:       q.Get("tag"),
 		Text:      q.Get("text"),
 		Limit:     queryInt(r, "limit", 0),
+		Folder:    q.Get("folder"),
 	}
 }
 
@@ -125,9 +128,11 @@ func (s *Server) handleExampleDelete(w http.ResponseWriter, r *http.Request) {
 	writeNoContent(w)
 }
 
-// handleExampleMove implements POST /v1/examples/{id}/move: places a
-// workspace-scope example's file in another tier (local or workspace),
-// keeping its id and scope. A blank tier is rejected before the engine is
+// handleExampleMove implements POST /v1/examples/{id}/move: with tier,
+// places a workspace-scope example's file in another tier (local or
+// workspace), keeping its id, scope, and folder; with folder, places it in
+// another folder within its current directory, keeping its scope and tier
+// (PLAN §34f item 6). Neither present is rejected before the engine is
 // asked (moveTierRequest is declared in handlers_memories.go, shared by
 // both routes' identical body shape).
 func (s *Server) handleExampleMove(w http.ResponseWriter, r *http.Request) {
@@ -137,12 +142,19 @@ func (s *Server) handleExampleMove(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	if req.Tier == "" {
-		writeError(w, errs.New(errs.Invalid, "tier is required").
-			WithHint("pass tier local or workspace"))
+	examples := engineFrom(r.Context()).Examples()
+	var out *domain.SavedExample
+	var err error
+	switch {
+	case req.Folder != nil:
+		out, err = examples.MoveFolder(r.Context(), id, *req.Folder)
+	case req.Tier != "":
+		out, err = examples.Move(r.Context(), id, req.Tier)
+	default:
+		writeError(w, errs.New(errs.Invalid, "tier or folder is required").
+			WithHint("pass tier (local or workspace) or folder"))
 		return
 	}
-	out, err := engineFrom(r.Context()).Examples().Move(r.Context(), id, req.Tier)
 	if err != nil {
 		writeError(w, err)
 		return

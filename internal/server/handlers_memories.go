@@ -20,6 +20,9 @@ func memoryQueryFromRequest(r *http.Request) domain.MemoryQuery {
 		Flow:      q.Get("flow"),
 		Limit:     queryInt(r, "limit", 0),
 		MinScore:  queryFloat(r, "min_score", 0),
+		// Folder restricts results to that folder and everything below it
+		// (PLAN §34f item 4).
+		Folder: q.Get("folder"),
 	}
 }
 
@@ -128,18 +131,26 @@ func (s *Server) handleMemoryPromotion(w http.ResponseWriter, r *http.Request) {
 }
 
 // moveTierRequest is POST /v1/memories/{id}/move and POST
-// /v1/examples/{id}/move's shared body (PLAN §7b): the tier to move the
-// file to. The client-side twin is internal/engine/remote's own
+// /v1/examples/{id}/move's shared body: Tier (PLAN §7b) moves the file to
+// another tier, Folder (PLAN §34f item 6) moves it to another folder within
+// its current directory; each request carries exactly one of the two.
+// Folder is a pointer so an explicit "move to the root folder" (an empty
+// string) can be told apart from "no folder change requested" (the key
+// absent) on the wire. The client-side twin is internal/engine/remote's own
 // moveTierRequest (memories.go, examples.go), which sends the same shape.
 type moveTierRequest struct {
-	Tier string `json:"tier"`
+	Tier   string  `json:"tier,omitempty"`
+	Folder *string `json:"folder,omitempty"`
 }
 
-// handleMemoryMove implements POST /v1/memories/{id}/move: places a
-// workspace-scope memory's file in another tier (local or workspace),
-// keeping its id and scope. A blank tier is rejected before the engine is
-// asked; every other refusal (personal/service scope, an unknown tier) is
-// the engine's own error, passed through writeError unchanged.
+// handleMemoryMove implements POST /v1/memories/{id}/move: with tier, places
+// a workspace-scope memory's file in another tier (local or workspace),
+// keeping its id, scope, and folder; with folder, places it in another
+// folder within its current directory, keeping its scope and tier (PLAN
+// §34f item 6). Neither present is rejected before the engine is asked;
+// every other refusal (personal/service scope, an unknown tier, a taken
+// destination) is the engine's own error, passed through writeError
+// unchanged.
 func (s *Server) handleMemoryMove(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var req moveTierRequest
@@ -147,12 +158,19 @@ func (s *Server) handleMemoryMove(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	if req.Tier == "" {
-		writeError(w, errs.New(errs.Invalid, "tier is required").
-			WithHint("pass tier local or workspace"))
+	memories := engineFrom(r.Context()).Memories()
+	var out *domain.Memory
+	var err error
+	switch {
+	case req.Folder != nil:
+		out, err = memories.MoveFolder(r.Context(), id, *req.Folder)
+	case req.Tier != "":
+		out, err = memories.Move(r.Context(), id, req.Tier)
+	default:
+		writeError(w, errs.New(errs.Invalid, "tier or folder is required").
+			WithHint("pass tier (local or workspace) or folder"))
 		return
 	}
-	out, err := engineFrom(r.Context()).Memories().Move(r.Context(), id, req.Tier)
 	if err != nil {
 		writeError(w, err)
 		return
