@@ -177,6 +177,101 @@ func TestLocalOverride_BindUnknownService(t *testing.T) {
 	assert.Equal(t, errs.ServiceNotFound, errs.CodeOf(err))
 }
 
+// TestSetLocalRef_NoPath_OverridesRefOnly: a ref-only local override keeps
+// the service git-sourced (same URL/Subdir), only replacing Ref, and never
+// touches the committed workspace file.
+func TestSetLocalRef_NoPath_OverridesRefOnly(t *testing.T) {
+	ws := initWithGitService(t)
+	before, err := os.ReadFile(ws.File)
+	require.NoError(t, err)
+
+	require.NoError(t, workspace.SetLocalRef(ws, "rider-service", "feature-x"))
+	require.NoError(t, workspace.SaveLocal(ws))
+
+	ref := ws.Services[0]
+	assert.Equal(t, domain.SourceGit, ref.Source.Kind, "a ref-only override must not turn the service into a local source")
+	assert.Equal(t, "feature-x", ref.Source.Ref)
+	assert.Equal(t, "git@github.com:acme/rider-service.git", ref.Source.URL)
+	require.NotNil(t, ref.Team)
+	assert.Equal(t, "main", ref.Team.Ref, "the committed ref is kept, unchanged")
+
+	after, err := os.ReadFile(ws.File)
+	require.NoError(t, err)
+	assert.Equal(t, string(before), string(after), "a local (machine) ref override must never touch sapien.workspace.yaml")
+
+	// Round-trips through Load/SaveLocal.
+	reloaded, err := workspace.Load(ws.File)
+	require.NoError(t, err)
+	assert.Equal(t, "feature-x", reloaded.Services[0].Source.Ref)
+	assert.Equal(t, "main", reloaded.Services[0].Team.Ref)
+}
+
+// TestSetLocalRef_WithPath_RefKeptButIrrelevant: when a path override is
+// also active, the checkout wins for reading, but the ref override is
+// still remembered (round-trips) so it becomes effective again on unbind.
+func TestSetLocalRef_WithPath_RefKeptButIrrelevant(t *testing.T) {
+	ws := initWithGitService(t)
+	require.NoError(t, workspace.Bind(ws, "rider-service", "/tmp/rider-service"))
+	require.NoError(t, workspace.SetLocalRef(ws, "rider-service", "feature-x"))
+	require.NoError(t, workspace.SaveLocal(ws))
+
+	ref := ws.Services[0]
+	assert.Equal(t, domain.SourceLocal, ref.Source.Kind, "the checkout still wins for reading")
+	assert.Equal(t, "/tmp/rider-service", ref.Source.Path)
+	assert.Equal(t, "feature-x", ref.LocalRef, "the ref override is kept even though it is not currently effective")
+
+	reloaded, err := workspace.Load(ws.File)
+	require.NoError(t, err)
+	rref := reloaded.Services[0]
+	assert.Equal(t, domain.SourceLocal, rref.Source.Kind)
+	assert.Equal(t, "feature-x", rref.LocalRef)
+
+	// Unbinding the checkout makes the ref override effective again.
+	require.NoError(t, workspace.Unbind(reloaded, "rider-service"))
+	unbound := reloaded.Services[0]
+	assert.Equal(t, domain.SourceGit, unbound.Source.Kind)
+	assert.Equal(t, "feature-x", unbound.Source.Ref)
+}
+
+// TestClearLocalRef_RestoresCommittedRef: clearing a ref-only override
+// (no path) restores the committed source entirely.
+func TestClearLocalRef_RestoresCommittedRef(t *testing.T) {
+	ws := initWithGitService(t)
+	require.NoError(t, workspace.SetLocalRef(ws, "rider-service", "feature-x"))
+	require.NoError(t, workspace.SaveLocal(ws))
+	require.FileExists(t, workspace.LocalOverridePath(ws))
+
+	require.NoError(t, workspace.ClearLocalRef(ws, "rider-service"))
+	ref := ws.Services[0]
+	assert.Equal(t, "main", ref.Source.Ref)
+	assert.Nil(t, ref.Team)
+	assert.Empty(t, ref.LocalRef)
+
+	require.NoError(t, workspace.SaveLocal(ws))
+	assert.NoFileExists(t, workspace.LocalOverridePath(ws))
+
+	// Clearing an already-clear ref is an error, not a silent no-op --
+	// mirrors ServiceAPI.ClearRef's contract (nothing to clear).
+	err := workspace.ClearLocalRef(ws, "rider-service")
+	require.Error(t, err)
+	assert.Equal(t, errs.Invalid, errs.CodeOf(err))
+}
+
+// TestClearLocalRef_WithPathKept: clearing the ref override while a path
+// override is active leaves the path override untouched.
+func TestClearLocalRef_WithPathKept(t *testing.T) {
+	ws := initWithGitService(t)
+	require.NoError(t, workspace.Bind(ws, "rider-service", "/tmp/rider-service"))
+	require.NoError(t, workspace.SetLocalRef(ws, "rider-service", "feature-x"))
+
+	require.NoError(t, workspace.ClearLocalRef(ws, "rider-service"))
+	ref := ws.Services[0]
+	assert.Equal(t, domain.SourceLocal, ref.Source.Kind, "the path override must survive clearing the ref override")
+	assert.Equal(t, "/tmp/rider-service", ref.Source.Path)
+	assert.Empty(t, ref.LocalRef)
+	require.NotNil(t, ref.Team)
+}
+
 func TestEnsureLocalIgnored(t *testing.T) {
 	ws, err := workspace.Init(t.TempDir(), "team")
 	require.NoError(t, err)

@@ -211,6 +211,31 @@ func AddService(ws *domain.Workspace, ref domain.ServiceRef) error {
 	return nil
 }
 
+// SetTeamRef updates the named service's committed source.ref (PLAN §34f
+// item 2), preserving everything else in the entry, in memory only; call
+// Save to write it to sapien.workspace.yaml. It errors with errs.Invalid
+// when the service is not git-sourced (a ref only means something for a
+// git source) and errs.ServiceNotFound when there is no such service. When
+// this machine currently overrides the service with a local checkout
+// (ref.Team != nil), the committed ref -- ref.Team.Ref, what Save actually
+// writes -- is what changes; the effective (bound) source is untouched.
+func SetTeamRef(ws *domain.Workspace, name, ref string) error {
+	r, ok := serviceRefPtr(ws, name)
+	if !ok {
+		return errs.New(errs.ServiceNotFound, "service %q not found", name).WithDetail("name", name)
+	}
+	if committedSourceOf(*r).Kind != domain.SourceGit {
+		return errs.New(errs.Invalid, "service %q is not git-sourced; only a git source has a ref", name).
+			WithDetail("name", name)
+	}
+	if r.Team != nil {
+		r.Team.Ref = ref
+		return nil
+	}
+	r.Source.Ref = ref
+	return nil
+}
+
 // RemoveService removes the named service from ws.Services, returning
 // errs.ServiceNotFound if it is not registered. It does not persist ws; call
 // Save to write the change to disk.
