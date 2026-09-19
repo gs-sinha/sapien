@@ -459,6 +459,24 @@ func (m *memoryAPI) Move(ctx context.Context, id, tier string) (*domain.Memory, 
 	return m.Get(ctx, id)
 }
 
+// MoveFolder places memory id's file at newFolder within its current
+// directory, keeping scope and tier (PLAN §34f item 6): delegated straight
+// to the store's own MoveFolder, which does the actual validation, file
+// move, and reindex; this wrapper's only job is to fill Shipped on the
+// result and emit memory.changed, the same finishing touches Move (tier)
+// gets for free by riding through Update.
+func (m *memoryAPI) MoveFolder(ctx context.Context, id, newFolder string) (*domain.Memory, error) {
+	moved, err := m.l.memStore.MoveFolder(ctx, id, newFolder)
+	if err != nil {
+		return nil, err
+	}
+	list := []domain.Memory{*moved}
+	m.l.fillMemoryShipped(ctx, list)
+	out := list[0]
+	m.l.emit(domain.EventMemoryChanged, out)
+	return &out, nil
+}
+
 // Commit records a workspace-tier memory's file in the workspace
 // repository with one commit of that file (PLAN §7b), mirroring
 // flowAPI.Commit (see its doc comment for the full rationale) and reusing

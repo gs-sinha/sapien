@@ -657,6 +657,22 @@ func (e *exampleAPI) Move(ctx context.Context, id, tier string) (*domain.SavedEx
 	return e.Get(ctx, id)
 }
 
+// MoveFolder places example id's file at newFolder within its current
+// directory, keeping scope and tier (PLAN §34f item 6): delegated straight
+// to the store's own MoveFolder, which does the actual validation, file
+// move, and reindex; this wrapper fills in Shipped on the result, the same
+// finishing touch Move (tier) gets for free by riding through Update.
+func (e *exampleAPI) MoveFolder(ctx context.Context, id, newFolder string) (*domain.SavedExample, error) {
+	moved, err := e.l.exStore.MoveFolder(ctx, id, newFolder)
+	if err != nil {
+		return nil, err
+	}
+	list := []domain.SavedExample{*moved}
+	e.l.fillExampleShipped(ctx, list)
+	out := list[0]
+	return &out, nil
+}
+
 // Commit records a workspace-tier example's file in the workspace
 // repository with one commit of that file (PLAN §7b), mirroring
 // memoryAPI.Commit and flowAPI.Commit -- see their doc comments for the

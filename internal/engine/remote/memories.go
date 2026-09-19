@@ -33,6 +33,9 @@ func memoryQuery(q domain.MemoryQuery) url.Values {
 	if q.Flow != "" {
 		v.Set("flow", q.Flow)
 	}
+	if q.Folder != "" {
+		v.Set("folder", q.Folder)
+	}
 	if q.Limit > 0 {
 		v.Set("limit", strconv.Itoa(q.Limit))
 	}
@@ -123,18 +126,36 @@ func (m *memoryAPI) Reindex(ctx context.Context) error {
 
 var _ engine.MemoryAPI = (*memoryAPI)(nil)
 
+// moveTierRequest is POST /v1/memories/{id}/move and POST
+// /v1/examples/{id}/move's shared body: Tier (PLAN §7b) moves the file to
+// another tier, Folder (PLAN §34f item 6) moves it to another folder within
+// its current directory; each request sends exactly one of the two. Folder
+// is a pointer so "move to the root folder" (an explicit "") can be told
+// apart from "no folder change requested" (the key absent) on the wire. The
+// server-side twin is internal/server/handlers_memories.go's own
+// moveTierRequest.
 type moveTierRequest struct {
-	Tier string `json:"tier"`
+	Tier   string  `json:"tier,omitempty"`
+	Folder *string `json:"folder,omitempty"`
 }
 
 type commitMessageRequest struct {
 	Message string `json:"message,omitempty"`
 }
 
-// Move maps to POST /v1/memories/{id}/move.
+// Move maps to POST /v1/memories/{id}/move with tier.
 func (m *memoryAPI) Move(ctx context.Context, id, tier string) (*domain.Memory, error) {
 	var out domain.Memory
 	if err := m.r().do(ctx, http.MethodPost, "/v1/memories/"+id+"/move", nil, moveTierRequest{Tier: tier}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// MoveFolder maps to POST /v1/memories/{id}/move with folder.
+func (m *memoryAPI) MoveFolder(ctx context.Context, id, newFolder string) (*domain.Memory, error) {
+	var out domain.Memory
+	if err := m.r().do(ctx, http.MethodPost, "/v1/memories/"+id+"/move", nil, moveTierRequest{Folder: &newFolder}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

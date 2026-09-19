@@ -11,6 +11,7 @@ import (
 	"github.com/gs-sinha/sapien/internal/domain"
 	"github.com/gs-sinha/sapien/internal/engine"
 	"github.com/gs-sinha/sapien/internal/errs"
+	"github.com/gs-sinha/sapien/internal/folder"
 )
 
 // subjectMatch scores how many non-empty fields of a match the same
@@ -50,6 +51,9 @@ func memoryMatchesQuery(mem domain.Memory, q domain.MemoryQuery) bool {
 		return false
 	}
 	if q.Flow != "" && mem.Subject.Flow != q.Flow {
+		return false
+	}
+	if q.Folder != "" && !folder.HasPrefix(mem.Folder, folder.Normalize(q.Folder)) {
 		return false
 	}
 	return true
@@ -289,6 +293,30 @@ func (m *memoryAPI) Move(ctx context.Context, id, tier string) (*domain.Memory, 
 	} else {
 		stored.Shipped = ""
 	}
+	f.memories[id] = stored
+	cp := stored
+	return &cp, nil
+}
+
+// MoveFolder re-stamps the stored memory's Folder; the fake has no files, so
+// there is no conflict or read-only check to make, and no cleanup to do.
+func (m *memoryAPI) MoveFolder(ctx context.Context, id, newFolder string) (*domain.Memory, error) {
+	f := m.f()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.recordLocked("Memories.MoveFolder", map[string]string{"id": id, "folder": newFolder})
+	stored, ok := f.memories[id]
+	if !ok {
+		return nil, errs.New(errs.MemoryNotFound, "memory %q not found", id).WithDetail("id", id)
+	}
+	norm, err := folder.NormalizeAndValidate(newFolder)
+	if err != nil {
+		return nil, err
+	}
+	if stored.Scope == domain.ScopePersonal {
+		return nil, errs.New(errs.Invalid, "memory %q is personal scope; it has no file to move", id)
+	}
+	stored.Folder = norm
 	f.memories[id] = stored
 	cp := stored
 	return &cp, nil

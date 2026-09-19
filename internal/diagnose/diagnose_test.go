@@ -486,9 +486,12 @@ func TestRunStep_NilRunOrEngine(t *testing.T) {
 	assert.Nil(t, RunStep(context.Background(), nil, &domain.Run{}, "x"))
 }
 
-// Tier methods the diagnoser never calls; present so the stub still
+// Tier/folder methods the diagnoser never calls; present so the stub still
 // satisfies engine.MemoryAPI.
 func (s stubMemories) Move(context.Context, string, string) (*domain.Memory, error) { return nil, nil }
+func (s stubMemories) MoveFolder(context.Context, string, string) (*domain.Memory, error) {
+	return nil, nil
+}
 func (s stubMemories) Commit(context.Context, string, string) (*domain.Memory, error) {
 	return nil, nil
 }
