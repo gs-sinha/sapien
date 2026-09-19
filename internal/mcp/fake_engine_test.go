@@ -19,6 +19,7 @@ import (
 	"github.com/gs-sinha/sapien/internal/domain"
 	"github.com/gs-sinha/sapien/internal/engine"
 	"github.com/gs-sinha/sapien/internal/errs"
+	"github.com/gs-sinha/sapien/internal/folder"
 )
 
 // fakeState is the shared, mutex-protected in-memory store behind every
@@ -319,6 +320,7 @@ func (a fakeFlows) List(_ context.Context, query string) ([]domain.FlowSummary, 
 		out = append(out, domain.FlowSummary{
 			ID: f.ID, Name: f.Name, Path: f.Path, OwnerKind: f.OwnerKind, OwnerID: f.OwnerID,
 			Tags: f.Tags, Operations: ops, StepCount: len(f.Steps), Hash: "h", Updated: time.Now(),
+			Folder: f.Folder,
 		})
 	}
 	return out, nil
@@ -404,6 +406,7 @@ func (a fakeFlows) Create(ctx context.Context, yamlSrc string, path string) (*do
 		path = f.ID + ".flow.yaml"
 	}
 	f.Path = path
+	f.Folder = folder.Of(path)
 	f.OwnerKind = "workspace"
 	if f.Name == "" {
 		f.Name = f.ID
@@ -668,7 +671,10 @@ func (a fakeMemories) Search(_ context.Context, q domain.MemoryQuery) ([]domain.
 		if q.Service != "" && m.Subject.Service != q.Service {
 			continue
 		}
-		if ql != "" && !strings.Contains(strings.ToLower(m.Text), ql) {
+		if q.Folder != "" && !folder.HasPrefix(m.Folder, folder.Normalize(q.Folder)) {
+			continue
+		}
+		if ql != "" && !strings.Contains(strings.ToLower(m.Text+" "+m.Folder), ql) {
 			continue
 		}
 		out = append(out, domain.ScoredMemory{Memory: m, Score: 1, Reasons: []string{"lexical"}})
@@ -1020,7 +1026,10 @@ func (a fakeExamples) List(_ context.Context, q domain.ExampleQuery) ([]domain.S
 				continue
 			}
 		}
-		if q.Text != "" && !strings.Contains(strings.ToLower(ex.ID+" "+ex.Description+" "+strings.Join(ex.Tags, " ")), strings.ToLower(q.Text)) {
+		if q.Text != "" && !strings.Contains(strings.ToLower(ex.ID+" "+ex.Description+" "+strings.Join(ex.Tags, " ")+" "+ex.Folder), strings.ToLower(q.Text)) {
+			continue
+		}
+		if q.Folder != "" && !folder.HasPrefix(ex.Folder, folder.Normalize(q.Folder)) {
 			continue
 		}
 		out = append(out, ex)
@@ -1280,7 +1289,15 @@ func (a fakeFlows) CreateIn(ctx context.Context, yamlSrc string, opts engine.Cre
 	if kind == "" {
 		kind = domain.FlowOwnerLocal
 	}
-	created, err := a.Create(ctx, yamlSrc, opts.Path)
+	path := opts.Path
+	if path == "" && opts.Folder != "" {
+		id := parseFakeFlow(yamlSrc).ID
+		if id == "" {
+			id = fmt.Sprintf("flow-%d", len(a.st.flows)+1)
+		}
+		path = folder.Join(folder.Normalize(opts.Folder), id+domain.FlowFileSuffix)
+	}
+	created, err := a.Create(ctx, yamlSrc, path)
 	if err != nil {
 		return nil, err
 	}
@@ -1309,6 +1326,32 @@ func (a fakeFlows) Rescope(_ context.Context, id string, ownerKind, ownerID stri
 		if a.st.flows[i].ID == id {
 			a.st.flows[i].OwnerKind, a.st.flows[i].OwnerID = ownerKind, ownerID
 			a.st.flows[i].Path = fakeTierPath(ownerKind, ownerID, filepath.Base(a.st.flows[i].Path))
+			// The fake's Rescope (unlike the real engine's RescopeWith) does
+			// not preserve a subfolder across a tier move -- filepath.Base
+			// above already dropped it -- so Folder resets to the root too.
+			a.st.flows[i].Folder = ""
+			c := a.st.flows[i]
+			return &c, nil
+		}
+	}
+	return nil, errs.New(errs.FlowNotFound, "flow %q not found", id)
+}
+
+// Move re-homes a flow's file within its current tier to newFolder, keeping
+// its file name (PLAN §34f item 6): the fake's counterpart to Rescope's
+// tier-only move.
+func (a fakeFlows) Move(_ context.Context, id, newFolder string) (*domain.Flow, error) {
+	a.st.mu.Lock()
+	defer a.st.mu.Unlock()
+	for i := range a.st.flows {
+		if a.st.flows[i].ID == id {
+			norm, err := folder.NormalizeAndValidate(newFolder)
+			if err != nil {
+				return nil, err
+			}
+			name := filepath.Base(a.st.flows[i].Path)
+			a.st.flows[i].Folder = norm
+			a.st.flows[i].Path = fakeTierPath(a.st.flows[i].OwnerKind, a.st.flows[i].OwnerID, folder.Join(norm, name))
 			c := a.st.flows[i]
 			return &c, nil
 		}
@@ -1484,6 +1527,28 @@ func (a fakeMemories) Move(_ context.Context, id, tier string) (*domain.Memory, 
 	return nil, errs.New(errs.MemoryNotFound, "memory %q not found", id)
 }
 
+// MoveFolder re-stamps the stored memory's Folder (PLAN §34f item 6); the
+// fake has no files, so there is no conflict or read-only check to make.
+func (a fakeMemories) MoveFolder(_ context.Context, id, newFolder string) (*domain.Memory, error) {
+	a.st.mu.Lock()
+	defer a.st.mu.Unlock()
+	for i := range a.st.memories {
+		if a.st.memories[i].ID == id {
+			norm, err := folder.NormalizeAndValidate(newFolder)
+			if err != nil {
+				return nil, err
+			}
+			if a.st.memories[i].Scope == domain.ScopePersonal {
+				return nil, errs.New(errs.Invalid, "memory %q is personal scope; it has no file to move", id)
+			}
+			a.st.memories[i].Folder = norm
+			c := a.st.memories[i]
+			return &c, nil
+		}
+	}
+	return nil, errs.New(errs.MemoryNotFound, "memory %q not found", id)
+}
+
 func (a fakeMemories) Commit(_ context.Context, id, message string) (*domain.Memory, error) {
 	a.st.mu.Lock()
 	defer a.st.mu.Unlock()
@@ -1509,6 +1574,25 @@ func (a fakeExamples) Move(_ context.Context, id, tier string) (*domain.SavedExa
 			} else {
 				a.st.examples[i].Shipped = ""
 			}
+			c := a.st.examples[i]
+			return &c, nil
+		}
+	}
+	return nil, errs.New(errs.ExampleNotFound, "example %q not found", id)
+}
+
+// MoveFolder re-stamps the stored example's Folder (PLAN §34f item 6); the
+// fake has no files, so there is no conflict or read-only check to make.
+func (a fakeExamples) MoveFolder(_ context.Context, id, newFolder string) (*domain.SavedExample, error) {
+	a.st.mu.Lock()
+	defer a.st.mu.Unlock()
+	for i := range a.st.examples {
+		if a.st.examples[i].ID == id {
+			norm, err := folder.NormalizeAndValidate(newFolder)
+			if err != nil {
+				return nil, err
+			}
+			a.st.examples[i].Folder = norm
 			c := a.st.examples[i]
 			return &c, nil
 		}

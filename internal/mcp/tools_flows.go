@@ -16,13 +16,15 @@ import (
 	"github.com/gs-sinha/sapien/internal/engine"
 	"github.com/gs-sinha/sapien/internal/errs"
 	"github.com/gs-sinha/sapien/internal/flowpatch"
+	"github.com/gs-sinha/sapien/internal/folder"
 )
 
 // --- list_flows -----------------------------------------------------
 
 // ListFlowsInput is list_flows' arguments.
 type ListFlowsInput struct {
-	Query string `json:"query,omitempty" jsonschema:"filter by name, tag, or operation substring"`
+	Query  string `json:"query,omitempty" jsonschema:"filter by name, tag, folder, or operation substring"`
+	Folder string `json:"folder,omitempty" jsonschema:"restrict to this folder and everything below it"`
 }
 
 // ListFlowsOutput is list_flows' structured output.
@@ -38,6 +40,12 @@ func (s *server) listFlows(ctx context.Context, req *sdkmcp.CallToolRequest, in 
 	if err != nil {
 		return errResult(err), nil, nil
 	}
+	// Folder isn't a filter List itself takes (PLAN §34f item 6: derived
+	// from the path, no DB column); applied here, same as the HTTP handler
+	// and the CLI's own --folder flag.
+	if in.Folder != "" {
+		flows = filterFlowsByFolder(flows, in.Folder)
+	}
 	out := ListFlowsOutput{Flows: flows}
 	var b strings.Builder
 	for _, f := range flows {
@@ -45,12 +53,29 @@ func (s *server) listFlows(ctx context.Context, req *sdkmcp.CallToolRequest, in 
 		if shipText := shipStateText(f.Shipped); shipText != "" {
 			tier += ", " + shipText
 		}
-		fmt.Fprintf(&b, "- %s (%d steps, %s): %s [%s]\n", f.ID, f.StepCount, tier, f.Name, strings.Join(f.Tags, ","))
+		folderNote := ""
+		if f.Folder != "" {
+			folderNote = " folder:" + f.Folder
+		}
+		fmt.Fprintf(&b, "- %s (%d steps, %s%s): %s [%s]\n", f.ID, f.StepCount, tier, folderNote, f.Name, strings.Join(f.Tags, ","))
 	}
 	if len(flows) == 0 {
 		b.WriteString("no flows\n")
 	}
 	return result(b.String(), out), nil, nil
+}
+
+// filterFlowsByFolder keeps only the flows in prefix's folder or below it
+// (PLAN §34f item 4's prefix semantics: internal/folder.HasPrefix).
+func filterFlowsByFolder(flows []domain.FlowSummary, prefix string) []domain.FlowSummary {
+	norm := folder.Normalize(prefix)
+	out := flows[:0]
+	for _, f := range flows {
+		if folder.HasPrefix(f.Folder, norm) {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 // --- get_flow -----------------------------------------------------
@@ -201,6 +226,9 @@ func renderValidation(r *domain.ValidationResult) string {
 type FlowSaveResult struct {
 	ID   string `json:"id"`
 	Path string `json:"path"`
+	// Folder is the subfolder of the tier's flows directory the flow sits
+	// in (PLAN §34f item 6); "" at the root.
+	Folder string `json:"folder,omitempty"`
 	// Tier is the owner kind the file landed in: local, workspace, or
 	// service; Service names the owning service for the service tier.
 	Tier          string   `json:"tier"`
@@ -229,6 +257,7 @@ func buildFlowSaveResult(f *domain.Flow, wsDir string, valResult *domain.Validat
 	out := FlowSaveResult{
 		ID:            f.ID,
 		Path:          displayFlowPath(wsDir, f.Path),
+		Folder:        f.Folder,
 		Tier:          f.OwnerKind,
 		Steps:         len(f.Steps),
 		SetupSteps:    len(f.Setup),
@@ -353,6 +382,10 @@ type CreateFlowInput struct {
 	// .flow.yaml so list_flows finds it. Default: "<id>.flow.yaml" from the
 	// flow's own `id:`.
 	Path string `json:"path,omitempty" jsonschema:"destination path relative to the chosen tier's flows directory (not the workspace root); default <id>.flow.yaml; must stay inside that directory and end in .flow.yaml"`
+	// Folder places the flow at <folder>/<id>.flow.yaml within the chosen
+	// tier's flows directory (PLAN §34f item 6); mutually exclusive with
+	// Path.
+	Folder string `json:"folder,omitempty" jsonschema:"destination folder relative to the chosen tier's flows directory; the flow lands at <folder>/<id>.flow.yaml; mutually exclusive with path"`
 	// Scope is the tier: local (default) is this machine only, workspace is
 	// the team's repo, service is the owning service's api/flows and needs
 	// Service plus a bound local checkout.
@@ -374,7 +407,7 @@ func (s *server) createFlow(ctx context.Context, req *sdkmcp.CallToolRequest, in
 	// unused.
 	valResult, _ := s.engine().Flows().Validate(ctx, in.FlowYAML)
 	flow, err := s.engine().Flows().CreateIn(ctx, in.FlowYAML, engine.CreateFlowOptions{
-		Path: in.Path, OwnerKind: kind, OwnerID: service,
+		Path: in.Path, Folder: in.Folder, OwnerKind: kind, OwnerID: service,
 	})
 	if err != nil {
 		return errResult(err), nil, nil
@@ -498,11 +531,20 @@ func flowTierNote(kind, service string) string {
 
 // --- rescope_flow -----------------------------------------------------
 
-// RescopeFlowInput is rescope_flow's arguments.
+// RescopeFlowInput is rescope_flow's arguments. Scope used to be required;
+// it is optional now (PLAN §34f item 6) so a call can change only Folder
+// and leave the flow's tier exactly where it is -- existing callers that
+// always pass scope see no change in behavior.
 type RescopeFlowInput struct {
 	ID      string `json:"id" jsonschema:"flow id"`
-	Scope   string `json:"scope" jsonschema:"tier to move the flow to: local (this machine only), workspace (the team's repo), or service (the owning service's api/flows; needs service and a bound local checkout)"`
+	Scope   string `json:"scope,omitempty" jsonschema:"tier to move the flow to: local (this machine only), workspace (the team's repo), or service (the owning service's api/flows; needs service and a bound local checkout); omit to keep the current tier and only change folder"`
 	Service string `json:"service,omitempty" jsonschema:"owning service name; required for scope service"`
+	// Folder is applied after the scope change (if any), via Flows().Move,
+	// so one call can rescope and change folder together (PLAN §34f item
+	// 6); "" moves it to the root. A pointer so "move to the root" (an
+	// explicit "") can be told apart from "leave the folder alone" (the key
+	// absent).
+	Folder *string `json:"folder,omitempty" jsonschema:"also move the flow to this folder within its (new or current) tier; \"\" moves it to the root"`
 	// Commit and Message mirror engine.RescopeOptions (PLAN §7b): opt-in,
 	// only meaningful for scope workspace, and never a push.
 	Commit  bool   `json:"commit,omitempty" jsonschema:"also commit the moved file in the workspace repository; only for scope workspace; never pushes; do this only when the user asked for it"`
@@ -522,22 +564,33 @@ func (s *server) rescopeFlow(ctx context.Context, req *sdkmcp.CallToolRequest, i
 	if _, _, denied := s.checkPermission(req.Session, classWriteFlows); denied != nil {
 		return denied, nil, nil
 	}
-	if strings.TrimSpace(in.Scope) == "" {
-		return errResult(errs.New(errs.Invalid, "rescope_flow requires scope").
-			WithHint("pass scope local, workspace, or service (with service=<name>)")), nil, nil
-	}
-	kind, service, err := flowScopeArgs("rescope_flow", in.Scope, in.Service)
-	if err != nil {
-		return errResult(err), nil, nil
+	if strings.TrimSpace(in.Scope) == "" && in.Folder == nil {
+		return errResult(errs.New(errs.Invalid, "rescope_flow requires scope or folder").
+			WithHint("pass scope local, workspace, or service (with service=<name>), or folder to move within the current tier")), nil, nil
 	}
 	existing, err := s.engine().Flows().Get(ctx, in.ID)
 	if err != nil {
 		return errResult(err), nil, nil
 	}
-	moved, err := s.engine().Flows().RescopeWith(ctx, in.ID, kind, service, engine.RescopeOptions{Commit: in.Commit, Message: in.Message})
-	if err != nil {
-		return errResult(err), nil, nil
+
+	moved := existing
+	if strings.TrimSpace(in.Scope) != "" {
+		kind, service, kerr := flowScopeArgs("rescope_flow", in.Scope, in.Service)
+		if kerr != nil {
+			return errResult(kerr), nil, nil
+		}
+		moved, err = s.engine().Flows().RescopeWith(ctx, in.ID, kind, service, engine.RescopeOptions{Commit: in.Commit, Message: in.Message})
+		if err != nil {
+			return errResult(err), nil, nil
+		}
 	}
+	if in.Folder != nil {
+		moved, err = s.engine().Flows().Move(ctx, in.ID, *in.Folder)
+		if err != nil {
+			return errResult(err), nil, nil
+		}
+	}
+
 	wsDir := s.workspaceDir()
 	out := RescopeFlowOutput{
 		FlowSaveResult: buildFlowSaveResult(moved, wsDir, nil),
@@ -619,6 +672,7 @@ func buildFlowSaveResultFromSummary(sum *domain.FlowSummary, wsDir string) FlowS
 	out := FlowSaveResult{
 		ID:         sum.ID,
 		Path:       displayFlowPath(wsDir, sum.Path),
+		Folder:     sum.Folder,
 		Tier:       sum.OwnerKind,
 		Steps:      sum.StepCount,
 		Operations: sum.Operations,
