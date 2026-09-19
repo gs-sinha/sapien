@@ -41,15 +41,24 @@ func (e *Evaluator) store(expr string, c *compiledExpr) {
 	e.cache[expr] = c
 }
 
-// compile parses, checks, and plans expr, or returns it from cache.
-// hasCurrent/hasIter only affect the "available roots" text of an
-// unknown-variable error; successful compilations are cached independently
-// of them, since the shared environment always declares every root.
+// compile parses, checks, and plans expr, or returns it from cache. expr is
+// expanded through ExpandTemplates first (this is the runtime half of that
+// choke point; Parse/Roots is the validator's), so a `${...}` template
+// anywhere in expr -- bare, or inside a string literal -- compiles as the
+// CEL it rewrites to; the cache key and every error still carry expr's own
+// original text, never the expanded form. hasCurrent/hasIter only affect
+// the "available roots" text of an unknown-variable error; successful
+// compilations are cached independently of them, since the shared
+// environment always declares every root.
 func (e *Evaluator) compile(expr string, hasCurrent, hasIter bool) (*compiledExpr, error) {
 	if c, ok := e.lookup(expr); ok {
 		return c, nil
 	}
-	ast, iss := sharedEnv.Compile(expr)
+	expanded, xerr := ExpandTemplates(expr)
+	if xerr != nil {
+		return nil, xerr
+	}
+	ast, iss := sharedEnv.Compile(expanded)
 	if iss != nil && len(iss.Errors()) > 0 {
 		return nil, checkErr(expr, iss.Errors(), hasCurrent, hasIter)
 	}
@@ -128,7 +137,11 @@ var comparisonOps = map[string]bool{
 // and returns X. ok is false when expr is not such a comparison, or when X
 // fails to evaluate.
 func Describe(expr string, s Scope) (actual any, ok bool) {
-	ast, iss := sharedEnv.Parse(expr)
+	expanded, xerr := ExpandTemplates(expr)
+	if xerr != nil {
+		return nil, false
+	}
+	ast, iss := sharedEnv.Parse(expanded)
 	if iss != nil && len(iss.Errors()) > 0 {
 		return nil, false
 	}
