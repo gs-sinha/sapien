@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { flows, folders as foldersApi } from '../api/client';
+import { BulkMoveBar } from '../components/BulkMoveBar';
 import { EmptyState } from '../components/EmptyState';
 import { FolderBreadcrumb } from '../components/FolderBreadcrumb';
 import { FolderMovePopover } from '../components/FolderMovePopover';
@@ -9,8 +10,10 @@ import { Table } from '../components/Table';
 import { Timestamp } from '../components/Timestamp';
 import { distinctFolders, underFolder } from '../lib/folders';
 import { useAsync } from '../lib/useAsync';
+import { useBulkMove } from '../lib/useBulkMove';
 import { useFolderParam } from '../lib/useFolderParam';
 import { subscribe } from '../state/events';
+import { pushToast } from '../state/toast';
 import { CommitButton, FLOW_TIERS, PushButton, ShippedBadge, TIER_NAMES, tierLabel, tierOf } from './flows/tier';
 import type { FlowOwnerKind, FlowSummary } from '../api/types';
 
@@ -38,8 +41,29 @@ export default function FlowsPage() {
   // Tier chips: every tier shown until one is toggled off; composes with the text filter.
   const [tiers, setTiers] = useState<Set<FlowOwnerKind>>(() => new Set(FLOW_TIERS));
   const [folder, setFolder] = useFolderParam();
+  const { selected, setSelected, failures, clearSelection, bulkMove } = useBulkMove(
+    (id, target) => foldersApi.moveFlow(id, target),
+    reload,
+  );
 
   useEffect(() => subscribe('flow.changed', reload), [reload]);
+
+  // Selection is a view-level concern layered on top of whatever the
+  // filters currently show; changing any of them invalidates it rather
+  // than leaving a stale selection the user can no longer see.
+  useEffect(() => {
+    clearSelection();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [folder, filter, tiers]);
+
+  const handleDropIds = async (ids: string[], targetFolder: string) => {
+    setSelected(new Set(ids));
+    const failed = await bulkMove(ids, targetFolder);
+    const dest = targetFolder || 'root';
+    if (failed.length === 0) pushToast('success', `moved ${ids.length} flows to ${dest}`);
+    else if (failed.length < ids.length) pushToast('error', `moved ${ids.length - failed.length}/${ids.length} flows to ${dest}; ${failed.length} failed`);
+    else pushToast('error', `failed to move flows to ${dest}`);
+  };
 
   const toggleTier = (t: FlowOwnerKind) =>
     setTiers((prev) => {
@@ -89,7 +113,7 @@ export default function FlowsPage() {
         </div>
       </div>
       <div className="flex flex-col gap-4 md:flex-row">
-        <FolderSidebar items={data || []} selected={folder} onSelect={setFolder} treeKey="folders:flows" />
+        <FolderSidebar items={data || []} selected={folder} onSelect={setFolder} treeKey="folders:flows" onDropIds={handleDropIds} />
         <div className="min-w-0 flex-1">
           {folderList.length > 0 && <FolderBreadcrumb folder={folder} onNavigate={setFolder} />}
           {loading && <div className="text-sm text-slate-400">Loading…</div>}
@@ -101,8 +125,21 @@ export default function FlowsPage() {
             <div className="text-sm text-slate-400">{filter ? `No flows match "${filter}".` : 'No flows in the selected tiers.'}</div>
           )}
           {!loading && !error && filtered.length > 0 && (
+            <BulkMoveBar
+              count={selected.size}
+              itemLabel="flows"
+              folders={folderList}
+              onMove={(target, onProgress) => bulkMove(Array.from(selected), target, onProgress)}
+              onClear={clearSelection}
+              failures={failures}
+            />
+          )}
+          {!loading && !error && filtered.length > 0 && (
             <Table<FlowSummary>
               rowKey={(f) => f.id}
+              selectedKeys={selected}
+              onSelectionChange={setSelected}
+              draggable
               columns={[
                 {
                   key: 'id',

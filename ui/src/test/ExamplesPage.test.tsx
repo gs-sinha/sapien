@@ -19,6 +19,7 @@ const examplesCommit = vi.fn(async (id: string, _message?: string): Promise<Save
   tier: 'workspace',
   shipped: 'unpushed',
 }));
+const foldersMoveExample = vi.fn(async (id: string, folder: string): Promise<SavedExample> => ({ ...orderExample, id, folder }));
 const repoPush = vi.fn(
   async (): Promise<RepoStatus> => ({ in_git: true, branch: 'main', behind: 0, ahead: 0, dirty: 0, pushed: true, pushed_count: 1 }),
 );
@@ -28,6 +29,9 @@ vi.mock('../api/client', () => ({
     list: (...a: unknown[]) => examplesList(...a),
     move: (id: string, tier: 'local' | 'workspace') => examplesMove(id, tier),
     commit: (id: string, message?: string) => examplesCommit(id, message),
+  },
+  folders: {
+    moveExample: (id: string, folder: string) => foldersMoveExample(id, folder),
   },
   repo: {
     push: () => repoPush(),
@@ -61,6 +65,7 @@ beforeEach(() => {
   examplesList.mockReset().mockResolvedValue([orderExample, billingExample]);
   examplesMove.mockClear();
   examplesCommit.mockClear();
+  foldersMoveExample.mockClear();
   repoPush.mockClear();
   useToasts.setState({ toasts: [] });
   useRepo.setState({ status: null, started: false });
@@ -198,5 +203,37 @@ describe('ExamplesPage', () => {
 
     await user.click(within(rowOf('ex-shipped')).getByRole('button', { name: 'Move to local' }));
     await waitFor(() => expect(examplesMove).toHaveBeenCalledWith('ex-shipped', 'local'));
+  });
+});
+
+// Smoke test for the multi-select bulk move (PLAN §34f item 6 follow-up):
+// the mechanics (Table's selection, the action bar, sequential calls,
+// reload-once) are shared with FlowsPage and covered thoroughly in
+// BulkMove.test.tsx; this just confirms ExamplesPage wires them up the
+// same way, with its own API (folders.moveExample).
+describe('bulk move (via ExamplesPage)', () => {
+  it('selecting two rows and moving them calls folders.moveExample for each and reloads once', async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <ExamplesPage />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getByText('order-happy-path')).toBeInTheDocument());
+    examplesList.mockClear();
+
+    await user.click(screen.getByRole('checkbox', { name: 'select order-happy-path' }));
+    await user.click(screen.getByRole('checkbox', { name: 'select billing-refund-partial' }));
+    expect(screen.getByText('2 selected')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Move 2 to folder…' }));
+    await user.type(screen.getByRole('textbox', { name: /folder/i }), 'billing');
+    await user.click(screen.getByRole('button', { name: 'Move' }));
+
+    await waitFor(() => expect(foldersMoveExample).toHaveBeenCalledTimes(2));
+    expect(foldersMoveExample).toHaveBeenCalledWith('order-happy-path', 'billing');
+    expect(foldersMoveExample).toHaveBeenCalledWith('billing-refund-partial', 'billing');
+    expect(examplesList).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(screen.queryByText(/^\d+ selected$/)).not.toBeInTheDocument());
   });
 });

@@ -34,6 +34,7 @@ const sampleMemories: Memory[] = [
 const memoriesList = vi.fn(async (_params?: unknown): Promise<Memory[]> => sampleMemories);
 const memoriesMove = vi.fn(async (id: string, tier: 'local' | 'workspace'): Promise<Memory> => memory({ id, tier }));
 const memoriesCommit = vi.fn(async (id: string, _message?: string): Promise<Memory> => memory({ id, tier: 'workspace', shipped: 'unpushed' }));
+const foldersMoveMemory = vi.fn(async (id: string, folder: string): Promise<Memory> => memory({ id, folder }));
 const repoPush = vi.fn(
   async (): Promise<RepoStatus> => ({ in_git: true, branch: 'main', behind: 0, ahead: 0, dirty: 0, pushed: true, pushed_count: 1 }),
 );
@@ -45,6 +46,9 @@ vi.mock('../api/client', () => ({
     move: (id: string, tier: 'local' | 'workspace') => memoriesMove(id, tier),
     commit: (id: string, message?: string) => memoriesCommit(id, message),
   },
+  folders: {
+    moveMemory: (id: string, folder: string) => foldersMoveMemory(id, folder),
+  },
   repo: {
     push: () => repoPush(),
   },
@@ -54,6 +58,7 @@ beforeEach(() => {
   memoriesList.mockClear().mockResolvedValue(sampleMemories);
   memoriesMove.mockClear();
   memoriesCommit.mockClear();
+  foldersMoveMemory.mockClear();
   repoPush.mockClear();
   useToasts.setState({ toasts: [] });
   useRepo.setState({ status: null, started: false });
@@ -166,5 +171,33 @@ describe('MemoriesPage tier column', () => {
         true,
       ),
     );
+  });
+});
+
+// Smoke test for the multi-select bulk move (PLAN §34f item 6 follow-up):
+// the mechanics (Table's selection, the action bar, sequential calls,
+// reload-once) are shared with FlowsPage and covered thoroughly in
+// BulkMove.test.tsx; this just confirms MemoriesPage wires them up the
+// same way, with its own API (folders.moveMemory).
+describe('bulk move (via MemoriesPage)', () => {
+  it('selecting two rows and moving them calls folders.moveMemory for each and reloads once', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByText('mem_local')).toBeInTheDocument());
+    memoriesList.mockClear();
+
+    await user.click(screen.getByRole('checkbox', { name: 'select mem_local' }));
+    await user.click(screen.getByRole('checkbox', { name: 'select mem_untracked' }));
+    expect(screen.getByText('2 selected')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Move 2 to folder…' }));
+    await user.type(screen.getByRole('textbox', { name: /folder/i }), 'billing');
+    await user.click(screen.getByRole('button', { name: 'Move' }));
+
+    await waitFor(() => expect(foldersMoveMemory).toHaveBeenCalledTimes(2));
+    expect(foldersMoveMemory).toHaveBeenCalledWith('mem_local', 'billing');
+    expect(foldersMoveMemory).toHaveBeenCalledWith('mem_untracked', 'billing');
+    expect(memoriesList).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(screen.queryByText(/^\d+ selected$/)).not.toBeInTheDocument());
   });
 });

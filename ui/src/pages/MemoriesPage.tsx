@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { memories, folders as foldersApi } from '../api/client';
+import { BulkMoveBar } from '../components/BulkMoveBar';
 import { EmptyState } from '../components/EmptyState';
 import { FolderBreadcrumb } from '../components/FolderBreadcrumb';
 import { FolderMovePopover } from '../components/FolderMovePopover';
@@ -10,8 +11,10 @@ import { Timestamp } from '../components/Timestamp';
 import { CommitButton, ItemTierBadge, MoveTierControl, PushButton, ShippedBadge } from '../components/tiers';
 import { distinctFolders, underFolder } from '../lib/folders';
 import { useAsync } from '../lib/useAsync';
+import { useBulkMove } from '../lib/useBulkMove';
 import { useFolderParam } from '../lib/useFolderParam';
 import { subscribe } from '../state/events';
+import { pushToast } from '../state/toast';
 import type { Memory, MemoryScope, MemoryType } from '../api/types';
 
 const memoryTypes: MemoryType[] = ['note', 'semantic', 'behavioral', 'testing', 'invariant', 'environment', 'gotcha'];
@@ -43,6 +46,28 @@ export default function MemoriesPage() {
       un2();
     };
   }, [reload]);
+
+  const { selected, setSelected, failures, clearSelection, bulkMove } = useBulkMove(
+    (id, target) => foldersApi.moveMemory(id, target),
+    reload,
+  );
+
+  // Selection is a view-level concern layered on top of whatever the
+  // filters currently show; changing any of them invalidates it rather
+  // than leaving a stale selection the user can no longer see.
+  useEffect(() => {
+    clearSelection();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [folder, submitted, type, scope, service]);
+
+  const handleDropIds = async (ids: string[], targetFolder: string) => {
+    setSelected(new Set(ids));
+    const failed = await bulkMove(ids, targetFolder);
+    const dest = targetFolder || 'root';
+    if (failed.length === 0) pushToast('success', `moved ${ids.length} memories to ${dest}`);
+    else if (failed.length < ids.length) pushToast('error', `moved ${ids.length - failed.length}/${ids.length} memories to ${dest}; ${failed.length} failed`);
+    else pushToast('error', `failed to move memories to ${dest}`);
+  };
 
   const folderList = useMemo(() => distinctFolders(data || []), [data]);
   const filtered = useMemo(() => underFolder(data || [], folder), [data, folder]);
@@ -99,7 +124,7 @@ export default function MemoriesPage() {
       </form>
 
       <div className="flex flex-col gap-4 md:flex-row">
-        <FolderSidebar items={data || []} selected={folder} onSelect={setFolder} treeKey="folders:memories" />
+        <FolderSidebar items={data || []} selected={folder} onSelect={setFolder} treeKey="folders:memories" onDropIds={handleDropIds} />
         <div className="min-w-0 flex-1">
           {folderList.length > 0 && <FolderBreadcrumb folder={folder} onNavigate={setFolder} />}
           {loading && <div className="text-sm text-slate-400">Loading…</div>}
@@ -108,8 +133,21 @@ export default function MemoriesPage() {
             <EmptyState title="No memories" hint="Memories captured by agents or people during calls and runs show up here." />
           )}
           {!loading && !error && data && data.length > 0 && (
+            <BulkMoveBar
+              count={selected.size}
+              itemLabel="memories"
+              folders={folderList}
+              onMove={(target, onProgress) => bulkMove(Array.from(selected), target, onProgress)}
+              onClear={clearSelection}
+              failures={failures}
+            />
+          )}
+          {!loading && !error && data && data.length > 0 && (
             <Table<Memory>
               rowKey={(m) => m.id}
+              selectedKeys={selected}
+              onSelectionChange={setSelected}
+              draggable
               columns={[
                 {
                   key: 'id',
