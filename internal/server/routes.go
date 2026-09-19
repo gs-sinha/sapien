@@ -48,6 +48,12 @@ var routeTable = []routeDef{
 		func(s *Server) http.HandlerFunc { return s.handleWorkspaceRegister }},
 	{http.MethodDelete, "/v1/workspaces", "closeWorkspace", "Close an open workspace on this daemon (dir query parameter)", true,
 		func(s *Server) http.HandlerFunc { return s.handleWorkspaceClose }},
+	{http.MethodPost, "/v1/workspaces/create", "createWorkspace", "Create and initialize a new workspace", true,
+		func(s *Server) http.HandlerFunc { return s.handleWorkspaceCreate }},
+	{http.MethodPost, "/v1/workspaces/clone", "cloneWorkspace", "Clone a workspace repository and open it", true,
+		func(s *Server) http.HandlerFunc { return s.handleWorkspaceClone }},
+	{http.MethodGet, "/v1/fs/dirs", "browseDirectories", "List a directory's subdirectories for a picker", true,
+		func(s *Server) http.HandlerFunc { return s.handleFSDirs }},
 
 	{http.MethodGet, "/v1/services", "listServices", "List registered services", true,
 		func(s *Server) http.HandlerFunc { return s.handleServicesList }},

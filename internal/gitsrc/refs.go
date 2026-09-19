@@ -25,7 +25,7 @@ type RemoteRefs struct {
 func (m *Manager) LsRemote(ctx context.Context, url string) (*RemoteRefs, error) {
 	refs := &RemoteRefs{}
 
-	if out, err := m.run(ctx, "", "ls-remote", "--symref", url, "HEAD"); err == nil {
+	if out, err := m.run(ctx, "", "ls-remote", "--symref", "--", url, "HEAD"); err == nil {
 		for _, line := range strings.Split(out, "\n") {
 			if !strings.HasPrefix(line, "ref:") {
 				continue
@@ -38,7 +38,7 @@ func (m *Manager) LsRemote(ctx context.Context, url string) (*RemoteRefs, error)
 		}
 	}
 
-	out, err := m.run(ctx, "", "ls-remote", "--heads", "--tags", url)
+	out, err := m.run(ctx, "", "ls-remote", "--heads", "--tags", "--", url)
 	if err != nil {
 		return nil, withDetail(err, "url", url)
 	}
@@ -80,7 +80,7 @@ func (m *Manager) LsRemote(ctx context.Context, url string) (*RemoteRefs, error)
 // LsRemote when only existence matters, e.g. SetRef validating a ref before
 // writing it anywhere).
 func (m *Manager) RefExists(ctx context.Context, url, ref string) (bool, error) {
-	out, err := m.run(ctx, "", "ls-remote", "--heads", "--tags", url, ref)
+	out, err := m.run(ctx, "", "ls-remote", "--heads", "--tags", "--", url, ref)
 	if err != nil {
 		return false, withDetail(err, "url", url)
 	}

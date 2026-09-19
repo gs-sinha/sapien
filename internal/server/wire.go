@@ -90,3 +90,17 @@ type setSecretRequest struct {
 type registerWorkspaceRequest struct {
 	Dir string `json:"dir"`
 }
+
+// createWorkspaceRequest is POST /v1/workspaces/create's body.
+type createWorkspaceRequest struct {
+	Dir     string `json:"dir"`
+	Name    string `json:"name,omitempty"`
+	GitInit bool   `json:"git_init,omitempty"`
+}
+
+// cloneWorkspaceRequest is POST /v1/workspaces/clone's body.
+type cloneWorkspaceRequest struct {
+	URL  string `json:"url"`
+	Dir  string `json:"dir"`
+	Name string `json:"name,omitempty"`
+}

@@ -1054,6 +1054,20 @@ export interface DirEntry {
   reason?: string;
 }
 
+/** GET /v1/fs/dirs?path=<dir> -> one directory level, for the folder picker. Same shape as DirListing but without the git annotations. */
+export interface FSDirListing {
+  path: string;
+  /** Absent at the filesystem root. */
+  parent?: string;
+  entries: FSDirEntry[];
+}
+
+/** One subdirectory in an FSDirListing. */
+export interface FSDirEntry {
+  name: string;
+  path: string;
+}
+
 /** POST /v1/services/from-checkout: registers a local checkout's origin as the team's git source and binds it here. */
 export interface AddFromCheckoutRequest {
   name?: string;

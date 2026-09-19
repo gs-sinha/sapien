@@ -32,6 +32,11 @@ import (
 // is not set.
 const defaultTimeout = 60 * time.Second
 
+// defaultCloneTimeout is the `git clone` budget used when
+// Options.CloneTimeout is not set: cloning a large repository over a slow
+// link takes far longer than an ordinary git invocation.
+const defaultCloneTimeout = 10 * time.Minute
+
 // defaultSubdir is the package directory used when a Source does not
 // declare one (PLAN §7, §18).
 const defaultSubdir = "api"
@@ -46,6 +51,10 @@ type Options struct {
 	Git string
 	// Timeout bounds every individual git invocation. Default: 60s.
 	Timeout time.Duration
+	// CloneTimeout bounds `git clone` (Manager.CloneInto). Cloning is far
+	// slower than an ordinary git invocation, so it gets its own budget
+	// rather than Timeout's. Default: 10 minutes.
+	CloneTimeout time.Duration
 	// Logger receives debug-level records of every git command run. Default:
 	// slog.Default().
 	Logger *slog.Logger
@@ -58,11 +67,12 @@ type Options struct {
 
 // Manager creates and maintains managed git clones for git-sourced services.
 type Manager struct {
-	cacheDir string
-	git      string
-	timeout  time.Duration
-	logger   *slog.Logger
-	env      []string
+	cacheDir     string
+	git          string
+	timeout      time.Duration
+	cloneTimeout time.Duration
+	logger       *slog.Logger
+	env          []string
 }
 
 // New builds a Manager from opts, applying defaults for every unset field.
@@ -86,17 +96,23 @@ func New(opts Options) *Manager {
 		timeout = defaultTimeout
 	}
 
+	cloneTimeout := opts.CloneTimeout
+	if cloneTimeout <= 0 {
+		cloneTimeout = defaultCloneTimeout
+	}
+
 	logger := opts.Logger
 	if logger == nil {
 		logger = slog.Default()
 	}
 
 	return &Manager{
-		cacheDir: cacheDir,
-		git:      gitBin,
-		timeout:  timeout,
-		logger:   logger,
-		env:      append([]string(nil), opts.Env...),
+		cacheDir:     cacheDir,
+		git:          gitBin,
+		timeout:      timeout,
+		cloneTimeout: cloneTimeout,
+		logger:       logger,
+		env:          append([]string(nil), opts.Env...),
 	}
 }
 
@@ -152,7 +168,9 @@ var gitURLSchemes = []string{"http://", "https://", "ssh://", "git://", "file://
 // "~"-prefixed, with no scheme and no "user@host:" prefix -- is not a git
 // URL, even if it happens to contain a colon (e.g. a Windows drive letter).
 func IsGitURL(s string) bool {
-	if s == "" {
+	if s == "" || strings.HasPrefix(s, "-") {
+		// A leading "-" would be read as a git option, not a repository;
+		// the scp-like pattern below would otherwise accept "-x@host:path".
 		return false
 	}
 	lower := strings.ToLower(s)
@@ -209,18 +227,25 @@ func slugify(s string) string {
 }
 
 // run executes git with args in dir (the process's own working directory
-// when dir is ""), applying m.timeout, capturing stdout/stderr, and forcing
-// GIT_TERMINAL_PROMPT=0. An already-done ctx is rejected immediately,
-// without starting a process. A failure is returned as errs.Cancelled (ctx
-// cancelled or deadline exceeded) or errs.ServiceSource (any other git
-// failure, stderr attached as a detail and a hint attached for common
-// failure patterns); callers add a "url" detail where they have one.
+// when dir is ""), applying m.timeout. See runTimeout.
 func (m *Manager) run(ctx context.Context, dir string, args ...string) (string, error) {
+	return m.runTimeout(ctx, m.timeout, dir, args...)
+}
+
+// runTimeout executes git with args in dir (the process's own working
+// directory when dir is ""), applying timeout, capturing stdout/stderr, and
+// forcing GIT_TERMINAL_PROMPT=0. An already-done ctx is rejected
+// immediately, without starting a process. A failure is returned as
+// errs.Cancelled (ctx cancelled or deadline exceeded) or errs.ServiceSource
+// (any other git failure, stderr attached as a detail and a hint attached
+// for common failure patterns); callers add a "url" detail where they have
+// one.
+func (m *Manager) runTimeout(ctx context.Context, timeout time.Duration, dir string, args ...string) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", errs.Wrap(errs.Cancelled, err, "git %s: cancelled", strings.Join(args, " "))
 	}
 
-	cctx, cancel := context.WithTimeout(ctx, m.timeout)
+	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(cctx, m.git, args...) //nolint:gosec // m.git and args are operator-controlled, not user input.

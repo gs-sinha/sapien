@@ -13,7 +13,12 @@ vi.mock('../api/client', () => ({
   workspacesApi: {
     list: () => workspacesList(),
     register: vi.fn(),
+    // AddWorkspaceDialog imports these through the picker; unused here but
+    // the whole module is replaced, so they must exist for the import chain.
+    create: vi.fn(),
+    clone: vi.fn(),
   },
+  fsApi: { dirs: vi.fn(async () => ({ path: '/home/dev', entries: [] })) },
   getRecentEvents: vi.fn(async () => []),
 }));
 
@@ -97,6 +102,16 @@ describe('WorkspacePicker', () => {
 
     expect(currentWorkspace()).toBe('');
     expect(reload).not.toHaveBeenCalled();
+  });
+
+  it('opens the Add workspace dialog from the dropdown', async () => {
+    render(<WorkspacePicker />);
+    await waitFor(() => expect(screen.getByText('primary')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: /primary/ }));
+    fireEvent.click(screen.getByText('Add workspace…'));
+
+    expect(screen.getByRole('dialog', { name: 'Add workspace' })).toBeInTheDocument();
   });
 
   it('stays quiet when the daemon cannot list workspaces', async () => {

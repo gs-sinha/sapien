@@ -80,6 +80,8 @@ func TestIsGitURL(t *testing.T) {
 		{"file scheme", "file:///tmp/bare-repos/allocation-service.git", true},
 		{"uppercase scheme", "HTTPS://GITHUB.COM/company/repo.git", true},
 		{"empty", "", false},
+		{"leading dash scp-like", "-u@host:path", false},
+		{"leading dash scheme", "-https://github.com/company/repo.git", false},
 		{"absolute path", "/Users/dev/code/allocation-service", false},
 		{"relative path", "../allocation-service", false},
 		{"tilde path", "~/code/allocation-service", false},

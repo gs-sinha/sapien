@@ -282,7 +282,7 @@ func (m *Manager) clone(ctx context.Context, url, dir, subdir string) error {
 	// Best-effort cleanup of a partial clone left by an earlier failed attempt.
 	_ = os.RemoveAll(dir)
 
-	if _, err := m.run(ctx, "", "clone", "--filter=blob:none", "--no-checkout", url, dir); err != nil {
+	if _, err := m.run(ctx, "", "clone", "--filter=blob:none", "--no-checkout", "--", url, dir); err != nil {
 		_ = os.RemoveAll(dir)
 		return withDetail(err, "url", url)
 	}
@@ -307,7 +307,7 @@ func (m *Manager) resolveDefaultRef(ctx context.Context, dir, url string) (strin
 		}
 	}
 
-	out, err = m.run(ctx, "", "ls-remote", "--symref", url, "HEAD")
+	out, err = m.run(ctx, "", "ls-remote", "--symref", "--", url, "HEAD")
 	if err != nil {
 		return "", withDetail(err, "url", url)
 	}

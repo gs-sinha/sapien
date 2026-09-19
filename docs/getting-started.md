@@ -73,6 +73,15 @@ with `--workspace`, so the list mostly fills itself in. `use` sets the
 *fallback*, not an override: inside a workspace, that workspace still
 wins.
 
+The same three things are in the inspector: the workspace picker's **Add
+workspace…** opens a dialog with **New** (choose a parent folder in the
+daemon's folder browser, name it, optionally `git init`), **Clone** (paste a
+workspace repository's URL and choose where it goes; it is cloned,
+registered and opened, and a repository with no `sapien.workspace.yaml` gets
+one), and **Existing** (register a folder you already have). A destination
+must be new or empty, paths must be absolute or start with `~`, and a
+failed create or clone removes what it made, so trying again works.
+
 One `sapien serve` serves every registered workspace, opening each on
 first use, so the UI's picker (top of the nav) and MCP's
 `switch_workspace` both switch without restarting anything. Each

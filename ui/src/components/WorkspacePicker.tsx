@@ -3,6 +3,7 @@ import { workspacesApi } from '../api/client';
 import { useEvents } from '../state/events';
 import { useWorkspace } from '../state/workspace';
 import { pushToast } from '../state/toast';
+import { AddWorkspaceDialog } from './AddWorkspaceDialog';
 import type { WorkspaceInfo } from '../state/workspace';
 
 // The workspace switcher at the top of the nav.
@@ -15,6 +16,7 @@ import type { WorkspaceInfo } from '../state/workspace';
 export function WorkspacePicker() {
   const { current, list, setList, select } = useWorkspace();
   const [open, setOpen] = useState(false);
+  const [showAdd, setShowAdd] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -112,7 +114,31 @@ export function WorkspacePicker() {
               </span>
             </button>
           ))}
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false);
+              setShowAdd(true);
+            }}
+            className="block w-full border-t border-slate-100 px-2 py-1.5 text-left text-xs font-medium text-slate-500 hover:bg-slate-100 dark:border-slate-800 dark:hover:bg-slate-800"
+          >
+            Add workspace…
+          </button>
         </div>
+      )}
+
+      {showAdd && (
+        <AddWorkspaceDialog
+          onClose={() => setShowAdd(false)}
+          onAdded={(dir) => {
+            // Same sequence as switchTo: point every later request at the new
+            // workspace, drop the previous workspace's buffered events, then
+            // reload so each page refetches in the new frame.
+            select(dir);
+            useEvents.getState().restart();
+            window.location.reload();
+          }}
+        />
       )}
     </div>
   );

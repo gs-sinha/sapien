@@ -36,6 +36,7 @@ import type {
   FlowYAMLRequest,
   FrictionPreview,
   FrictionReport,
+  FSDirListing,
   HealthResponse,
   Memory,
   MemoryQueryParams,
@@ -540,6 +541,18 @@ export const secrets = {
 export const workspacesApi = {
   list: (): Promise<WorkspaceInfo[]> => orEmpty(get('/v1/workspaces')),
   register: (dir: string): Promise<WorkspaceInfo> => post('/v1/workspaces', { dir }),
+  // A brand-new folder (created when missing) with a committed workspace file;
+  // git_init additionally `git init`s it. clone runs `git clone <url> <dir>`.
+  create: (dir: string, name: string, gitInit: boolean): Promise<WorkspaceInfo> =>
+    post('/v1/workspaces/create', { dir, name, git_init: gitInit }),
+  clone: (url: string, dir: string, name: string): Promise<WorkspaceInfo> => post('/v1/workspaces/clone', { url, dir, name }),
+};
+
+// One directory level for the folder picker (path omitted = home). Unlike
+// services.browseCheckouts this carries no git annotations: it is just the
+// filesystem, for choosing a parent directory or an existing checkout.
+export const fsApi = {
+  dirs: (path?: string): Promise<FSDirListing> => get(`/v1/fs/dirs${buildQuery({ path })}`),
 };
 
 export function getRecentEvents(limit = 200): Promise<Event[]> {

@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/gs-sinha/sapien/internal/engine"
+	"github.com/gs-sinha/sapien/internal/gitsrc"
 	"github.com/gs-sinha/sapien/internal/terminal"
 	"github.com/gs-sinha/sapien/internal/ui"
 	"github.com/gs-sinha/sapien/internal/workspaces"
@@ -27,6 +28,10 @@ type Options struct {
 	// workspacectx.go) and Engine is the primary/fallback. When nil the
 	// server serves Engine alone, exactly as it always did.
 	Workspaces *workspaces.Manager
+	// Git is the git manager POST /v1/workspaces/create and
+	// POST /v1/workspaces/clone use to init and clone repositories.
+	// Optional: nil uses gitsrc.New(gitsrc.Options{}).
+	Git *gitsrc.Manager
 	// Token is the bearer token every request but /v1/health must present.
 	Token string
 	// Version is reported by /v1/health, used by daemon clients to detect a
@@ -75,6 +80,7 @@ type Options struct {
 type Server struct {
 	engine     engine.Engine
 	workspaces *workspaces.Manager
+	git        *gitsrc.Manager
 	token      string
 	version    string
 	commit     string
@@ -115,9 +121,15 @@ func New(opts Options) *Server {
 		started = time.Now()
 	}
 
+	gitMgr := opts.Git
+	if gitMgr == nil {
+		gitMgr = gitsrc.New(gitsrc.Options{})
+	}
+
 	s := &Server{
 		engine:     opts.Engine,
 		workspaces: opts.Workspaces,
+		git:        gitMgr,
 
 		token:         opts.Token,
 		version:       opts.Version,
