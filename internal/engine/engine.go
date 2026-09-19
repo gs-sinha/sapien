@@ -28,6 +28,9 @@ type Engine interface {
 	// Repo is the workspace's own git repository: fetched on the git tick,
 	// pulled only on request and only fast-forward on a clean tree.
 	Repo() RepoAPI
+	// Settings exposes daemon/workspace settings beyond the engine's own
+	// config -- currently semantic search (PLAN §34f item 5).
+	Settings() SettingsAPI
 	// Close releases resources. Local closes the DB; Remote closes connections.
 	Close() error
 }
@@ -391,4 +394,61 @@ type RepoAPI interface {
 	// since a pull must come first, and a no-op success when nothing is
 	// ahead. The returned status carries Pushed and PushedCount.
 	Push(ctx context.Context) (*domain.RepoStatus, error)
+}
+
+// SettingsAPI manages daemon/workspace-level settings exposed to a UI or
+// CLI beyond the engine's own internal/config (PLAN §34f item 5): today
+// just semantic search. A future §34f slice (daemon control, updates) adds
+// more methods here the same way.
+type SettingsAPI interface {
+	// GetSemantic reports the effective, merged semantic-search
+	// configuration (workspace overriding user; never the api_key itself)
+	// plus its live status.
+	GetSemantic(ctx context.Context) (*domain.SemanticSettings, error)
+	// PutSemantic validates req (defaulting base_url/batch_size, requiring
+	// kind when enabled), probes the provider the way TestSemantic does
+	// (unless req.Force), writes it to the file req.Scope names ("user",
+	// the default, or "workspace"), and applies it live to this
+	// workspace -- swapping the embedder under a lock and triggering a
+	// reindex when it was just turned on or kind/base_url/model changed. A
+	// daemon serving several workspaces additionally reapplies a
+	// "user"-scope change to every other open one (internal/server, since
+	// only it can see every open engine).
+	PutSemantic(ctx context.Context, req SemanticPutRequest) (*domain.SemanticSettings, error)
+	// TestSemantic probes req without saving it: one short embed call.
+	// Reported through SemanticTestResult.OK/Error rather than a Go error,
+	// whether the provider accepts it or not -- an error return is
+	// reserved for something unexpected.
+	TestSemantic(ctx context.Context, req domain.SemanticProbe) (*domain.SemanticTestResult, error)
+	// ReindexSemantic starts a full rebuild of the semantic vector index in
+	// the background (semantic.index events report progress) and returns
+	// once it has started, not once it has finished.
+	ReindexSemantic(ctx context.Context) error
+	// OllamaStatus probes an Ollama endpoint's /api/tags. baseURL ""
+	// defers to the workspace's configured semantic.base_url, defaulting
+	// to http://127.0.0.1:11434.
+	OllamaStatus(ctx context.Context, baseURL string) (*domain.OllamaStatus, error)
+	// OllamaPull starts `ollama pull` for req.Model in the background
+	// (semantic.pull events report its NDJSON progress) and returns once
+	// it has started; errs.Conflict when that model is already being
+	// pulled.
+	OllamaPull(ctx context.Context, req domain.OllamaPullRequest) error
+}
+
+// SemanticPutRequest is PUT /v1/settings/semantic's request body.
+type SemanticPutRequest struct {
+	Enabled   bool   `json:"enabled"`
+	Kind      string `json:"kind,omitempty"`
+	BaseURL   string `json:"base_url,omitempty"`
+	Model     string `json:"model,omitempty"`
+	BatchSize int    `json:"batch_size,omitempty"`
+	// APIKey is tri-state: nil (the field absent from the JSON body) keeps
+	// the scope's stored key, a pointer to "" clears it, anything else
+	// (including a verbatim "${env.NAME}" reference) sets it.
+	APIKey *string `json:"api_key,omitempty"`
+	// Scope is "user" (the default, when empty) or "workspace".
+	Scope string `json:"scope,omitempty"`
+	// Force saves an enabled config even when the pre-save probe (the same
+	// one TestSemantic runs) fails.
+	Force bool `json:"force,omitempty"`
 }

@@ -122,11 +122,11 @@ call, and onboard your services.
    request so flows, other agents, and the UI reuse it. See
    [`docs/examples.md`](docs/examples.md).
 
-Recommended, right after step 2 and before connecting an agent, so the
-first daemon starts with it: turn on [semantic search](#optional-semantic-search)
-with a local Ollama model, so search also matches operations described in
-other words. It takes an `ollama pull` and a config block, and nothing leaves
-the machine.
+   Search works without a model. [Semantic search](#optional-semantic-search)
+   is off by default and is not a setup step: turn it on anytime from the
+   inspector's Settings page, which detects a local Ollama install, lists
+   and pulls models, and applies live with no daemon restart, or run
+   `sapien semantic enable --kind ollama --model nomic-embed-text`.
 
 Keep one workspace per system: every service your team calls together,
 from however many repos. Search, `get_context`, memory-driven expansion,
@@ -216,41 +216,40 @@ Sapien uses its local SQLite task, operation, and documentation indexes by
 default. This needs no model and is the appropriate mode for smaller machines.
 Semantic search is an optional addition to the same `search_apis` results; it
 helps match paraphrases and reports `semantic` in `matched_on` when it
-contributes.
+contributes. Off by default, and turning it on or off never needs a daemon
+restart: a change applies live, to every open workspace it affects.
 
-To enable it with a local Ollama model:
+The easiest way is the inspector's Settings page (`sapien ui`, then
+**Settings → Semantic search**): it detects a local Ollama install, lists
+the models you already have pulled, and can pull a new one -- `nomic-embed-text`
+is the recommended default until the search-eval harness has measured
+another -- all without leaving the browser.
+
+From the terminal:
 
 ```sh
 brew install ollama                  # skip if already installed
 brew services start ollama
-ollama pull nomic-embed-text
+sapien semantic enable --kind ollama --model nomic-embed-text
 ```
 
-Add this to `<workspace>/.sapien/config.yaml`:
-
-```yaml
-semantic:
-  enabled: true
-  kind: ollama
-  base_url: http://127.0.0.1:11434
-  model: nomic-embed-text
-  batch_size: 8
-```
-
-Restart the workspace daemon so it loads the setting:
+`enable` tries one embed call against the config before saving it (refusing
+otherwise, unless `--force`), applies it immediately, and reindexes existing
+content in the background. Other commands:
 
 ```sh
-sapien --workspace /absolute/path/to/workspace daemon stop
-sapien --workspace /absolute/path/to/workspace ui
+sapien semantic status      # configuration and live indexing progress
+sapien semantic test        # try the current (or --kind/--model/...) config, without saving
+sapien semantic reindex     # rebuild the vector index from scratch
+sapien semantic disable     # back to lexical-only search
 ```
 
-The first start builds vectors in one background worker; later starts reuse
-them. Authored `tasks:` phrases enrich their target operation's existing
-vector rather than creating extra task vectors. Put the same configuration in
-`~/.sapien/config.yaml` to make it the user default for every workspace. A
-workspace can opt out with `semantic: {enabled: false}`. Removing the block or
-setting `enabled: false` leaves all SQLite search behavior available and starts
-no embedding worker.
+`--workspace-scope` on `enable`/`disable` writes `<workspace>/.sapien/config.yaml`
+instead of the user-level `~/.sapien/config.yaml`, for a setting that should
+travel with one workspace rather than becoming this machine's default for
+every workspace -- a workspace's own setting always wins over the user one.
+Authored `tasks:` phrases enrich their target operation's existing vector
+rather than creating extra task vectors.
 
 ## Onboarding services
 

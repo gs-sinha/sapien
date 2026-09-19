@@ -214,4 +214,17 @@ var routeTable = []routeDef{
 		func(s *Server) http.HandlerFunc { return s.handleTerminal }},
 	{http.MethodGet, "/v1/terminal/targets", "getTerminalTargets", "Commands and directories the terminal endpoint accepts", true,
 		func(s *Server) http.HandlerFunc { return s.handleTerminalTargets }},
+
+	{http.MethodGet, "/v1/settings/semantic", "getSemanticSettings", "Semantic search's effective configuration and live status", true,
+		func(s *Server) http.HandlerFunc { return s.handleSettingsSemanticGet }},
+	{http.MethodPut, "/v1/settings/semantic", "putSemanticSettings", "Configure semantic search and apply it live, no restart", true,
+		func(s *Server) http.HandlerFunc { return s.handleSettingsSemanticPut }},
+	{http.MethodPost, "/v1/settings/semantic/test", "testSemanticSettings", "Try an embedding config without saving it", true,
+		func(s *Server) http.HandlerFunc { return s.handleSettingsSemanticTest }},
+	{http.MethodPost, "/v1/settings/semantic/reindex", "reindexSemanticSettings", "Rebuild the semantic vector index in the background", true,
+		func(s *Server) http.HandlerFunc { return s.handleSettingsSemanticReindex }},
+	{http.MethodGet, "/v1/settings/semantic/ollama", "getSemanticOllamaStatus", "Probe an Ollama endpoint and list its models", true,
+		func(s *Server) http.HandlerFunc { return s.handleSettingsOllamaStatus }},
+	{http.MethodPost, "/v1/settings/semantic/ollama/pull", "pullSemanticOllamaModel", "Pull an Ollama model in the background", true,
+		func(s *Server) http.HandlerFunc { return s.handleSettingsOllamaPull }},
 }

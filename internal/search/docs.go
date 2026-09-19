@@ -77,9 +77,10 @@ func (s *Searcher) Docs(ctx context.Context, query string, opts domain.SearchOpt
 	// matched" check, so a query lexical search misses entirely can still
 	// surface semantic-only doc hits.
 	var semHits []SemanticHit
-	if s.sem != nil {
+	sem := s.semantic()
+	if sem != nil {
 		var serr error
-		semHits, serr = s.sem.Query(ctx, "doc", trimmed, limit*2)
+		semHits, serr = sem.Query(ctx, "doc", trimmed, limit*2)
 		if serr != nil {
 			return nil, serr
 		}
@@ -136,7 +137,7 @@ func (s *Searcher) Docs(ctx context.Context, query string, opts domain.SearchOpt
 		return nil, err
 	}
 
-	if s.sem == nil {
+	if sem == nil {
 		list := make([]scoredID, 0, len(combined))
 		for id, h := range combined {
 			meta, ok := metas[id]

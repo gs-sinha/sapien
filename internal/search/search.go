@@ -9,6 +9,7 @@ import (
 	"context"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/gs-sinha/sapien/internal/domain"
 	"github.com/gs-sinha/sapien/internal/store"
@@ -17,7 +18,12 @@ import (
 
 // Searcher runs operation and doc search against one workspace database.
 type Searcher struct {
-	db  *store.DB
+	db *store.DB
+	// mu guards sem: WithSemantic can be called concurrently with
+	// Operations()/Docs() (PLAN §34f item 5's hot-swap), so every read of
+	// sem goes through the semantic() accessor in semantic.go instead of
+	// the field directly.
+	mu  sync.RWMutex
 	sem Semantic // optional; nil disables semantic fusion (see WithSemantic)
 }
 
@@ -299,10 +305,11 @@ func (s *Searcher) lexicalLookup(ctx context.Context, query string, opts domain.
 	// "nothing matched" check, so a query lexical search misses entirely
 	// can still surface semantic-only hits.
 	var semHits []SemanticHit
-	semanticActive := s.sem != nil && !opts.Deterministic
+	sem := s.semantic()
+	semanticActive := sem != nil && !opts.Deterministic
 	if semanticActive {
 		var serr error
-		semHits, serr = s.sem.Query(ctx, "operation", query, limit*2)
+		semHits, serr = sem.Query(ctx, "operation", query, limit*2)
 		if serr != nil {
 			return nil, serr
 		}

@@ -341,37 +341,6 @@ released  allocation-service.getAllocation   <span class="ok">200</span>   2/2
 
         <li>
           <div class="body">
-            <h3>Turn on semantic search <span class="badge">Recommended</span></h3>
-            <p>Search works without a model. Add a small embedding model and it also matches paraphrases, so an agent or a teammate who describes an operation in different words from its docs still finds it. The model runs locally in <a href="https://ollama.com">Ollama</a>, so nothing leaves your machine. Skip this on a machine short on memory.</p>
-            <div data-tabs>
-              <div class="tablist" role="tablist" aria-label="Install Ollama on">
-                <button role="tab" id="t-ollama-mac" aria-controls="p-ollama-mac" aria-selected="true">macOS</button>
-                <button role="tab" id="t-ollama-linux" aria-controls="p-ollama-linux" aria-selected="false">Linux</button>
-              </div>
-              <div class="tabpanel" role="tabpanel" id="p-ollama-mac" aria-labelledby="t-ollama-mac">
-                <pre class="code"><span class="p">$ </span>brew install ollama &amp;&amp; brew services start ollama
-<span class="p">$ </span>ollama pull nomic-embed-text</pre>
-              </div>
-              <div class="tabpanel" role="tabpanel" id="p-ollama-linux" aria-labelledby="t-ollama-linux">
-                <pre class="code"><span class="p">$ </span>curl -fsSL https://ollama.com/install.sh | sh
-<span class="p">$ </span>ollama pull nomic-embed-text</pre>
-              </div>
-            </div>
-            <p>Then turn it on for every workspace on this machine, before you connect an agent so the first daemon starts with it. Sapien reads <code>~/.sapien/config.yaml</code> whenever it opens a workspace, including the one you just created, so there is nothing to register. The command only appends when the file has no <code>semantic:</code> block yet; if it already has one, edit that block instead. The first start builds the vectors in the background, and search works as before while it does.</p>
-            <pre class="code"><span class="p">$ </span>mkdir -p ~/.sapien &amp;&amp; grep -qs '^semantic:' ~/.sapien/config.yaml || cat &gt;&gt; ~/.sapien/config.yaml &lt;&lt;'EOF'
-semantic:
-  enabled: true
-  kind: ollama
-  base_url: http://127.0.0.1:11434
-  model: nomic-embed-text
-  batch_size: 8
-EOF</pre>
-            <p class="note">Turning it on later? A running daemon read the file when it opened each workspace, so run <code>sapien daemon stop</code> and the next start picks it up. A workspace's own <code>.sapien/config.yaml</code> wins over this file, so <code>semantic: {enabled: false}</code> there opts that workspace out.</p>
-          </div>
-        </li>
-
-        <li>
-          <div class="body">
             <h3>Connect your agent</h3>
             <p>Installs the Sapien MCP server for every Claude Code session on this machine, in any repo. Swap the client for <code>codex</code>, <code>cursor</code> or <code>cowork</code> (Claude Desktop), or use <code>generic</code> to print JSON for another host.</p>
             <p><code>--allow-mutations</code> lets agents make POST, PUT, PATCH and DELETE calls, which running a flow that creates data needs. It applies to non-production environments on this machine only; production stays blocked. Leave it off and agents can only read.</p>
@@ -386,6 +355,7 @@ EOF</pre>
             <p>The inspector is served by the local daemon, so there's nothing else to install: flows and their runs with every request and response, services and operations with intent search and Try it, examples, memories, and an Agent tab that runs your own <code>claude</code> or <code>codex</code> in a terminal.</p>
             <pre class="code"><span class="p">$ </span>sapien ui                                <span class="c"># opens http://127.0.0.1:7717 in your browser</span>
 <span class="p">$ </span>sapien ui --install-app                  <span class="c"># macOS: Sapien.app for Spotlight and the Dock</span></pre>
+            <p class="note">Semantic search is off by default and isn't a setup step: turn it on anytime from the inspector's <b>Settings</b> page, which detects a local <a href="https://ollama.com">Ollama</a> install, lists and pulls models, and applies live with no daemon restart, or run <code>sapien semantic enable --kind ollama --model nomic-embed-text</code>.</p>
           </div>
         </li>
       </ol>
