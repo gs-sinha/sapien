@@ -74,7 +74,12 @@ func referenceSampleScope() Scope {
 // keeps the reference doc honest as the implementation evolves.
 func TestReference_ExamplesEvaluate(t *testing.T) {
 	md := Reference()
-	assert.LessOrEqual(t, strings.Count(md, "\n"), 120, "Reference() should stay concise")
+	// Raised from 120 for the bare-CEL `${...}` rewrite rules (BUG A: a
+	// template inside `assert`/`until`/`when`/etc. used to compile as
+	// opaque literal string text instead of the expression it named) and
+	// the lt/lte/gt/gte structured comparisons: still a budget, just one
+	// that fits what an agent now needs to find in this doc.
+	assert.LessOrEqual(t, strings.Count(md, "\n"), 135, "Reference() should stay concise")
 
 	examples := extractCelExamples(t, md)
 	require.NotEmpty(t, examples)
