@@ -71,6 +71,30 @@ and phase numbers refer to PLAN.md §34's roadmap.
   remember it per browser.
 
 ### Fixed
+- **A `${...}` template inside a bare CEL assertion, an `expr:`, `until`,
+  `when`, `extract` or a loop field was never expanded**, so
+  `body.id != "${steps.a.out.id}"` compared against the literal text and
+  could never fail -- a flow could be green on assertions that checked
+  nothing. Templates now expand everywhere (one template filling a whole
+  string literal keeps its native type, as `eq:` does), the validator sees
+  the references inside them, and a `${` that survives is an error
+  (`TEMPLATE_IN_EXPR`). Structured assertions gain `lt`, `lte`, `gt`, `gte`,
+  the comparisons that pushed authors into bare CEL. (Discussion #8.)
+- **`out.<name>` was always empty in a step's own `assert` and `until`**,
+  though documented as available: assertions ran before extraction.
+  Extraction now runs first, tolerantly -- a failed assertion is still the
+  primary outcome, a read of an `out` entry that failed to extract says why,
+  and the validator rejects an `out.<name>` the step does not extract
+  (`UNKNOWN_OUT`). (Discussion #6.)
+- **`patch_flow`'s `add_step` refused an anchor it had just listed as
+  present** when `before`/`after` named a step in another phase. Anchors
+  resolve across the whole flow, nested blocks included, and the new step
+  goes where the anchor lives; a contradicting `phase`/`into` says where that
+  is. Patching keeps the file's indent width, writes new keys in the DSL's
+  conventional order rather than alphabetically, keeps comments with their
+  steps, and reports as `notes` a comment that went with a replaced step or
+  stayed above a changed one. Blank lines between steps are still lost
+  (yaml.v3). (Discussion #4.)
 - The first save of a model Ollama had not loaded yet was refused: the
   pre-save probe gave up after 10s while the model was still loading. It
   waits 90s, and says why it is waiting.
