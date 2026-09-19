@@ -43,6 +43,12 @@ func NewIndex(db *store.DB, emb Embedder) *Index {
 	return &Index{db: db, emb: emb}
 }
 
+// Embedder returns the Embedder x embeds and queries with, so a caller that
+// only holds an *Index (internal/engine/local's status reporting, PLAN §34f
+// item 5) can still read its current Model()/Dim() without x needing to
+// re-expose them itself.
+func (x *Index) Embedder() Embedder { return x.emb }
+
 // IndexOperations upserts an embedding per operation, skipping any operation
 // whose built text hashes the same as what's already stored under the
 // current embedding model. fields is keyed by operation id (domain.Field.

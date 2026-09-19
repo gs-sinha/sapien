@@ -26,9 +26,24 @@ type SemanticHit struct {
 // nil sem (the zero value, and New's default) disables semantic fusion
 // entirely: Operations()/Docs() then behave exactly as lexical-only search,
 // unchanged from before this hook existed.
+//
+// Safe to call concurrently with Operations()/Docs() (PLAN §34f item 5:
+// internal/engine/local.Local.ApplySemantic hot-swaps the embedder under a
+// running server) -- see semantic() below for the read side of the lock
+// this guards.
 func (s *Searcher) WithSemantic(sem Semantic) *Searcher {
+	s.mu.Lock()
 	s.sem = sem
+	s.mu.Unlock()
 	return s
+}
+
+// semantic returns the currently-installed Semantic backend, or nil, under
+// s.mu -- the read side of WithSemantic's write lock.
+func (s *Searcher) semantic() Semantic {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.sem
 }
 
 // rrfK mirrors internal/semantic.RRF's reciprocal-rank-fusion constant.
