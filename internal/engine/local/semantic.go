@@ -385,7 +385,7 @@ func (l *Local) SemanticStatus(ctx context.Context) (domain.SemanticStatus, erro
 	emb := idx.Embedder()
 	model, dim := emb.Model(), emb.Dim()
 
-	embedded, err := semanticEmbeddedCount(ctx, idx, model, dim)
+	embedded, dim, err := semanticEmbeddedCount(ctx, idx, model, dim)
 	if err != nil {
 		return domain.SemanticStatus{}, err
 	}
@@ -402,18 +402,32 @@ func (l *Local) SemanticStatus(ctx context.Context) (domain.SemanticStatus, erro
 // semanticEmbeddedCount returns how many vectors-table rows are currently
 // stored under (model, dim) -- across every kind, since upsert always
 // stamps the writing embedder's own Model()/Dim(), so this is exactly "what
-// the current embedder has written".
-func semanticEmbeddedCount(ctx context.Context, idx *semantic.Index, model string, dim int) (int, error) {
+// the current embedder has written" -- along with the dim it counted under.
+// An embedder learns its dim from its first response, so right after a
+// daemon start dim is still 0 while the rows it wrote last time sit in the
+// table: then the model's largest stored group stands in, rather than the
+// status reading "0 embedded" until something happens to embed.
+func semanticEmbeddedCount(ctx context.Context, idx *semantic.Index, model string, dim int) (int, int, error) {
 	st, err := idx.Stats(ctx)
 	if err != nil {
-		return 0, err
+		return 0, dim, err
 	}
+	count, countDim := 0, dim
 	for _, m := range st.Models {
-		if m.Model == model && m.Dim == dim {
-			return m.Count, nil
+		if m.Model != model {
+			continue
+		}
+		if dim != 0 {
+			if m.Dim == dim {
+				return m.Count, dim, nil
+			}
+			continue
+		}
+		if m.Count > count {
+			count, countDim = m.Count, m.Dim
 		}
 	}
-	return 0, nil
+	return count, countDim, nil
 }
 
 // semanticTotal counts operations + doc sections + memories -- exactly what

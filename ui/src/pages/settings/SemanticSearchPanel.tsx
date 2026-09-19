@@ -338,18 +338,22 @@ function OllamaModelPicker({ baseUrl, model, onSelect }: { baseUrl: string; mode
     );
   }
 
-  const installed = new Set(data.models.map((m) => m.name));
-  const missing = OLLAMA_SUGGESTIONS.filter((s) => !installed.has(s.model));
+  // Ollama lists a model under its tag ("nomic-embed-text:latest") while a
+  // saved config, a suggestion, or a user names it bare; ":latest" is what
+  // the bare name means, so the two are the same model here.
+  const bare = (name: string) => name.replace(/:latest$/, '');
+  const installed = new Set(data.models.map((m) => bare(m.name)));
+  const missing = OLLAMA_SUGGESTIONS.filter((s) => !installed.has(bare(s.model)));
 
   return (
     <div className="space-y-2">
       <label className="block">
         <span className="mb-1 block text-xs text-slate-500">Model</span>
-        <select value={installed.has(model) ? model : ''} onChange={(e) => onSelect(e.target.value)} className={fieldCls}>
+        <select value={installed.has(bare(model)) ? bare(model) : ''} onChange={(e) => onSelect(e.target.value)} className={fieldCls}>
           <option value="">select an installed model…</option>
           {data.models.map((m) => (
-            <option key={m.name} value={m.name}>
-              {m.name}
+            <option key={m.name} value={bare(m.name)}>
+              {bare(m.name)}
             </option>
           ))}
         </select>
