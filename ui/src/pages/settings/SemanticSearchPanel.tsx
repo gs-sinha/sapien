@@ -6,11 +6,13 @@
 // state/repo.ts being fed by `workspace.repo`.
 import { useEffect, useState } from 'react';
 import { semanticSettings } from '../../api/client';
+import { Collapsible } from '../../components/Collapsible';
 import { useAsync } from '../../lib/useAsync';
 import { subscribe } from '../../state/events';
 import { pushToast } from '../../state/toast';
 import type {
   OllamaModelsResponse,
+  SemanticEmbedKind,
   SemanticIndexStatus,
   SemanticProviderKind,
   SemanticSettings,
@@ -34,6 +36,14 @@ const OLLAMA_SUGGESTIONS: Array<{ model: string; label?: string; hint?: string }
   { model: 'mxbai-embed-large', hint: '335M parameters, 1024 dims: 512-token context' },
   { model: 'bge-m3', hint: '568M parameters, 1024 dims: multilingual' },
   { model: 'all-minilm', hint: '22M parameters, 384 dims: fastest, weakest' },
+];
+
+// What semantic search can embed, in display order (config.SemanticKinds).
+const ALL_KINDS: Array<{ kind: SemanticEmbedKind; label: string; hint: string }> = [
+  { kind: 'operations', label: 'Operations', hint: 'summary, description, path, field names, tags' },
+  { kind: 'examples', label: 'Examples', hint: "a saved example's description, embedded with the operation it calls" },
+  { kind: 'memories', label: 'Memories', hint: 'text and tags' },
+  { kind: 'docs', label: 'Doc sections', hint: 'title, heading and the first 1,000 characters' },
 ];
 
 const OPENAI_SUGGESTIONS = ['text-embedding-3-small', 'text-embedding-3-large'];
@@ -84,6 +94,14 @@ function SemanticForm({ initial, onSaved }: { initial: SemanticSettings; onSaved
   const [apiKeyTouched, setApiKeyTouched] = useState(false);
   const [apiKeySet, setApiKeySet] = useState(initial.api_key_set);
 
+  const [kinds, setKinds] = useState<SemanticEmbedKind[]>(initial.kinds?.length ? initial.kinds : ALL_KINDS.map((k) => k.kind));
+  // Prefixes follow the model until the user types in either box; "Reset"
+  // goes back to following it (sent as reset_prefixes on the next save).
+  const [prefixesCustom, setPrefixesCustom] = useState(!!initial.prefixes_custom);
+  const [queryPrefix, setQueryPrefix] = useState(initial.query_prefix ?? '');
+  const [documentPrefix, setDocumentPrefix] = useState(initial.document_prefix ?? '');
+  const [resetPrefixes, setResetPrefixes] = useState(false);
+
   const [status, setStatus] = useState<SemanticIndexStatus>(initial.status);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -100,6 +118,15 @@ function SemanticForm({ initial, onSaved }: { initial: SemanticSettings; onSaved
     [],
   );
 
+  const toggleKind = (k: SemanticEmbedKind) =>
+    setKinds((prev) => {
+      const next = prev.includes(k) ? prev.filter((x) => x !== k) : [...prev, k];
+      // An example is embedded as part of the operation it calls, so it
+      // cannot stay on without operations.
+      const kept = next.includes('operations') ? next : next.filter((x) => x !== 'examples');
+      return ALL_KINDS.map((x) => x.kind).filter((x) => kept.includes(x));
+    });
+
   const switchKind = (next: SemanticProviderKind) => {
     setKind(next);
     // Only replace the base URL if it still holds the previous provider's
@@ -113,6 +140,12 @@ function SemanticForm({ initial, onSaved }: { initial: SemanticSettings; onSaved
     base_url: baseUrl || undefined,
     model: model || undefined,
     scope,
+    kinds,
+    ...(resetPrefixes
+      ? { reset_prefixes: true }
+      : prefixesCustom
+        ? { query_prefix: queryPrefix, document_prefix: documentPrefix }
+        : {}),
     ...(apiKeyTouched ? { api_key: apiKey } : {}),
     ...(force ? { force: true } : {}),
   });
@@ -235,6 +268,73 @@ function SemanticForm({ initial, onSaved }: { initial: SemanticSettings; onSaved
               </label>
             </>
           )}
+
+          <fieldset className="space-y-1">
+            <legend className="mb-1 text-xs text-slate-500">What to embed</legend>
+            {ALL_KINDS.map(({ kind: k, label, hint }) => {
+              const count = status.by_kind?.[k];
+              const disabled = k === 'examples' && !kinds.includes('operations');
+              return (
+                <label key={k} className={`flex items-baseline gap-2 text-sm ${disabled ? 'opacity-50' : ''}`}>
+                  <input type="checkbox" checked={kinds.includes(k)} disabled={disabled} onChange={() => toggleKind(k)} />
+                  <span>{label}</span>
+                  <span className="text-xs text-slate-500">
+                    {hint}
+                    {count ? ` · ${count.embedded.toLocaleString()} / ${count.total.toLocaleString()} embedded` : ''}
+                  </span>
+                </label>
+              );
+            })}
+          </fieldset>
+
+          <Collapsible storageKey="settings:semantic:prefixes" title="Task prefixes" defaultOpen={false}>
+            <div className="space-y-2">
+              <p className="max-w-2xl text-xs text-slate-500">
+                Most embedding models are trained with a short instruction in front of a search and another in front of an indexed text; sent bare they
+                still answer, only worse. {prefixesCustom && !resetPrefixes ? 'These are your own.' : "These follow the model's own documentation and change with the model when you save."}
+              </p>
+              <label className="block">
+                <span className="mb-1 block text-xs text-slate-500">Query prefix</span>
+                <input
+                  value={queryPrefix}
+                  onChange={(e) => {
+                    setQueryPrefix(e.target.value);
+                    setPrefixesCustom(true);
+                    setResetPrefixes(false);
+                  }}
+                  placeholder="(none)"
+                  className={fieldCls + ' font-mono'}
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-xs text-slate-500">Document prefix (changing it re-embeds everything)</span>
+                <input
+                  value={documentPrefix}
+                  onChange={(e) => {
+                    setDocumentPrefix(e.target.value);
+                    setPrefixesCustom(true);
+                    setResetPrefixes(false);
+                  }}
+                  placeholder="(none)"
+                  className={fieldCls + ' font-mono'}
+                />
+              </label>
+              {prefixesCustom && !resetPrefixes && (
+                <button
+                  type="button"
+                  className={chipCls}
+                  onClick={() => {
+                    setQueryPrefix(initial.default_query_prefix ?? '');
+                    setDocumentPrefix(initial.default_document_prefix ?? '');
+                    setPrefixesCustom(false);
+                    setResetPrefixes(true);
+                  }}
+                >
+                  Reset to the model&apos;s default
+                </button>
+              )}
+            </div>
+          </Collapsible>
 
           <div className="flex flex-wrap items-center gap-4 text-sm">
             <label className="flex items-center gap-1.5">

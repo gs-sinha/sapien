@@ -1117,7 +1117,12 @@ export interface SemanticIndexStatus {
   dim?: number;
   embedded?: number;
   total?: number;
+  /** Counts per embedded kind; a kind that is turned off is absent, and "examples" never appears (they ride their operation). */
+  by_kind?: Partial<Record<SemanticEmbedKind, { embedded: number; total: number }>>;
 }
+
+/** What semantic search can embed (`kinds`). */
+export type SemanticEmbedKind = 'operations' | 'examples' | 'memories' | 'docs';
 
 export interface SemanticSettings {
   enabled: boolean;
@@ -1127,6 +1132,14 @@ export interface SemanticSettings {
   batch_size?: number;
   /** Whether an OpenAI-compatible API key is stored server-side; the key itself is never returned. */
   api_key_set: boolean;
+  /** What gets embedded, always spelled out. */
+  kinds?: SemanticEmbedKind[];
+  /** The task prefixes in effect, what the model's own documentation asks for, and whether the config overrides it. */
+  query_prefix?: string;
+  document_prefix?: string;
+  default_query_prefix?: string;
+  default_document_prefix?: string;
+  prefixes_custom?: boolean;
   source: SemanticSettingsScope;
   status: SemanticIndexStatus;
 }
@@ -1140,6 +1153,12 @@ export interface UpdateSemanticSettingsRequest {
   batch_size?: number;
   api_key?: string;
   scope?: SemanticSettingsScope;
+  /** Absent keeps the stored list; an empty list means every kind. */
+  kinds?: SemanticEmbedKind[];
+  /** Absent keeps what is stored; "" is a valid override (no prefix). `reset_prefixes` drops both overrides. */
+  query_prefix?: string;
+  document_prefix?: string;
+  reset_prefixes?: boolean;
   /** Resend a refused PUT with this set to bypass the refusal ("Save anyway"). */
   force?: boolean;
 }

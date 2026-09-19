@@ -182,4 +182,56 @@ describe('SemanticSearchPanel', () => {
     await waitFor(() => expect(update).toHaveBeenCalled());
     expect(update.mock.calls[0][0]).not.toHaveProperty('api_key');
   });
+  it('turning "Doc sections" off saves kinds without docs, and examples cannot outlive operations', async () => {
+    get.mockResolvedValue({
+      ...baseSettings,
+      kinds: ['operations', 'examples', 'memories', 'docs'],
+      status: { ...baseSettings.status, by_kind: { docs: { embedded: 840, total: 840 } } },
+    });
+    const user = userEvent.setup();
+    render(<SemanticSearchPanel />);
+
+    const docs = await screen.findByRole('checkbox', { name: /Doc sections/ });
+    expect(screen.getByText(/840 \/ 840 embedded/)).toBeInTheDocument();
+    await user.click(docs);
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(update).toHaveBeenCalledWith(expect.objectContaining({ kinds: ['operations', 'examples', 'memories'] })));
+
+    await user.click(screen.getByRole('checkbox', { name: /Operations/ }));
+    expect(screen.getByRole('checkbox', { name: /Examples/ })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(update).toHaveBeenLastCalledWith(expect.objectContaining({ kinds: ['memories'] })));
+  });
+
+  it('prefixes follow the model until edited; an edit is sent, and Reset sends reset_prefixes', async () => {
+    get.mockResolvedValue({
+      ...baseSettings,
+      query_prefix: 'search_query: ',
+      document_prefix: 'search_document: ',
+      default_query_prefix: 'search_query: ',
+      default_document_prefix: 'search_document: ',
+      prefixes_custom: false,
+    });
+    const user = userEvent.setup();
+    render(<SemanticSearchPanel />);
+
+    await user.click(await screen.findByRole('button', { name: /Task prefixes/ }));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(update).toHaveBeenCalled());
+    expect(update.mock.calls[0][0]).not.toHaveProperty('query_prefix');
+    expect(update.mock.calls[0][0]).not.toHaveProperty('reset_prefixes');
+
+    const doc = screen.getByRole('textbox', { name: /Document prefix/ });
+    await user.clear(doc);
+    await user.type(doc, 'passage: ');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() =>
+      expect(update).toHaveBeenLastCalledWith(expect.objectContaining({ query_prefix: 'search_query: ', document_prefix: 'passage: ' })),
+    );
+
+    await user.click(screen.getByRole('button', { name: /Reset to the model/ }));
+    expect(screen.getByRole('textbox', { name: /Document prefix/ })).toHaveValue('search_document: ');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(update).toHaveBeenLastCalledWith(expect.objectContaining({ reset_prefixes: true })));
+  });
 });
