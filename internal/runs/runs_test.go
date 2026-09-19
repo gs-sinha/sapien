@@ -625,6 +625,13 @@ func TestSummarize(t *testing.T) {
 			{Status: domain.StepErrored},
 			{Status: domain.StepSkipped},
 		}, domain.RunSummary{StepsTotal: 4, StepsPassed: 1, StepsFailed: 1, StepsErrored: 1, StepsSkipped: 1, Assertions: 3, AssertionsFailed: 1}},
+		// PLAN §34f.8: a loop block's own row (Kind set) is not itself a
+		// step for steps_total -- only its nested executions (leaves) are.
+		{"loop block excluded, nested executions counted", []domain.StepResult{
+			{StepID: "each", Status: domain.StepPassed, Kind: "foreach", Count: 2},
+			{StepID: "create", Status: domain.StepPassed, Iteration: intp(0), Parent: "each"},
+			{StepID: "create", Status: domain.StepFailed, Iteration: intp(1), Parent: "each"},
+		}, domain.RunSummary{StepsTotal: 2, StepsPassed: 1, StepsFailed: 1}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
