@@ -24,11 +24,16 @@ const DEFAULT_BASE_URL: Record<SemanticProviderKind, string> = {
   openai: 'https://api.openai.com/v1',
 };
 
-const OLLAMA_SUGGESTIONS: Array<{ model: string; label?: string }> = [
-  { model: 'nomic-embed-text', label: 'default' },
-  { model: 'mxbai-embed-large' },
-  { model: 'all-minilm' },
-  { model: 'bge-m3' },
+// Suggestions, not recommendations: only the default carries a label until
+// the search-eval harness has measured another (PLAN §34f item 5). `hint`
+// is the chip's tooltip -- what pulling it costs and what it is for.
+const OLLAMA_SUGGESTIONS: Array<{ model: string; label?: string; hint?: string }> = [
+  { model: 'nomic-embed-text', label: 'default', hint: '137M parameters, 768 dims: small and fast' },
+  { model: 'embeddinggemma', hint: '308M parameters, 768 dims: strong for its size' },
+  { model: 'qwen3-embedding:0.6b', hint: '0.6B parameters, 1024 dims: heavier, strong on technical text' },
+  { model: 'mxbai-embed-large', hint: '335M parameters, 1024 dims: 512-token context' },
+  { model: 'bge-m3', hint: '568M parameters, 1024 dims: multilingual' },
+  { model: 'all-minilm', hint: '22M parameters, 384 dims: fastest, weakest' },
 ];
 
 const OPENAI_SUGGESTIONS = ['text-embedding-3-small', 'text-embedding-3-large'];
@@ -365,7 +370,7 @@ function OllamaModelPicker({ baseUrl, model, onSelect }: { baseUrl: string; mode
             const inProgress = !!p && !p.done;
             return (
               <div key={s.model} className="flex flex-col gap-1">
-                <button type="button" onClick={() => pull(s.model)} disabled={inProgress} className={chipCls}>
+                <button type="button" onClick={() => pull(s.model)} disabled={inProgress} className={chipCls} title={s.hint}>
                   {inProgress ? 'Pulling…' : 'Pull'} {s.model}
                   {s.label ? ` (${s.label})` : ''}
                 </button>
