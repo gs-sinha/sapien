@@ -88,6 +88,14 @@ describe('StatusBar repo segment', () => {
     expect(screen.queryByRole('button', { name: 'Pull' })).not.toBeInTheDocument();
   });
 
+  it('the "N uncommitted" text links to the Changes page (PLAN §34f item 1)', async () => {
+    useRepo.setState({ status: { in_git: true, branch: 'main', behind: 0, ahead: 0, dirty: 5 } });
+    await renderBar();
+
+    const link = screen.getByRole('link', { name: '5 uncommitted' });
+    expect(link).toHaveAttribute('href', '/ui/changes');
+  });
+
   it('ahead shows unpushed, with no Pull button since nothing is behind', async () => {
     useRepo.setState({ status: { in_git: true, branch: 'main', behind: 0, ahead: 4, dirty: 0 } });
     const { container } = await renderBar();

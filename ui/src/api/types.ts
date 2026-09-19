@@ -1085,3 +1085,95 @@ export interface ApiError {
   source?: SourceLoc;
   hint?: string;
 }
+
+// ---- PLAN §34f item 1: the Changes page (ui/src/pages/ChangesPage.tsx) ----
+
+/** A file's git status under the workspace repo, as GET /v1/workspace/repo/changes reports it. */
+export type RepoFileState = 'untracked' | 'modified' | 'deleted' | 'renamed' | 'conflicted' | 'unpushed';
+
+/** Which kind of Sapien item a changed file is, if any (a workspace/environment file has none of the item kinds). */
+export type RepoItemKind = 'flow' | 'memory' | 'example' | 'environment' | 'workspace' | 'other';
+
+export interface RepoChangeFile {
+  path: string;
+  state: RepoFileState;
+  /** Always present ("other" for a file that is none of the specific kinds, e.g. sapien.workspace.yaml). */
+  kind: RepoItemKind;
+  /** Set together with `id` when the file is a flow/memory/example, for the "Open flow/memory/example" link. */
+  id?: string;
+  title?: string;
+  /** Set when `state` is "renamed". */
+  old_path?: string;
+}
+
+export interface RepoServiceChangeFile {
+  path: string;
+  state: RepoFileState;
+}
+
+/** One row of the Changes page's read-only "Services" section: a bound
+ *  local checkout (`mode: "local"`, with its own dirty file list) or a
+ *  team-sourced service (`mode: "team"`, a single-line ref summary). */
+export interface RepoServiceChange {
+  name: string;
+  mode: BindingMode;
+  path?: string;
+  branch?: string;
+  ref?: string;
+  dirty: boolean;
+  files: RepoServiceChangeFile[];
+}
+
+/** GET /v1/workspace/repo/changes. */
+export interface RepoChanges {
+  status: RepoStatus;
+  files: RepoChangeFile[];
+  services: RepoServiceChange[];
+}
+
+/** GET /v1/workspace/repo/diff?path=. */
+export interface RepoDiff {
+  path: string;
+  state: RepoFileState;
+  /** Always present (empty for an untracked file, where `content` is used instead). */
+  diff: string;
+  /** An untracked file's content, shown in place of a diff. */
+  content?: string;
+  binary: boolean;
+  truncated: boolean;
+}
+
+/** POST /v1/workspace/repo/commit. */
+export interface RepoCommitRequest {
+  paths: string[];
+  message: string;
+}
+
+export interface RepoCommitResult {
+  commit: string;
+  committed: string[];
+  status: RepoStatus;
+}
+
+// ---- PLAN §34f item 6: folders ----
+//
+// Declaration-merged onto the interfaces defined above so this stays one
+// contiguous, appended block instead of four scattered edits. A flow,
+// memory, or saved example may live in a subfolder of its kind's directory
+// at any tier; the folder is read from the path, orthogonal to tier. ""
+// (or absent, for an item written before folders existed) is the root.
+export interface Flow {
+  folder?: string;
+}
+export interface FlowSummary {
+  folder?: string;
+}
+export interface CreateFlowRequest {
+  folder?: string;
+}
+export interface Memory {
+  folder?: string;
+}
+export interface SavedExample {
+  folder?: string;
+}

@@ -34,6 +34,10 @@ const TryIt = lazy(() => import('./pages/TryIt'));
 // state/agentTerminal.ts), so this lazy chunk is the only one that pays
 // for them.
 const AgentPage = lazy(() => import('./pages/AgentPage'));
+// PLAN §34f item 1: the workspace repo's source-control panel; kept its own
+// lazy chunk like every other page (it pulls in components/tree, which the
+// folder sidebar below also uses but keeps light enough not to matter).
+const ChangesPage = lazy(() => import('./pages/ChangesPage'));
 
 function PageFallback() {
   return <div className="p-6 text-sm text-slate-400">Loading…</div>;
@@ -82,6 +86,7 @@ export function App() {
                     <Route path="/ui/events" element={<EventsPage />} />
                     <Route path="/ui/try/:operationId" element={<TryIt />} />
                     <Route path="/ui/agent" element={<AgentPage />} />
+                    <Route path="/ui/changes" element={<ChangesPage />} />
                     <Route path="*" element={<NotFound />} />
                   </Routes>
                 </Suspense>

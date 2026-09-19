@@ -2,6 +2,9 @@ import { useEffect } from 'react';
 import { NavLink } from 'react-router-dom';
 import { WorkspacePicker } from './WorkspacePicker';
 import { useFrictionCount } from '../state/friction';
+// PLAN §34f item 1: the Changes page's nav badge (number of changed files,
+// hidden at 0 or when the workspace isn't in git). See state/changesCount.ts.
+import { ensureChangesCountSubscribed, useChangesCount } from '../state/changesCount';
 
 const links = [
   { to: '/ui/flows', label: 'Flows' },
@@ -14,16 +17,20 @@ const links = [
   { to: '/ui/events', label: 'Events' },
   // Phase 7b (PLAN §34c): the agent pane (src/pages/AgentPage.tsx).
   { to: '/ui/agent', label: 'Agent' },
+  { to: '/ui/changes', label: 'Changes' },
 ];
 
 export function Nav() {
   const pendingFriction = useFrictionCount((s) => s.pending);
+  const changesCount = useChangesCount((s) => (s.inGit ? s.count : 0));
 
   // One cheap list() call on mount; FrictionPage refreshes this same store
   // after it sends or drops a report so the badge stays in sync without
   // polling. See state/friction.ts.
   useEffect(() => {
     useFrictionCount.getState().refresh();
+    ensureChangesCountSubscribed();
+    useChangesCount.getState().refresh();
   }, []);
 
   return (
@@ -46,6 +53,11 @@ export function Nav() {
             {l.to === '/ui/friction' && pendingFriction > 0 && (
               <span className="rounded-full bg-amber-500 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-white">
                 {pendingFriction}
+              </span>
+            )}
+            {l.to === '/ui/changes' && changesCount > 0 && (
+              <span className="rounded-full bg-sky-600 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-white">
+                {changesCount}
               </span>
             )}
           </span>
