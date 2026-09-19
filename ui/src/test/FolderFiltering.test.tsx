@@ -170,7 +170,7 @@ describe('"Move to folder…" (via FlowsPage)', () => {
     await waitFor(() => expect(screen.getByText('root-flow')).toBeInTheDocument());
 
     await user.click(within(rowOf('root-flow')).getByRole('button', { name: 'Move to folder…' }));
-    const input = screen.getByRole('combobox', { name: /Folder/ });
+    const input = screen.getByRole('textbox', { name: /folder/i });
     await user.clear(input);
     await user.type(input, 'brand-new');
     await user.click(screen.getByRole('button', { name: 'Move' }));
@@ -192,7 +192,7 @@ describe('"Move to folder…" (via FlowsPage)', () => {
     await waitFor(() => expect(screen.getByText('a-flow')).toBeInTheDocument());
 
     await user.click(within(rowOf('a-flow')).getByRole('button', { name: 'Move to folder…' }));
-    const input = screen.getByRole('combobox', { name: /Folder/ });
+    const input = screen.getByRole('textbox', { name: /folder/i });
     await user.clear(input);
     await user.type(input, '/');
     await user.click(screen.getByRole('button', { name: 'Move' }));
@@ -200,7 +200,7 @@ describe('"Move to folder…" (via FlowsPage)', () => {
     await waitFor(() => expect(foldersMoveFlow).toHaveBeenCalledWith('a-flow', ''));
   });
 
-  it('the autocomplete datalist offers every existing folder of that kind', async () => {
+  it('lists every existing folder of that kind, and one click on one moves the item there', async () => {
     flowsList.mockResolvedValue(foldered);
     const user = userEvent.setup();
     render(
@@ -211,11 +211,27 @@ describe('"Move to folder…" (via FlowsPage)', () => {
     await waitFor(() => expect(screen.getByText('root-flow')).toBeInTheDocument());
 
     await user.click(within(rowOf('root-flow')).getByRole('button', { name: 'Move to folder…' }));
-    const input = screen.getByRole('combobox', { name: /Folder/ });
-    const listId = input.getAttribute('list')!;
-    const datalist = document.getElementById(listId)!;
-    const options = Array.from(datalist.querySelectorAll('option')).map((o) => o.getAttribute('value'));
-    expect(options.sort()).toEqual(['a', 'a/b', 'other'].sort());
+    const list = screen.getByRole('list', { name: 'Existing folders' });
+    const offered = within(list).getAllByRole('button').map((b) => b.textContent);
+    expect(offered.sort()).toEqual(['a', 'a/b', 'other'].sort());
+
+    await user.click(within(list).getByRole('button', { name: 'other' }));
+    await waitFor(() => expect(foldersMoveFlow).toHaveBeenCalledWith('root-flow', 'other'));
+  });
+
+  it('Enter on the name of an existing folder moves the item there', async () => {
+    flowsList.mockResolvedValue(foldered);
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <FlowsPage />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getByText('root-flow')).toBeInTheDocument());
+
+    await user.click(within(rowOf('root-flow')).getByRole('button', { name: 'Move to folder…' }));
+    await user.type(screen.getByRole('textbox', { name: /folder/i }), 'other{Enter}');
+    await waitFor(() => expect(foldersMoveFlow).toHaveBeenCalledWith('root-flow', 'other'));
   });
 
   it('a failed move surfaces the error inline in the popover', async () => {
@@ -230,7 +246,7 @@ describe('"Move to folder…" (via FlowsPage)', () => {
     await waitFor(() => expect(screen.getByText('root-flow')).toBeInTheDocument());
 
     await user.click(within(rowOf('root-flow')).getByRole('button', { name: 'Move to folder…' }));
-    const input = screen.getByRole('combobox', { name: /Folder/ });
+    const input = screen.getByRole('textbox', { name: /folder/i });
     await user.clear(input);
     await user.type(input, 'a');
     await user.click(screen.getByRole('button', { name: 'Move' }));

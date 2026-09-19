@@ -1,7 +1,11 @@
 // "Move to folder…" action shared by the Flows/Memories/Examples list rows
-// and their detail pages (PLAN §34f item 6): a small popover with a text
-// input, autocompleting from the kind's existing folders; free text creates
-// a new one, and "/" moves the item back to the root. Errors (Conflict, a
+// and their detail pages (PLAN §34f item 6): a small popover listing the
+// kind's existing folders -- one click moves the item there -- above a text
+// input; free text creates a new folder, and "/" moves the item back to the
+// root. The list is ours rather than a native <datalist>: with a datalist
+// open, Chrome spends Enter on its own suggestion popup, so typing the name
+// of an existing folder and pressing Enter closed the popover having moved
+// nothing, which is the common case, not the odd one. Errors (Conflict, a
 // read-only item) surface inline rather than only as a toast, since the
 // popover is small enough that a toast could be missed or already gone by
 // the time the user looks back at it.
@@ -28,7 +32,7 @@ export function FolderMovePopover({
   folders?: readonly string[];
   /** Fetched lazily the first time the popover opens, instead of a static
    *  list -- for a detail page, which doesn't otherwise load every sibling
-   *  item just for this. A failed load just leaves the datalist empty
+   *  item just for this. A failed load just leaves the list empty
    *  (free text still works); never blocks opening the popover. */
   loadFolders?: () => Promise<string[]>;
   onMove: (folder: string) => Promise<unknown>;
@@ -43,6 +47,10 @@ export function FolderMovePopover({
   const ref = useRef<HTMLDivElement>(null);
   const listId = useId();
   const options = folders ?? loadedFolders;
+  // What is typed narrows the list; the folder the item is already in stays
+  // listed (disabled) so the list reads as "where things are", not a diff.
+  const needle = normalizeFolder(value).toLowerCase();
+  const matching = options.filter((f) => f !== '' && (needle === '' || needle === (currentFolder || '').toLowerCase() || f.toLowerCase().includes(needle)));
 
   useEffect(() => {
     if (!open) return;
@@ -73,8 +81,8 @@ export function FolderMovePopover({
     return () => document.removeEventListener('mousedown', onDocClick);
   }, [open]);
 
-  const submit = async () => {
-    const folder = normalizeFolder(value);
+  const submit = async (target?: string) => {
+    const folder = normalizeFolder(target ?? value);
     setBusy(true);
     setError(null);
     try {
@@ -101,12 +109,28 @@ export function FolderMovePopover({
       {open && (
         <div className="absolute right-0 z-10 mt-1 w-56 rounded border border-slate-200 bg-white p-2 text-left shadow-lg dark:border-slate-800 dark:bg-slate-900">
           <label className="mb-1 block text-xs text-slate-500" htmlFor={listId + '-input'}>
-            Folder (&quot;/&quot; for root)
+            Move to folder (&quot;/&quot; for the root)
           </label>
+          {matching.length > 0 && (
+            <ul className="mb-2 max-h-40 overflow-auto" aria-label="Existing folders">
+              {matching.map((f) => (
+                <li key={f}>
+                  <button
+                    type="button"
+                    disabled={busy || f === (currentFolder || '')}
+                    onClick={() => void submit(f)}
+                    className="block w-full truncate rounded px-1.5 py-1 text-left font-mono text-xs hover:bg-slate-100 disabled:opacity-50 dark:hover:bg-slate-800"
+                    title={f === (currentFolder || '') ? 'already here' : `move to ${f}`}
+                  >
+                    {f}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
           <input
             id={listId + '-input'}
             autoFocus
-            list={listId}
             value={value}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={(e) => {
@@ -117,14 +141,9 @@ export function FolderMovePopover({
                 setOpen(false);
               }
             }}
-            placeholder="/"
+            placeholder="new or existing folder, e.g. billing/refunds"
             className="w-full rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900"
           />
-          <datalist id={listId}>
-            {options.map((f) => (
-              <option key={f} value={f} />
-            ))}
-          </datalist>
           {error && <div className="mt-1 text-xs text-red-600">{error}</div>}
           <div className="mt-2 flex justify-end gap-1">
             <button
@@ -137,7 +156,7 @@ export function FolderMovePopover({
             <button
               type="button"
               disabled={busy}
-              onClick={submit}
+              onClick={() => void submit()}
               className="rounded border border-sky-600 bg-sky-50 px-2 py-1 text-xs text-sky-800 disabled:opacity-50 dark:border-sky-500 dark:bg-sky-950 dark:text-sky-300"
             >
               {busy ? 'Moving…' : 'Move'}
