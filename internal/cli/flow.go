@@ -15,6 +15,7 @@ import (
 	"github.com/gs-sinha/sapien/internal/domain"
 	"github.com/gs-sinha/sapien/internal/engine"
 	"github.com/gs-sinha/sapien/internal/errs"
+	"github.com/gs-sinha/sapien/internal/folder"
 )
 
 func init() { Register(newFlowCmd) }
@@ -34,6 +35,7 @@ func newFlowCmd(app *App) *cobra.Command {
 		newFlowPromoteCmd(app),
 		newFlowRescopeCmd(app),
 		newFlowCommitCmd(app),
+		newFlowMvCmd(app),
 		newFlowDeleteCmd(app),
 		newFlowReferenceCmd(app),
 		newFlowRunCmd(app),
@@ -42,7 +44,8 @@ func newFlowCmd(app *App) *cobra.Command {
 }
 
 func newFlowListCmd(app *App) *cobra.Command {
-	return &cobra.Command{
+	var folderFilter string
+	cmd := &cobra.Command{
 		Use:   "list [query]",
 		Short: "List flows",
 		Args:  cobra.MaximumNArgs(1),
@@ -61,18 +64,60 @@ func newFlowListCmd(app *App) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if folderFilter != "" {
+				flows = filterFlowsByFolder(flows, folderFilter)
+			}
 
 			if app.Printer.IsJSON() {
 				return app.Printer.JSON(flows)
 			}
+			showFolder := anyFlowHasFolder(flows)
+			header := []string{"ID", "NAME", "TIER", "SHIPPED", "STEPS", "OPERATIONS"}
+			if showFolder {
+				header = []string{"ID", "NAME", "FOLDER", "TIER", "SHIPPED", "STEPS", "OPERATIONS"}
+			}
 			rows := make([][]string, 0, len(flows))
 			for _, f := range flows {
-				rows = append(rows, []string{f.ID, f.Name, flowTier(f.OwnerKind, f.OwnerID), shipStateColumn(f.Shipped), strconv.Itoa(f.StepCount), strings.Join(f.Operations, ",")})
+				row := []string{f.ID, f.Name, flowTier(f.OwnerKind, f.OwnerID), shipStateColumn(f.Shipped), strconv.Itoa(f.StepCount), strings.Join(f.Operations, ",")}
+				if showFolder {
+					row = []string{f.ID, f.Name, f.Folder, flowTier(f.OwnerKind, f.OwnerID), shipStateColumn(f.Shipped), strconv.Itoa(f.StepCount), strings.Join(f.Operations, ",")}
+				}
+				rows = append(rows, row)
 			}
-			app.Printer.Table([]string{"ID", "NAME", "TIER", "SHIPPED", "STEPS", "OPERATIONS"}, rows)
+			app.Printer.Table(header, rows)
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&folderFilter, "folder", "", "restrict to this folder and everything below it")
+	return cmd
+}
+
+// filterFlowsByFolder keeps only the flows in prefix's folder or below it
+// (PLAN §34f item 4's prefix semantics: internal/folder.HasPrefix). Flows
+// has no folder filter of its own (List takes a bare text query), so every
+// caller that wants one -- this command, the HTTP handler, the MCP tool --
+// applies it client-side against Folder, which List already fills in.
+func filterFlowsByFolder(flows []domain.FlowSummary, prefix string) []domain.FlowSummary {
+	norm := folder.Normalize(prefix)
+	out := flows[:0]
+	for _, f := range flows {
+		if folder.HasPrefix(f.Folder, norm) {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// anyFlowHasFolder reports whether any flow in flows carries a non-root
+// folder, so `flow list`'s table only grows a FOLDER column when it would
+// actually show something (PLAN §34f item 5).
+func anyFlowHasFolder(flows []domain.FlowSummary) bool {
+	for _, f := range flows {
+		if f.Folder != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // flowTier renders a flow's tier for the TIER column and the save
@@ -235,7 +280,7 @@ func printDiagnostics(p *Printer, result *domain.ValidationResult) {
 }
 
 func newFlowCreateCmd(app *App) *cobra.Command {
-	var destPath, scope, service string
+	var destPath, destFolder, scope, service string
 	cmd := &cobra.Command{
 		Use:   "create <file> [--scope local|workspace|service] [--service <name>]",
 		Short: "Save a flow file into a tier (default: local, this machine only)",
@@ -249,7 +294,10 @@ relative to the chosen tier's flows directory) into one of three tiers:
 
 Start local. When the flow runs green and others would benefit from it, move
 it up with "sapien flow promote <id>". Prints a summary of what was saved,
-never the document.`,
+never the document.
+
+--folder places it at <folder>/<id>.flow.yaml within the chosen tier's
+flows directory instead of the root; mutually exclusive with --path.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			kind, owner, err := flowScopeFlags(scope, service)
@@ -270,7 +318,7 @@ never the document.`,
 			}
 
 			flow, err := eng.Flows().CreateIn(cmd.Context(), string(data), engine.CreateFlowOptions{
-				Path: destPath, OwnerKind: kind, OwnerID: owner,
+				Path: destPath, Folder: destFolder, OwnerKind: kind, OwnerID: owner,
 			})
 			if err != nil {
 				return err
@@ -285,6 +333,7 @@ never the document.`,
 		},
 	}
 	cmd.Flags().StringVar(&destPath, "path", "", "destination relative to the chosen tier's flows directory (default: <id>.flow.yaml)")
+	cmd.Flags().StringVar(&destFolder, "folder", "", "destination folder relative to the chosen tier's flows directory; mutually exclusive with --path")
 	cmd.Flags().StringVar(&scope, "scope", domain.FlowOwnerLocal, "tier to save into: local (this machine), workspace (the team's repo), or service (needs --service)")
 	cmd.Flags().StringVar(&service, "service", "", "owning service for --scope service")
 	return cmd
@@ -598,6 +647,55 @@ func commitAllFlows(app *App, ctx context.Context, eng engine.Engine, message st
 		app.Printer.Line("committed %s (%s)", sum.Path, shipStateColumn(sum.Shipped))
 	}
 	return nil
+}
+
+// newFlowMvCmd is `sapien flow mv <id> <folder>`: move a flow's file to
+// another folder within its current tier's flows directory, keeping tier
+// and file name (PLAN §34f item 6). <folder> "" or "/" moves it to the
+// root. Distinct from `flow rescope`/`flow promote`, which move a flow
+// between tiers and keep its folder.
+func newFlowMvCmd(app *App) *cobra.Command {
+	return &cobra.Command{
+		Use:   "mv <id> <folder>",
+		Short: "Move a flow to another folder, keeping its tier",
+		Long: `Move a flow's file to another folder within its current tier's flows
+directory, keeping its tier and file name. <folder> "" or "/" moves it to
+the root. Refused when a file already exists at the destination, or for a
+flow whose service tier is read from a managed git clone (see
+"sapien service bind"). Use "sapien flow rescope"/"promote" to move a flow
+between tiers instead; either keeps its current folder.`,
+		Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			eng, err := app.Engine()
+			if err != nil {
+				return err
+			}
+			defer eng.Close()
+
+			existing, err := eng.Flows().Get(cmd.Context(), args[0])
+			if err != nil {
+				return err
+			}
+			oldPath := existing.Path
+
+			moved, err := eng.Flows().Move(cmd.Context(), args[0], args[1])
+			if err != nil {
+				return err
+			}
+
+			if app.Printer.IsJSON() {
+				return app.Printer.JSON(map[string]any{
+					"id":       moved.ID,
+					"folder":   moved.Folder,
+					"old_path": oldPath,
+					"new_path": moved.Path,
+					"flow":     summarizeFlow(moved),
+				})
+			}
+			app.Printer.Line("%s -> %s", oldPath, moved.Path)
+			return nil
+		},
+	}
 }
 
 func newFlowDeleteCmd(app *App) *cobra.Command {
