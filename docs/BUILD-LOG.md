@@ -843,3 +843,63 @@ pushed, a push from behind was refused with "pull first". Go suite green
 with `-race` (38 packages, vet clean), 196 UI tests, bundle 69.3 KB
 initial / 221.9 KB total gzipped. The acceptance scenario now expects a
 new example at the local tier and moves it to the team's.
+
+### Control from the UI, folders, and flows that branch (2026-09-19)
+
+Consumers of the inspector sent one list: git without leaving the UI,
+with changes visible from the top like an editor; a service's branch,
+the daemon's restart and the next version from the UI; an install that
+upgrades itself; embeddings that are not a confusing install step, with
+a choice of models; collapsible warnings and docs; conditionals and
+loops in flows. The pattern behind most of it: the engine could already
+do the thing, and only a shell could ask. Decided in PLAN §34f, whose
+HTTP shapes were written first so backends and UIs could be built in
+parallel against the same text -- seven Sonnet agents in seven git
+worktrees, merged one by one, then two more for the flow chart and bulk
+moves. Worktrees are cut from `origin/main`, not the local branch, so
+five agents started without §34f in their PLAN.md and were pointed at
+the primary checkout's copy; later agents fast-forward to `main` first.
+
+What the merge and the first real use found, which no agent's own suite
+could:
+
+- Two agents each added `Manager.Engines()` with different return types;
+  one kept. The Settings UI sent `openai_compatible` where the config
+  says `openai`. A bound service with no changed files crashed the
+  Changes page: `files` was `omitempty` on the wire and unguarded in the
+  tree. An unparsed flow was listed as "other"; files are now named by
+  where they sit when the catalog does not know them.
+- Organising the user's own seventeen flows through the UI: the Folder
+  column sat off-screen behind Operations; moving a flow into an
+  EXISTING folder by typing its name and pressing Enter closed the
+  popover and moved nothing (the popover now lists folders as buttons);
+  a dev build ahead of its tag was offered that tag as an update; a move
+  read "Add 11 flows; remove 11 flows"; the status bar said 10
+  uncommitted while the Changes badge said 35 (one counted directories);
+  "Push 1 commits". Seventeen single moves is what made multi-select and
+  drag-to-folder worth building, and the bar that appeared on the first
+  tick pushed the rows down so the second click missed -- it now holds
+  its place. The eleven team flows were committed as eleven pure renames
+  and pushed from the Changes page.
+- The user's first model switch was refused with a client timeout: the
+  pre-save probe waited 10s, a cold `bge-m3` load took 12.9s (0.24s
+  warm). Asked what an embedding is made of, the answer showed two
+  gaps: every model was sent bare text though most are trained with
+  task prefixes, and 840 of 1,551 vectors were doc sections the user
+  finds irrelevant. Now `kinds` chooses what is embedded, example
+  descriptions ride in their operation's text, prefixes follow the
+  model and can be edited, and -- because a prefix arriving is a change
+  no content fingerprint sees -- the daemon catches the index up on
+  start. That last change exposed a race: two settings changes each
+  spawned a full reindex and the older could write doc rows back after
+  the newer had cleared them; one runs at a time now.
+- `loop` is a reserved identifier in cel-go's parser, so the loop root
+  is `iter`. A step id with a hyphen still cannot be referenced as
+  `steps.my-id` (CEL reads a subtraction); that predates this work and
+  is open.
+
+Open after this round: two workspaces pinning different committed refs
+of one URL still share, and thrash, one managed clone (a local ref
+override gets its own); no search-eval run yet backs any model beyond
+the default; `create_example(run_id)` cannot take a folder; the daemon's
+port is a flag, not a config key.

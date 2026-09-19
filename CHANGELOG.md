@@ -6,6 +6,78 @@ and phase numbers refer to PLAN.md §34's roadmap.
 
 ## [Unreleased]
 
+### Added
+- **A Changes page: the workspace repository like an editor's source-control
+  panel.** One tree of every changed file -- flows, memories, examples,
+  `sapien.workspace.yaml`, `environments/`, `.gitignore` -- with change marks
+  that roll up folder by folder to a badge in the nav. Tick files or folders,
+  write a message (one is suggested, and a file moved to another folder reads
+  as a move, not an add and a remove), Commit, Pull, Push, and see each
+  file's diff beside it. Bound service checkouts are listed read-only.
+  `sapien workspace changes` and `sapien workspace commit -m <msg> [--all |
+  paths...]` do the same from a shell. Still a human's request, the workspace
+  repository only, never forced, and no MCP tool.
+- **Folders for flows, memories and examples.** Any of them may live in a
+  subfolder at any tier; the folder is read from the path and ids stay
+  global, so moving never breaks a reference. The list pages get a folder
+  sidebar, a breadcrumb, "Move to folder..." per row, multi-select "Move N to
+  folder...", and drag a row (or the selection) onto a folder. `sapien
+  flow|memory|example mv`, `--folder` on list and create, `folder` on the MCP
+  create, rescope and list tools, and folder names are lexical search text.
+  A service sync now finds a teammate's flow in a subfolder.
+- **Conditions and loops in flows.** `when:` on a step skips it when false
+  (recorded `skipped`, never a failure; the validator warns about an
+  unguarded read of a step that may be skipped). A step with `steps:` is a
+  loop block: `foreach: <list>` or `repeat: {until|while, max, interval}`,
+  with `break_when`, `on_error` and a mandatory cap; inside, `iter.item` and
+  `iter.index`, and `steps.<id>` is always the latest execution, so
+  iteration N reads iteration N-1's cursor; after it, `steps.<block>.count`
+  and `.iterations`. Run steps are keyed by iteration, runs resume at a block
+  boundary, `patch_flow` reaches nested steps and adds `into:`, and an
+  agent's view of a run collapses passing iterations to one line while
+  keeping every failed one.
+- **A Settings page.** Semantic search: turn it on, off or to another model
+  with no daemon restart; it finds Ollama, lists and pulls models with
+  progress, tests a config before saving it, and shows indexing live. Choose
+  what is embedded (operations, examples, memories, doc sections) and edit
+  the task prefixes, which otherwise follow the model. Daemon: version,
+  uptime, load, and Restart. Updates: what is running, what is latest, a
+  daily check that can be turned off, and an upgrade button for a script
+  install (other installs are shown their own command). `sapien semantic
+  status|enable|disable|reindex|test`, `sapien daemon restart`, `sapien
+  upgrade`.
+- **Change a service's branch from its page.** A git-sourced service's ref
+  can be switched to any branch or tag of its remote, for this machine only
+  (a `ref:` in `sapien.workspace.local.yaml`, with its own clone) or for the
+  team (rewrites `sapien.workspace.yaml`). `sapien service set-ref`,
+  `sapien service branches`.
+- **`http://sapien.localhost:7717`.** `*.localhost` names pass the host
+  guard, `sapien ui` opens that address (`--loopback-ip` for `127.0.0.1`),
+  and the daemon's token is kept across restarts, so open tabs and MCP
+  bridges survive one and the session cookie lasts 90 days.
+
+### Changed
+- **Semantic search is no longer an install step**, and sends each model the
+  task prefixes it was trained with (`search_query:` / `search_document:`
+  for `nomic-embed-text`, and so on); before, every model was sent bare
+  text. A saved example's description is now embedded with the operation it
+  calls. The index catches itself up when the daemon starts, so an upgrade
+  that changes how texts are built needs no manual reindex.
+- **`scripts/install.sh` upgrades in place**: says so and stops when already
+  current, installs over the existing binary's directory, defers to `brew
+  upgrade` for a Homebrew install, refuses to overwrite a dev build, and
+  restarts a running daemon.
+- Warnings on the service page and docs on the operation page collapse, and
+  remember it per browser.
+
+### Fixed
+- The first save of a model Ollama had not loaded yet was refused: the
+  pre-save probe gave up after 10s while the model was still loading. It
+  waits 90s, and says why it is waiting.
+- A build ahead of its release tag (`v1.3.1-43-gabc1234`) was offered that
+  same tag as an update.
+- The acceptance test read the developer's own `~/.sapien/config.yaml`.
+
 ## [1.3.1] - 2026-09-15
 
 ### Fixed
