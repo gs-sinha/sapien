@@ -45,7 +45,12 @@ type Step struct {
 	// directly on the step taking precedence. A step must set Call,
 	// Example, or both (when both, Call must match the example's
 	// operation). See internal/flow.Materialize.
-	Example string            `yaml:"example,omitempty" json:"example,omitempty"`
+	Example string `yaml:"example,omitempty" json:"example,omitempty"`
+	// When is a CEL boolean (inputs/env/steps only, no `status`/`body`/...:
+	// this step hasn't run yet) evaluated before the request is built; false
+	// records the step `skipped` (SkipReason "when") without sending a
+	// request or evaluating assertions, and the run continues (PLAN §34f.7).
+	When    string            `yaml:"when,omitempty" json:"when,omitempty"`
 	Input   map[string]any    `yaml:"input,omitempty" json:"input,omitempty"` // bound by name to path/query/header params
 	Params  *ExplicitParams   `yaml:"params,omitempty" json:"params,omitempty"`
 	Body    any               `yaml:"body,omitempty" json:"body,omitempty"`

@@ -119,16 +119,25 @@ func (v *Validator) validateMaterialized(ctx context.Context, f *domain.Flow) (*
 	combined := AllSteps(matF)
 
 	vd := &validation{
-		ctx:        ctx,
-		cat:        v.cat,
-		flow:       matF,
-		stepIndex:  map[string]int{},
-		opByStepID: map[string]*domain.Operation{},
-		fieldCache: map[string]*fieldIndex{},
+		ctx:          ctx,
+		cat:          v.cat,
+		flow:         matF,
+		stepIndex:    map[string]int{},
+		opByStepID:   map[string]*domain.Operation{},
+		fieldCache:   map[string]*fieldIndex{},
+		maybeSkipped: map[string]bool{},
 	}
 	for _, st := range combined {
 		if st.ID != "" {
 			vd.allStepIDs = append(vd.allStepIDs, st.ID)
+		}
+		// maybeSkipped records every step whose result may be absent from
+		// `steps` at run time even though it's a valid, in-order reference:
+		// today that's only a step with its own `when`; PLAN §34f.8 will add
+		// a step nested in a foreach/repeat block (which can run zero
+		// iterations). See checkStepRef's MAYBE_SKIPPED check.
+		if st.When != "" {
+			vd.maybeSkipped[st.ID] = true
 		}
 	}
 
@@ -271,6 +280,9 @@ type validation struct {
 	opByStepID map[string]*domain.Operation
 	allStepIDs []string
 	fieldCache map[string]*fieldIndex
+	// maybeSkipped is the set of step ids a `steps.<id>` reference should be
+	// has()-guarded against (MAYBE_SKIPPED); see its assignment above.
+	maybeSkipped map[string]bool
 }
 
 func (vd *validation) fieldsFor(op *domain.Operation) *fieldIndex {
@@ -619,6 +631,13 @@ func (vd *validation) checkExpressionsForStep(st domain.Step, idx int) []domain.
 		}
 	}
 
+	// `when` gates the whole step and is evaluated before the request is
+	// built, so it sees the same roots as input/body/headers (no current
+	// step context) and is checked here first.
+	if st.When != "" {
+		add(st.When, false, false, st.Line)
+	}
+
 	walk(st.Input, false)
 	if st.Params != nil {
 		walk(st.Params.Path, false)
@@ -673,15 +692,15 @@ func (vd *validation) checkExprText(text string, st domain.Step, op *domain.Oper
 	}
 	var diags []domain.Diagnostic
 	for _, r := range expr.Roots(text) {
-		diags = append(diags, vd.checkRef(r, st, op, idx, hasCurrent, secretAllowed, line)...)
+		diags = append(diags, vd.checkRef(r, st, op, idx, hasCurrent, secretAllowed, line, text)...)
 	}
 	return diags
 }
 
-func (vd *validation) checkRef(r expr.Ref, st domain.Step, op *domain.Operation, idx int, hasCurrent, secretAllowed bool, line int) []domain.Diagnostic {
+func (vd *validation) checkRef(r expr.Ref, st domain.Step, op *domain.Operation, idx int, hasCurrent, secretAllowed bool, line int, text string) []domain.Diagnostic {
 	switch r.Root {
 	case "steps":
-		return vd.checkStepRef(r, st, idx, line)
+		return vd.checkStepRef(r, st, idx, line, text)
 	case "inputs":
 		return vd.checkInputRef(r, st, line)
 	case "env":
@@ -725,7 +744,7 @@ func contextRootDiag(root string, st domain.Step, line int) []domain.Diagnostic 
 	}}
 }
 
-func (vd *validation) checkStepRef(r expr.Ref, st domain.Step, idx int, line int) []domain.Diagnostic {
+func (vd *validation) checkStepRef(r expr.Ref, st domain.Step, idx int, line int, text string) []domain.Diagnostic {
 	refIdx, ok := vd.stepIndex[r.StepID]
 	if !ok {
 		return []domain.Diagnostic{{
@@ -743,12 +762,35 @@ func (vd *validation) checkStepRef(r expr.Ref, st domain.Step, idx int, line int
 			Line:    line, StepID: st.ID,
 		}}
 	}
+	var diags []domain.Diagnostic
 	if len(r.Path) >= 1 && r.Path[0] == "body" {
 		if refOp := vd.opByStepID[r.StepID]; refOp != nil {
-			return vd.checkFieldPath(refOp, r.Path[1:], st, line)
+			diags = append(diags, vd.checkFieldPath(refOp, r.Path[1:], st, line)...)
 		}
 	}
-	return nil
+	if vd.maybeSkipped[r.StepID] && !hasSkipGuard(text, r.StepID) {
+		diags = append(diags, domain.Diagnostic{
+			Code: CodeMaybeSkipped, Severity: domain.SeverityWarning,
+			Message: fmt.Sprintf("step `%s` may be skipped; guard this reference with has(steps.%s) or steps.?%s", r.StepID, r.StepID, r.StepID),
+			Line:    line, StepID: st.ID,
+		})
+	}
+	return diags
+}
+
+// hasSkipGuard reports whether text (the whole expression or template body
+// containing the steps.<stepID> reference being checked) appears to guard
+// against stepID being skipped, via has(steps.<stepID> or the
+// optional-chaining steps.?<stepID> syntax anywhere in text. This is
+// deliberately a textual check, not a structural one: it does not verify
+// the guard actually dominates this specific reference (an unrelated
+// has(steps.other_step) earlier in a long `&&` chain would still silence
+// the warning here), and a guard written in a different field/expression
+// than the reference is invisible to it. MAYBE_SKIPPED is a warning, never
+// an error, precisely because this heuristic can both over- and
+// under-fire; see PLAN §34f.7/8.
+func hasSkipGuard(text, stepID string) bool {
+	return strings.Contains(text, "has(steps."+stepID) || strings.Contains(text, "steps.?"+stepID)
 }
 
 func (vd *validation) checkInputRef(r expr.Ref, st domain.Step, line int) []domain.Diagnostic {

@@ -36,6 +36,7 @@ type stepDoc struct {
 	ID      string                 `yaml:"id"`
 	Call    string                 `yaml:"call"`
 	Example string                 `yaml:"example,omitempty"`
+	When    string                 `yaml:"when,omitempty"`
 	Input   map[string]any         `yaml:"input,omitempty"`
 	Params  *domain.ExplicitParams `yaml:"params,omitempty"`
 	Body    any                    `yaml:"body,omitempty"`
@@ -117,6 +118,7 @@ func stepsToDomain(docs []stepDoc) []domain.Step {
 			ID:      sd.ID,
 			Call:    sd.Call,
 			Example: sd.Example,
+			When:    sd.When,
 			Input:   sd.Input,
 			Params:  sd.Params,
 			Body:    sd.Body,

@@ -44,6 +44,13 @@ const (
 	CodeUnknownFlowInput = "UNKNOWN_FLOW_INPUT"
 	CodeContextRoot      = "CONTEXT_ROOT"
 	CodeSecretContext    = "SECRET_CONTEXT"
+	// CodeMaybeSkipped is a warning (PLAN §34f.7): an expression references
+	// steps.X where X may not have run (X has a `when`, or -- once blocks
+	// exist -- X is nested in a block that may run zero times) and the
+	// reference isn't textually guarded by has(steps.X or steps.?X in the
+	// same expression. See maybeSkippedGuarded's doc for exactly what
+	// "guarded" means and its limits.
+	CodeMaybeSkipped = "MAYBE_SKIPPED"
 
 	// Example resolution (PLAN §34b), checked by Materialize against an
 	// ExampleResolver.
@@ -53,10 +60,10 @@ const (
 
 // reservedKeys are the flow-DSL keys the schema rejects today but are
 // parked for a future version (PLAN.md §8). `setup`/`teardown` used to be
-// here too; they are implemented now (PLAN §8, §9) so a flow may use them
-// freely.
+// here too, and `when` more recently (PLAN §34f.7); they are implemented
+// now so a flow may use them freely. `foreach` is reserved here only until
+// PLAN §34f.8 (loop blocks) lands.
 var reservedKeys = map[string]bool{
-	"when":     true,
 	"parallel": true,
 	"foreach":  true,
 	"retry":    true,

@@ -85,7 +85,7 @@ func TestParse_MalformedYAML(t *testing.T) {
 }
 
 func TestParse_ReservedKey(t *testing.T) {
-	src := readExample(t, "flow-reserved-when.invalid.yaml")
+	src := readExample(t, "flow-reserved-parallel.invalid.yaml")
 	f, err := Parse(src)
 	require.Error(t, err)
 	assert.Nil(t, f)
@@ -95,6 +95,22 @@ func TestParse_ReservedKey(t *testing.T) {
 	require.NotNil(t, found, "expected a RESERVED_KEY diagnostic, got %+v", diags)
 	assert.Equal(t, domain.SeverityError, found.Severity)
 	assert.Positive(t, found.Line)
+}
+
+// TestParse_When confirms `when` (PLAN §34f.7) parses onto domain.Step.When
+// and is no longer rejected as a reserved key.
+func TestParse_When(t *testing.T) {
+	f, err := Parse(`version: 1
+id: t
+steps:
+  - id: a
+    call: order-service.createOrder
+    when: inputs.releaseNow
+    body: {x: 1}
+`)
+	require.NoError(t, err)
+	require.Len(t, f.Steps, 1)
+	assert.Equal(t, "inputs.releaseNow", f.Steps[0].When)
 }
 
 func TestParse_UnknownAssertionKey(t *testing.T) {

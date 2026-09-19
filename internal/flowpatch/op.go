@@ -84,4 +84,5 @@ var allowedMergeFields = map[string]bool{
 	"timeout": true,
 	"call":    true,
 	"example": true,
+	"when":    true,
 }

@@ -68,6 +68,7 @@ Step keys:
 | `id` | Unique within the flow; `^[a-zA-Z_][a-zA-Z0-9_-]*$`. |
 | `call` | Operation ID, `<service>.<operationId>`. A step needs `call` or `example` (or both, if they agree). |
 | `example` | Saved example id to reuse; see [Examples in flows](#examples-in-flows). |
+| `when` | CEL boolean (`inputs`/`env`/`steps` only); false skips this step. See [Conditions and loops](#conditions-and-loops). |
 | `input` | Flat map bound by name to the operation's path/query/header params. |
 | `params` | `{path:, query:, headers:}`, for name collisions the flat `input:` can't express. |
 | `body` | Request body. |
@@ -289,6 +290,51 @@ teardown:
     call: sorting-service.releaseBag
     input: { bagId: "${steps.bag.out.bagId}" }
 ```
+
+## Conditions and loops
+
+`when:` is a bare CEL boolean on any step, checked before the request is
+built: it sees `inputs`, `env`, and `steps.<id>...` for an earlier step, but
+not `status`/`body`/... (this step hasn't run yet, same restriction as
+`input`/`body`/`headers`). `when: false` records the step `skipped`
+(`skip_reason: "when"`) without sending a request or evaluating `assert`,
+and never fails the run; a `when` expression that fails to *evaluate* (a bad
+expression, a missing input) fails the step the same way a bad `assert`
+expression does.
+
+```yaml
+version: 1
+id: conditional-release
+inputs:
+  releaseNow: { type: boolean, default: false }
+steps:
+  - id: allocate
+    call: allocation-service.allocate
+    body: { orderId: ord_1 }
+    extract: { allocationId: body.allocationId }
+    assert: [status == 201]
+
+  - id: release
+    call: allocation-service.releaseAllocation
+    when: inputs.releaseNow
+    input: { allocationId: "${steps.allocate.out.allocationId}" }
+
+  - id: check
+    call: allocation-service.getAllocation
+    input: { allocationId: "${steps.allocate.out.allocationId}" }
+    # release may have been skipped; has() keeps this from erroring
+    assert:
+      - "!has(steps.release) || steps.release.status == 200"
+```
+
+A skipped step is left out of `steps` entirely for the rest of the run: an
+unguarded `steps.<skipped-id>...` reference elsewhere errors clearly (`steps.x
+was skipped (when: false); guard with has(steps.x)`) instead of silently
+seeing zero values, and `sapien flow validate` warns (`MAYBE_SKIPPED`) at
+that reference's line when it sees no `has(steps.<id>)` or `steps.?<id>`
+guard anywhere in the same expression -- a simple, textual check, not a full
+guard-dominance analysis, so it can both over- and under-fire; treat it as a
+prompt to double check, not as gospel.
 
 ## Resuming a run
 

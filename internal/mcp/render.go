@@ -218,7 +218,10 @@ type ResponseView struct {
 
 // StepView is the compact rendering of one run step.
 type StepView struct {
-	StepID     string                   `json:"step_id"`
+	StepID string `json:"step_id"`
+	// SkipReason is set when Status is "skipped" and the reason is known
+	// beyond "not reached": today only "when" (PLAN §34f.7).
+	SkipReason string                   `json:"skip_reason,omitempty"`
 	Operation  string                   `json:"operation,omitempty"`
 	Status     string                   `json:"status"`
 	Request    *RequestView             `json:"request,omitempty"`
@@ -272,6 +275,7 @@ func buildRunView(run *domain.Run, stepFilter string, includeBodies, capBodies b
 		}
 		sv := StepView{
 			StepID:     st.StepID,
+			SkipReason: st.SkipReason,
 			Operation:  st.Operation,
 			Status:     string(st.Status),
 			Assertions: st.Assertions,
@@ -312,6 +316,9 @@ func renderRunText(rv RunView) string {
 		s += fmt.Sprintf("- %s (%s): %s", st.StepID, st.Operation, st.Status)
 		if st.Reused {
 			s += " (reused)"
+		}
+		if st.SkipReason != "" {
+			s += fmt.Sprintf(" (%s)", st.SkipReason)
 		}
 		if st.Response != nil {
 			s += fmt.Sprintf(" -> %d", st.Response.Status)

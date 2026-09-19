@@ -107,6 +107,9 @@ func renderFlowOutline(f *domain.Flow) string {
 				call = "example " + st.Example
 			}
 			extras := ""
+			if st.When != "" {
+				extras += " when:" + st.When
+			}
 			if n := len(st.Assert); n > 0 {
 				extras += fmt.Sprintf(" [%d assert]", n)
 			}

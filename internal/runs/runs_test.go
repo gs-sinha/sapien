@@ -32,11 +32,12 @@ func dt(n int) time.Time {
 
 func fullStep(id string, idx int) domain.StepResult {
 	return domain.StepResult{
-		StepID:    id,
-		Index:     idx,
-		Operation: "order-service.createOrder",
-		Status:    domain.StepPassed,
-		Attempts:  2,
+		StepID:     id,
+		Index:      idx,
+		Operation:  "order-service.createOrder",
+		Status:     domain.StepPassed,
+		SkipReason: "", // a passed step never carries one; see TestAppendStep_SkipReasonRoundTrip
+		Attempts:   2,
 		Request: &domain.RequestRecord{
 			Method:  "POST",
 			URL:     "https://api.example.com/v1/orders",
@@ -75,6 +76,7 @@ func assertStepEqual(t *testing.T, want, got domain.StepResult) {
 	assert.Equal(t, want.Index, got.Index)
 	assert.Equal(t, want.Operation, got.Operation)
 	assert.Equal(t, want.Status, got.Status)
+	assert.Equal(t, want.SkipReason, got.SkipReason)
 	assert.Equal(t, want.Attempts, got.Attempts)
 	assert.Equal(t, want.Request, got.Request)
 	assert.Equal(t, want.Response, got.Response)
@@ -164,6 +166,32 @@ func TestAppendStep_FullRoundTrip(t *testing.T) {
 	assert.Equal(t, run.Inputs, got.Inputs)
 	assert.Equal(t, run.Trigger, got.Trigger)
 	assert.Equal(t, run.OperationHashes, got.OperationHashes)
+}
+
+// TestAppendStep_SkipReasonRoundTrip covers the "when" skip reason
+// specifically (PLAN §34f.7): a skipped step's skip_reason survives a
+// round trip through the run_steps table, which is NOT NULL DEFAULT ''
+// (unlike the nullable *_json/operation columns), so an empty SkipReason
+// must be written as the empty string, not SQL NULL.
+func TestAppendStep_SkipReasonRoundTrip(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+
+	run := &domain.Run{Environment: "local"}
+	require.NoError(t, s.Create(ctx, run))
+
+	require.NoError(t, s.AppendStep(ctx, run.ID, domain.StepResult{
+		StepID: "release", Index: 0, Status: domain.StepSkipped, SkipReason: "when",
+	}))
+	require.NoError(t, s.AppendStep(ctx, run.ID, domain.StepResult{
+		StepID: "cancelled-before-start", Index: 1, Status: domain.StepSkipped,
+	}))
+
+	got, err := s.Get(ctx, run.ID)
+	require.NoError(t, err)
+	require.Len(t, got.Steps, 2)
+	assert.Equal(t, "when", got.Steps[0].SkipReason)
+	assert.Empty(t, got.Steps[1].SkipReason, "a step skipped for a reason other than `when` carries no skip_reason")
 }
 
 func TestAppendStep_MultipleStepsOrderedByIndex(t *testing.T) {

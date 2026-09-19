@@ -478,6 +478,8 @@ export interface StepResult {
   index: number;
   operation?: string;
   status: StepStatus;
+  /** Set when status is 'skipped' and the reason is known beyond "not reached": today only 'when'. */
+  skip_reason?: string;
   attempts?: number;
   request?: RequestRecord;
   response?: ResponseRecord;

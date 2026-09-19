@@ -13,6 +13,21 @@ import (
 	"github.com/gs-sinha/sapien/internal/domain"
 )
 
+// TestRenderFlowOutline_ShowsWhen confirms a step's `when` (PLAN §34f.7)
+// shows up compactly in get_flow(detail=outline).
+func TestRenderFlowOutline_ShowsWhen(t *testing.T) {
+	f := &domain.Flow{
+		ID: "f",
+		Steps: []domain.Step{
+			{ID: "a", Call: "svc.op", When: "inputs.releaseNow"},
+			{ID: "b", Call: "svc.op2"},
+		},
+	}
+	out := renderFlowOutline(f)
+	assert.Contains(t, out, "a: svc.op when:inputs.releaseNow")
+	assert.NotContains(t, out, "b: svc.op2 when:")
+}
+
 func TestTool_ListFlows(t *testing.T) {
 	cs := newTestSession(t, Config{Default: DefaultPermissions()}, "claude-code")
 	res := callTool(t, cs, "list_flows", map[string]any{})

@@ -33,7 +33,7 @@ const runColumns = `id, flow_id, flow_snapshot_json, env, inputs_json, status, s
 
 // stepColumns is the fixed column list/order for run_steps, excluding
 // run_id (always known from the query's WHERE clause).
-const stepColumns = `step_id, idx, status, operation, attempts, request_json, response_json, timings_json, assertions_json, out_json, error_json, started, finished`
+const stepColumns = `step_id, idx, status, skip_reason, operation, attempts, request_json, response_json, timings_json, assertions_json, out_json, error_json, started, finished`
 
 // Create inserts run, assigning run.ID and run.Started if unset and
 // defaulting run.Status to queued. Only the fields relevant to a freshly
@@ -178,9 +178,10 @@ func (s *Store) AppendStep(ctx context.Context, runID string, step domain.StepRe
 	return s.db.Write(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, `
 			INSERT INTO run_steps (run_id, `+stepColumns+`)
-			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 			ON CONFLICT(run_id, step_id) DO UPDATE SET
 				status          = excluded.status,
+				skip_reason     = excluded.skip_reason,
 				operation       = excluded.operation,
 				attempts        = excluded.attempts,
 				request_json    = excluded.request_json,
@@ -196,6 +197,7 @@ func (s *Store) AppendStep(ctx context.Context, runID string, step domain.StepRe
 			step.StepID,
 			step.Index,
 			string(step.Status),
+			step.SkipReason, // run_steps.skip_reason is NOT NULL DEFAULT '', unlike the nullable *_json/operation columns
 			store.NullString(step.Operation),
 			step.Attempts,
 			requestJSON,
@@ -541,21 +543,22 @@ func scanStep(sc rowScanner) (domain.StepResult, error) {
 	var (
 		stepID                                                                     string
 		idx, attempts                                                              int
-		status                                                                     string
+		status, skipReason                                                         string
 		operation                                                                  sql.NullString
 		requestJSON, responseJSON, timingsJSON, assertionsJSON, outJSON, errorJSON sql.NullString
 		started, finished                                                          sql.NullString
 	)
-	if err := sc.Scan(&stepID, &idx, &status, &operation, &attempts, &requestJSON, &responseJSON, &timingsJSON, &assertionsJSON, &outJSON, &errorJSON, &started, &finished); err != nil {
+	if err := sc.Scan(&stepID, &idx, &status, &skipReason, &operation, &attempts, &requestJSON, &responseJSON, &timingsJSON, &assertionsJSON, &outJSON, &errorJSON, &started, &finished); err != nil {
 		return domain.StepResult{}, err
 	}
 
 	step := domain.StepResult{
-		StepID:    stepID,
-		Index:     idx,
-		Operation: store.StringOrEmpty(operation),
-		Status:    domain.StepStatus(status),
-		Attempts:  attempts,
+		StepID:     stepID,
+		Index:      idx,
+		Operation:  store.StringOrEmpty(operation),
+		Status:     domain.StepStatus(status),
+		SkipReason: skipReason,
+		Attempts:   attempts,
 	}
 
 	var err error

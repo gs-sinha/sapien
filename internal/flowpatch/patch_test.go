@@ -57,6 +57,23 @@ func TestApply_MergeStep_ReplacesOneFieldLeavesOthers(t *testing.T) {
 	assert.Equal(t, []any{"status == 201"}, allocate["assert"], "the untouched `allocate` step's assert must survive")
 }
 
+// TestApply_MergeStep_When confirms `when` (PLAN §34f.7) is on the
+// merge_step whitelist, alongside the other bare-CEL step fields.
+func TestApply_MergeStep_When(t *testing.T) {
+	out, err := Apply(baseFlow, []Op{{
+		Kind:   KindMergeStep,
+		ID:     "allocate",
+		Fields: map[string]any{"when": "inputs.releaseNow"},
+	}})
+	require.NoError(t, err)
+
+	var doc map[string]any
+	require.NoError(t, yaml.Unmarshal([]byte(out), &doc))
+	steps := doc["steps"].([]any)
+	allocate := steps[1].(map[string]any)
+	assert.Equal(t, "inputs.releaseNow", allocate["when"])
+}
+
 func TestApply_MergeStep_UnknownField(t *testing.T) {
 	_, err := Apply(baseFlow, []Op{{
 		Kind:   KindMergeStep,

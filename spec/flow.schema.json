@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$comment": "*.flow.yaml -- see PLAN.md section 8 and internal/domain/flow.go. Reserved future keys (when, parallel, foreach, retry, use, needs, datasets) are rejected today via additionalProperties: false.",
+  "$comment": "*.flow.yaml -- see PLAN.md section 8, section 34f, and internal/domain/flow.go. Reserved future keys (parallel, foreach, retry, use, needs, datasets) are rejected today via additionalProperties: false.",
   "title": "Flow file",
   "type": "object",
   "additionalProperties": false,
@@ -112,6 +112,11 @@
         "example": {
           "type": "string",
           "pattern": "^[a-z0-9._-]+$"
+        },
+        "when": {
+          "type": "string",
+          "minLength": 1,
+          "description": "CEL boolean (inputs/env/steps only); false skips this step without sending a request."
         },
         "input": {
           "type": "object"

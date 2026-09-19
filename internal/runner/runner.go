@@ -285,7 +285,7 @@ func (r *Runner) Run(ctx context.Context, f *domain.Flow, inputs map[string]any,
 		if ferr := r.finishStep(runCtx, ec, result); ferr != nil && engineErr == nil {
 			engineErr = ferr
 		}
-		stepsSoFar[step.ID] = raw
+		rememberStep(stepsSoFar, result, raw)
 
 		switch result.Status {
 		case domain.StepFailed, domain.StepErrored:
@@ -362,7 +362,7 @@ func (r *Runner) Run(ctx context.Context, f *domain.Flow, inputs map[string]any,
 		if ferr := r.finishStep(runCtx, ec, result); ferr != nil && engineErr == nil {
 			engineErr = ferr
 		}
-		stepsSoFar[step.ID] = raw
+		rememberStep(stepsSoFar, result, raw)
 
 		switch result.Status {
 		case domain.StepFailed, domain.StepErrored:
@@ -397,7 +397,7 @@ func (r *Runner) Run(ctx context.Context, f *domain.Flow, inputs map[string]any,
 		if ferr := r.finishStep(tdCtx, ec, result); ferr != nil && engineErr == nil {
 			engineErr = ferr
 		}
-		stepsSoFar[step.ID] = raw
+		rememberStep(stepsSoFar, result, raw)
 	}
 
 	run.Summary = runs.Summarize(run.Steps)
@@ -465,6 +465,22 @@ func skippedStepResult(step domain.Step, idx int, op *domain.Operation, now time
 		Started:   now,
 		Finished:  now,
 	}
+}
+
+// rememberStep records a just-executed step's raw value for later steps'
+// steps.<id> references, unless it was skipped by its own `when` evaluating
+// false (PLAN §34f.7): that step is deliberately left out of stepsSoFar
+// entirely (never assigned even an empty placeholder), so an unguarded
+// steps.<id> reference to it fails clearly at evaluation time instead of
+// silently seeing zero values (see expr.friendlyEvalErr). This is the only
+// way executeStep itself can return StepSkipped -- the other skip path
+// (skippedStepResult, for a step never reached at all) is a separate branch
+// in Run's phase loops that assigns stepsSoFar directly.
+func rememberStep(stepsSoFar map[string]expr.StepValue, result domain.StepResult, raw expr.StepValue) {
+	if result.Status == domain.StepSkipped && result.SkipReason == "when" {
+		return
+	}
+	stepsSoFar[result.StepID] = raw
 }
 
 // Call executes a single operation as an ad hoc one-step flow.

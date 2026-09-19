@@ -38,11 +38,28 @@ func (r *Runner) executeStep(ctx context.Context, ec *execCtx, step domain.Step,
 	var assertions []domain.AssertionResult
 	attempts := 0
 
-	r.emitStep(ec, step.ID, domain.StepResolving, 0)
-
 	fail := func(status domain.StepStatus, err error) (domain.StepResult, expr.StepValue) {
 		return assembleStep(ec, result, status, err, usedSecrets, req, haveReq, resp, assertions, outMap, attempts, started)
 	}
+
+	// `when` is checked before anything else: no resolving event, no
+	// request, no assertions, and (PLAN §34f.7) the step is left out of
+	// stepsSoFar entirely -- the caller (Run) skips its usual `stepsSoFar[id]
+	// = raw` assignment when it sees Status == StepSkipped coming back from
+	// here. An evaluation error fails the step exactly like a bad assert
+	// expression does.
+	if step.When != "" {
+		ok, werr := ec.eval.EvalBool(step.When, expr.Scope{Inputs: ec.run.Inputs, Env: ec.envVars, Steps: stepsSoFar})
+		if werr != nil {
+			return fail(domain.StepErrored, werr)
+		}
+		if !ok {
+			result.SkipReason = "when"
+			return fail(domain.StepSkipped, nil)
+		}
+	}
+
+	r.emitStep(ec, step.ID, domain.StepResolving, 0)
 
 	plainScope := func() expr.Scope {
 		return expr.Scope{Inputs: ec.run.Inputs, Env: ec.envVars, Steps: stepsSoFar}

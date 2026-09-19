@@ -102,13 +102,13 @@ func TestValidateYAML_LineNumbers(t *testing.T) {
 
 // TestValidateYAML_UnknownKeyRejection exercises the two cases the task
 // calls out explicitly: an unknown key on a flow step (a reserved future
-// key, "when") and an unknown top-level workspace key.
+// key, "parallel") and an unknown top-level workspace key.
 func TestValidateYAML_UnknownKeyRejection(t *testing.T) {
-	t.Run("flow step when", func(t *testing.T) {
-		src := []byte("version: 1\nid: f\nsteps:\n  - id: a\n    call: svc.op\n    when: \"${true}\"\n")
+	t.Run("flow step parallel", func(t *testing.T) {
+		src := []byte("version: 1\nid: f\nsteps:\n  - id: a\n    call: svc.op\n    parallel: true\n")
 		problems := spec.ValidateYAML(spec.Flow, src)
 		require.NotEmpty(t, problems)
-		assert.True(t, anyMessageContains(problems, `"when"`), "expected a problem naming the unknown \"when\" key: %+v", problems)
+		assert.True(t, anyMessageContains(problems, `"parallel"`), "expected a problem naming the unknown \"parallel\" key: %+v", problems)
 	})
 
 	t.Run("workspace unknown key", func(t *testing.T) {

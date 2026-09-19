@@ -576,6 +576,162 @@ steps:
 	assert.False(t, res.Valid)
 }
 
+// ---- `when` (PLAN §34f.7) -------------------------------------------------
+
+func TestValidateSource_WhenValid(t *testing.T) {
+	src := `version: 1
+inputs:
+  releaseNow: { type: boolean, default: false }
+steps:
+  - id: a
+    call: order-service.createOrder
+    when: inputs.releaseNow
+    body: { customerId: c1, type: QCOM, pickup: {lat: 1, lng: 2}, drop: {lat: 1, lng: 2} }
+`
+	_, res := validateSrc(t, src)
+	assert.True(t, res.Valid, "%+v", res.Diagnostics)
+}
+
+func TestValidateSource_WhenExprSyntax(t *testing.T) {
+	src := `version: 1
+steps:
+  - id: a
+    call: order-service.createOrder
+    when: "not ) valid ("
+    body: { customerId: c1, type: QCOM, pickup: {lat: 1, lng: 2}, drop: {lat: 1, lng: 2} }
+`
+	_, res := validateSrc(t, src)
+	d := diag(res, CodeExprSyntax)
+	require.NotNil(t, d, "%+v", res.Diagnostics)
+	assert.Equal(t, "a", d.StepID)
+	assert.False(t, res.Valid)
+}
+
+// TestValidateSource_WhenForwardReference confirms `when` is checked as a
+// step reference exactly like `until`/`assert`: it may only reference an
+// earlier step.
+func TestValidateSource_WhenForwardReference(t *testing.T) {
+	src := `version: 1
+steps:
+  - id: a
+    call: allocation-service.allocate
+    when: "steps.b.status == 200"
+    body: { orderId: o1 }
+  - id: b
+    call: order-service.createOrder
+    body: { customerId: c1, type: QCOM, pickup: {lat: 1, lng: 2}, drop: {lat: 1, lng: 2} }
+`
+	_, res := validateSrc(t, src)
+	d := diag(res, CodeStepOrder)
+	require.NotNil(t, d, "%+v", res.Diagnostics)
+	assert.False(t, res.Valid)
+}
+
+// TestValidateSource_WhenContextRoot confirms `when` runs before the
+// request, so it cannot see this step's own status/body/... (CONTEXT_ROOT),
+// the same restriction input/body/headers templates already have.
+func TestValidateSource_WhenContextRoot(t *testing.T) {
+	src := `version: 1
+steps:
+  - id: a
+    call: order-service.createOrder
+    when: "status == 200"
+    body: { customerId: c1, type: QCOM, pickup: {lat: 1, lng: 2}, drop: {lat: 1, lng: 2} }
+`
+	_, res := validateSrc(t, src)
+	d := diag(res, CodeContextRoot)
+	require.NotNil(t, d, "%+v", res.Diagnostics)
+	assert.False(t, res.Valid)
+}
+
+// TestValidateSource_WhenEvalErrorLikeBadAssert is not a runtime concern
+// here (this package only validates), but confirms `when: false` (a plain
+// boolean literal) is perfectly valid: no `${...}` wrapper is required or
+// even accepted differently from a plain CEL expression.
+func TestValidateSource_WhenLiteralFalse(t *testing.T) {
+	src := `version: 1
+steps:
+  - id: a
+    call: order-service.createOrder
+    when: "false"
+    body: { customerId: c1, type: QCOM, pickup: {lat: 1, lng: 2}, drop: {lat: 1, lng: 2} }
+`
+	_, res := validateSrc(t, src)
+	assert.True(t, res.Valid, "%+v", res.Diagnostics)
+}
+
+// ---- MAYBE_SKIPPED (PLAN §34f.7) ------------------------------------------
+
+func TestValidateSource_MaybeSkipped_Unguarded(t *testing.T) {
+	src := `version: 1
+steps:
+  - id: a
+    call: order-service.createOrder
+    when: "false"
+    body: { customerId: c1, type: QCOM, pickup: {lat: 1, lng: 2}, drop: {lat: 1, lng: 2} }
+  - id: b
+    call: order-service.createOrder
+    body: { customerId: "${steps.a.out.orderId}", type: QCOM, pickup: {lat: 1, lng: 2}, drop: {lat: 1, lng: 2} }
+`
+	_, res := validateSrc(t, src)
+	d := diag(res, CodeMaybeSkipped)
+	require.NotNil(t, d, "%+v", res.Diagnostics)
+	assert.Equal(t, domain.SeverityWarning, d.Severity)
+	assert.Equal(t, "b", d.StepID)
+	// A warning never makes a flow invalid.
+	assert.True(t, res.Valid, "%+v", res.Diagnostics)
+}
+
+func TestValidateSource_MaybeSkipped_GuardedWithHas(t *testing.T) {
+	src := `version: 1
+steps:
+  - id: a
+    call: order-service.createOrder
+    when: "false"
+    body: { customerId: c1, type: QCOM, pickup: {lat: 1, lng: 2}, drop: {lat: 1, lng: 2} }
+  - id: b
+    call: order-service.createOrder
+    assert:
+      - "!has(steps.a) || steps.a.status == 201"
+    body: { customerId: c2, type: QCOM, pickup: {lat: 1, lng: 2}, drop: {lat: 1, lng: 2} }
+`
+	_, res := validateSrc(t, src)
+	assert.Nil(t, diag(res, CodeMaybeSkipped), "%+v", res.Diagnostics)
+	assert.True(t, res.Valid, "%+v", res.Diagnostics)
+}
+
+func TestValidateSource_MaybeSkipped_GuardedWithOptionalSyntax(t *testing.T) {
+	src := `version: 1
+steps:
+  - id: a
+    call: order-service.createOrder
+    when: "false"
+    body: { customerId: c1, type: QCOM, pickup: {lat: 1, lng: 2}, drop: {lat: 1, lng: 2} }
+  - id: b
+    call: order-service.createOrder
+    assert:
+      - "steps.?a.status.orValue(0) != 201"
+    body: { customerId: c2, type: QCOM, pickup: {lat: 1, lng: 2}, drop: {lat: 1, lng: 2} }
+`
+	_, res := validateSrc(t, src)
+	assert.Nil(t, diag(res, CodeMaybeSkipped), "%+v", res.Diagnostics)
+}
+
+// TestValidateSource_MaybeSkipped_NoWhenNoWarning confirms an ordinary step
+// (no `when`) never triggers MAYBE_SKIPPED for a reference to it.
+func TestValidateSource_MaybeSkipped_NoWhenNoWarning(t *testing.T) {
+	_, res := validateSrc(t, baseFlowTemplate)
+	assert.Nil(t, diag(res, CodeMaybeSkipped), "%+v", res.Diagnostics)
+}
+
+func TestHasSkipGuard(t *testing.T) {
+	assert.True(t, hasSkipGuard("!has(steps.a) || steps.a.status == 200", "a"))
+	assert.True(t, hasSkipGuard("steps.?a.status.orValue(0) == 200", "a"))
+	assert.False(t, hasSkipGuard("steps.a.status == 200", "a"))
+	// A guard for a different step id doesn't count.
+	assert.False(t, hasSkipGuard("has(steps.other) && steps.a.status == 200", "a"))
+}
+
 func strRepeat(s string, n int) string {
 	out := make([]byte, 0, len(s)*n)
 	for i := 0; i < n; i++ {

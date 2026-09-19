@@ -130,6 +130,9 @@ func stringMapToAny(m map[string]string) map[string]any {
 // skipped by `from_step` without a resumed run to seed it from (PLAN §9).
 func ReferencedSteps(st domain.Step) []string {
 	var texts []string
+	if st.When != "" {
+		texts = append(texts, st.When)
+	}
 	texts = append(texts, collectTemplates(st.Input)...)
 	if st.Params != nil {
 		texts = append(texts, collectTemplates(st.Params.Path)...)

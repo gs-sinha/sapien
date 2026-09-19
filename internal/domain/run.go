@@ -75,11 +75,16 @@ type ErrorInfo struct {
 
 // StepResult is the persisted outcome of one step.
 type StepResult struct {
-	StepID     string            `json:"step_id"`
-	Index      int               `json:"index"`
-	Operation  string            `json:"operation,omitempty"`
-	Status     StepStatus        `json:"status"`
-	Attempts   int               `json:"attempts,omitempty"` // >1 when polled
+	StepID    string     `json:"step_id"`
+	Index     int        `json:"index"`
+	Operation string     `json:"operation,omitempty"`
+	Status    StepStatus `json:"status"`
+	Attempts  int        `json:"attempts,omitempty"` // >1 when polled
+	// SkipReason names why Status is skipped: "when" (this step's `when`
+	// evaluated false) is the only reason set today; a step skipped because
+	// an earlier step failed/errored, or because it fell outside a resumed
+	// run's window, leaves this empty.
+	SkipReason string            `json:"skip_reason,omitempty"`
 	Request    *RequestRecord    `json:"request,omitempty"`
 	Response   *ResponseRecord   `json:"response,omitempty"`
 	Timings    *Timings          `json:"timings,omitempty"`
