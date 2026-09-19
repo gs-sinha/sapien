@@ -341,7 +341,29 @@ export interface Step {
   until?: string;
   poll?: Poll;
   timeout?: string;
+  // ---- when + loop blocks (PLAN §34f items 7/8) ----
+  /** A CEL boolean (inputs/env/steps only); false records the step `skipped` (skip_reason "when") without running it. */
+  when?: string;
+  /** Set together with `steps` on a loop block: CEL over inputs/env/steps evaluating to a list; one iteration per element (`iter.item` inside). Exactly one of `foreach`/`repeat` is set on a block. */
+  foreach?: string;
+  repeat?: RepeatConfig;
+  /** Foreach's iteration cap (default 100, hard limit 1000); unused for `repeat`, which takes its own required `repeat.max`. */
+  max?: number;
+  /** CEL boolean checked after each iteration; true ends the loop then. */
+  break_when?: string;
+  /** "stop" (default) or "continue": whether a failed nested step ends the whole block or lets the loop keep going. */
+  on_error?: string;
+  /** A step with `steps` set and no `call`/`example` is a loop block (see `foreach`/`repeat` above) that runs these nested steps repeatedly instead of calling an operation itself. */
+  steps?: Step[];
   line?: number;
+}
+
+/** `repeat:` on a loop block step (PLAN §34f.8): re-run `steps` until `until` is true (checked after each iteration) or while `while` stays true (checked before each), up to `max` iterations (1..1000, required), waiting `interval` between them. */
+export interface RepeatConfig {
+  until?: string;
+  while?: string;
+  max: number;
+  interval?: string;
 }
 
 /**
@@ -362,7 +384,11 @@ export interface Flow {
   description?: string;
   tags?: string[];
   inputs?: Record<string, InputSpec>;
+  /** Runs before `steps`; addressable as steps.<id> like any other step (docs/flows.md "Setup and teardown"). No loop blocks allowed here (PLAN §34f.8). */
+  setup?: Step[];
   steps: Step[];
+  /** Always runs after `steps`, even on failure; its own failures never change the run's outcome. No loop blocks allowed here (PLAN §34f.8). */
+  teardown?: Step[];
   path?: string;
   /** A FlowOwnerKind; "" or absent for flows written before tiers existed. */
   owner_kind?: string;
@@ -491,6 +517,13 @@ export interface StepResult {
   error?: ErrorInfo;
   started?: string;
   finished?: string;
+  /** "setup" | "steps" | "teardown"; absent (empty on the wire) means "steps". */
+  phase?: string;
+  /** Set on a step whose request/response/extracted values were copied from `reused_from_run` (a resumed run) instead of being executed. */
+  reused?: boolean;
+  reused_from_run?: string;
+  /** Non-fatal notes, e.g. "step definition changed since the run it was reused from". */
+  warnings?: string[];
   // ---- loop blocks (PLAN §34f.8) ----
   /** 0-based iteration number for a nested execution inside a loop block; absent for a top-level step or a block's own result. */
   iteration?: number;
