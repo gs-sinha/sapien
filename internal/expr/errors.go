@@ -16,12 +16,12 @@ type celErr = cel.Error
 var undeclaredRefRe = regexp.MustCompile(`undeclared reference to '([^']+)'`)
 
 // checkErr translates a compile-time (parse or check) failure from the
-// shared env into a friendly errs.Expr, using hasCurrent to pick the right
-// "available" root list for an unknown-variable message.
-func checkErr(expr string, issues []*celErr, hasCurrent bool) error {
+// shared env into a friendly errs.Expr, using hasCurrent/hasIter to pick the
+// right "available" root list for an unknown-variable message.
+func checkErr(expr string, issues []*celErr, hasCurrent, hasIter bool) error {
 	first := issues[0]
 	if m := undeclaredRefRe.FindStringSubmatch(first.Message); m != nil {
-		e := errs.New(errs.Expr, "unknown variable `%s`; available: %s", m[1], strings.Join(availableRoots(hasCurrent), ", ")).
+		e := errs.New(errs.Expr, "unknown variable `%s`; available: %s", m[1], strings.Join(availableRoots(hasCurrent, hasIter), ", ")).
 			WithDetail("expr", expr)
 		if first.Location != nil {
 			e = e.WithDetail("position", first.Location.Column()+1)
@@ -76,7 +76,7 @@ func friendlyEvalErr(expr string, err error) error {
 	}
 	if m := noSuchAttrRe.FindStringSubmatch(msg); m != nil {
 		name := strings.TrimSpace(strings.Split(m[1], ",")[0])
-		if currentOnlyRoots[name] {
+		if currentOnlyRoots[name] || iterOnlyRoots[name] {
 			return unavailableRootErr(name, expr)
 		}
 	}
@@ -96,6 +96,11 @@ func containerPath(expr, key string) string {
 }
 
 func unavailableRootErr(root, expr string) error {
+	if root == "iter" {
+		return errs.New(errs.Expr,
+			"`iter` is only available inside a loop block's own nested-step expressions, not in its `foreach`/`when`").
+			WithDetail("expr", expr)
+	}
 	return errs.New(errs.Expr,
 		"`%s` is only available inside a step's assert/extract/until; use steps.<id>.%s", root, root).
 		WithDetail("expr", expr)

@@ -52,6 +52,11 @@ const (
 	// "guarded" means and its limits.
 	CodeMaybeSkipped = "MAYBE_SKIPPED"
 
+	// Loop blocks (PLAN §34f.8).
+	CodeBlockShape  = "BLOCK_SHAPE"   // a block/call-step's shape is malformed: mixed call-only and block-only fields, foreach+repeat both/neither set, repeat missing max/until/while, max out of 1..1000
+	CodeNestedLoop  = "NESTED_LOOP"   // a loop block nested inside another loop block
+	CodeLoopInPhase = "LOOP_IN_PHASE" // a loop block in setup/teardown
+
 	// Example resolution (PLAN §34b), checked by Materialize against an
 	// ExampleResolver.
 	CodeUnknownExample           = "UNKNOWN_EXAMPLE"
@@ -59,13 +64,12 @@ const (
 )
 
 // reservedKeys are the flow-DSL keys the schema rejects today but are
-// parked for a future version (PLAN.md §8). `setup`/`teardown` used to be
-// here too, and `when` more recently (PLAN §34f.7); they are implemented
-// now so a flow may use them freely. `foreach` is reserved here only until
-// PLAN §34f.8 (loop blocks) lands.
+// parked for a future version (PLAN.md §8). `setup`/`teardown`, `when`
+// (PLAN §34f.7), and `foreach`/`repeat`/`max`/`break_when`/`on_error`
+// (PLAN §34f.8) used to be here too; they are implemented now so a flow may
+// use them freely.
 var reservedKeys = map[string]bool{
 	"parallel": true,
-	"foreach":  true,
 	"retry":    true,
 	"use":      true,
 	"needs":    true,

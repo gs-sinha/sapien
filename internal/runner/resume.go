@@ -176,9 +176,9 @@ func findStepByID(src, id string) (domain.Step, bool) {
 	if err != nil {
 		return domain.Step{}, false
 	}
-	for _, st := range flow.AllSteps(f) {
-		if st.ID == id {
-			return st, true
+	for _, fs := range flow.AllSteps(f) {
+		if fs.Step.ID == id {
+			return fs.Step, true
 		}
 	}
 	return domain.Step{}, false

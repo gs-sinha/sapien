@@ -42,16 +42,16 @@ func (e *Evaluator) store(expr string, c *compiledExpr) {
 }
 
 // compile parses, checks, and plans expr, or returns it from cache.
-// hasCurrent only affects the "available roots" text of an unknown-variable
-// error; successful compilations are cached independently of it, since the
-// shared environment always declares every root.
-func (e *Evaluator) compile(expr string, hasCurrent bool) (*compiledExpr, error) {
+// hasCurrent/hasIter only affect the "available roots" text of an
+// unknown-variable error; successful compilations are cached independently
+// of them, since the shared environment always declares every root.
+func (e *Evaluator) compile(expr string, hasCurrent, hasIter bool) (*compiledExpr, error) {
 	if c, ok := e.lookup(expr); ok {
 		return c, nil
 	}
 	ast, iss := sharedEnv.Compile(expr)
 	if iss != nil && len(iss.Errors()) > 0 {
-		return nil, checkErr(expr, iss.Errors(), hasCurrent)
+		return nil, checkErr(expr, iss.Errors(), hasCurrent, hasIter)
 	}
 	prog, err := sharedEnv.Program(ast)
 	if err != nil {
@@ -64,15 +64,18 @@ func (e *Evaluator) compile(expr string, hasCurrent bool) (*compiledExpr, error)
 
 // checkScopeRoots reports a friendly error when expr statically references a
 // current-step-only root (status/headers/body/latency_ms/request/out) but
-// scope has no Current step.
+// scope has no Current step, or `iter` but scope has no Iter (PLAN §34f.8).
 func checkScopeRoots(ast *cel.Ast, expr string, s Scope) error {
-	if s.hasCurrent() {
+	if s.hasCurrent() && s.hasIter() {
 		return nil
 	}
 	var refs []Ref
 	visitRefs(ast.NativeRep().Expr(), &refs)
 	for _, r := range refs {
-		if currentOnlyRoots[r.Root] {
+		if currentOnlyRoots[r.Root] && !s.hasCurrent() {
+			return unavailableRootErr(r.Root, expr)
+		}
+		if iterOnlyRoots[r.Root] && !s.hasIter() {
 			return unavailableRootErr(r.Root, expr)
 		}
 	}
@@ -82,7 +85,7 @@ func checkScopeRoots(ast *cel.Ast, expr string, s Scope) error {
 // Eval compiles (or reuses a cached compilation of) expr and evaluates it
 // against s.
 func (e *Evaluator) Eval(expr string, s Scope) (any, error) {
-	c, err := e.compile(expr, s.hasCurrent())
+	c, err := e.compile(expr, s.hasCurrent(), s.hasIter())
 	if err != nil {
 		return nil, err
 	}

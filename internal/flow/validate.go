@@ -107,15 +107,17 @@ func (v *Validator) validateMaterialized(ctx context.Context, f *domain.Flow) (*
 	matF, mdiags := Materialize(ctx, f, v.resolver)
 	diags = append(diags, mdiags...)
 
-	// combined walks setup, then main steps, then teardown, in that
-	// execution order: a step's position in this slice is what
+	// combined walks setup, then main steps, then teardown, recursing one
+	// level into each loop block's own nested steps right after the block
+	// (see AllSteps): a step's position in this slice is what
 	// checkStepRef's ordering check (refIdx >= idx -> CodeStepOrder) is
 	// compared against, so "a step may reference any setup step and
 	// earlier steps in its own list; teardown may also reference every
 	// setup and main step" (PLAN §8, §9) falls out of plain position
 	// ordering without any extra rule: every setup position is less than
 	// every main position, and every main position is less than every
-	// teardown position.
+	// teardown position. PLAN §34f.8 relaxes ordering further for a step
+	// referencing a sibling inside its own block; see blockOf below.
 	combined := AllSteps(matF)
 
 	vd := &validation{
@@ -126,25 +128,31 @@ func (v *Validator) validateMaterialized(ctx context.Context, f *domain.Flow) (*
 		opByStepID:   map[string]*domain.Operation{},
 		fieldCache:   map[string]*fieldIndex{},
 		maybeSkipped: map[string]bool{},
+		blockOf:      map[string]string{},
 	}
-	for _, st := range combined {
+	for _, fs := range combined {
+		st := fs.Step
 		if st.ID != "" {
 			vd.allStepIDs = append(vd.allStepIDs, st.ID)
 		}
+		vd.blockOf[st.ID] = fs.Parent
 		// maybeSkipped records every step whose result may be absent from
 		// `steps` at run time even though it's a valid, in-order reference:
-		// today that's only a step with its own `when`; PLAN §34f.8 will add
-		// a step nested in a foreach/repeat block (which can run zero
-		// iterations). See checkStepRef's MAYBE_SKIPPED check.
-		if st.When != "" {
+		// a step with its own `when`, or (PLAN §34f.8) any step nested in a
+		// loop block, since the block may run zero iterations, stop early
+		// (break_when/on_error), or simply not have reached this iteration
+		// yet on the first pass. See checkStepRef's MAYBE_SKIPPED check.
+		if st.When != "" || fs.Parent != "" {
 			vd.maybeSkipped[st.ID] = true
 		}
 	}
 
-	// Step ids must be unique across setup, steps, and teardown together
-	// (PLAN §8), so seenIDs is not reset between lists.
+	// Step ids must be unique across setup, steps, teardown, and every
+	// nested block together (PLAN §8, §34f.8), so seenIDs is not reset
+	// between lists or between a block and its parent.
 	seenIDs := map[string]bool{}
-	for i, st := range combined {
+	for i, fs := range combined {
+		st := fs.Step
 		switch {
 		case !stepIDPattern.MatchString(st.ID):
 			diags = append(diags, domain.Diagnostic{
@@ -163,6 +171,14 @@ func (v *Validator) validateMaterialized(ctx context.Context, f *domain.Flow) (*
 		}
 		if _, exists := vd.stepIndex[st.ID]; !exists {
 			vd.stepIndex[st.ID] = i
+		}
+
+		diags = append(diags, checkBlockShape(fs)...)
+		if st.IsBlock() {
+			// A block never has call/example (BLOCK_SHAPE already reported
+			// it if it does); nothing further to resolve against the
+			// catalog for the block step itself.
+			continue
 		}
 
 		switch {
@@ -198,11 +214,28 @@ func (v *Validator) validateMaterialized(ctx context.Context, f *domain.Flow) (*
 		}
 	}
 
-	for i, st := range combined {
+	for i, fs := range combined {
+		st := fs.Step
 		if op := vd.opByStepID[st.ID]; op != nil {
 			diags = append(diags, checkBinding(st, op, vd.fieldsFor(op))...)
 		}
-		diags = append(diags, vd.checkExpressionsForStep(st, i)...)
+		if !st.IsBlock() {
+			// blockCtx is fs.Parent: a nested step's own when/input/body/
+			// headers/until/extract/assert may reference any sibling in the
+			// same block (subject to MAYBE_SKIPPED), and sees `loop`.
+			diags = append(diags, vd.checkExpressionsForStep(st, i, fs.Parent, fs.Parent != "")...)
+		} else {
+			// A block's own `when` (if any) behaves like any top-level
+			// step's: evaluated before any iteration, no sibling/loop
+			// access. Its block-only fields (foreach, repeat.until/while,
+			// break_when) get their own treatment (see checkBlockFields):
+			// foreach like `when` above, the other three with sameBlock
+			// access to the block's own children plus `loop`.
+			if st.When != "" {
+				diags = append(diags, vd.checkExprText(st.When, st, nil, i, false, false, false, st.Line, fs.Parent)...)
+			}
+			diags = append(diags, vd.checkBlockFields(st, i)...)
+		}
 		diags = append(diags, checkDurations(st)...)
 	}
 
@@ -262,6 +295,97 @@ func checkDurations(st domain.Step) []domain.Diagnostic {
 		check("poll.interval", st.Poll.Interval)
 		check("poll.timeout", st.Poll.Timeout)
 	}
+	if st.Repeat != nil {
+		check("repeat.interval", st.Repeat.Interval)
+	}
+	return diags
+}
+
+// callOnlyFieldsSet reports whether st sets any field that only makes sense
+// on a call step (never on a loop block): example, input, params, body,
+// headers, extract, assert, until, poll, timeout. `call` and `when` are
+// checked separately -- `call` because BLOCK_SHAPE names it specially, and
+// `when` because it is valid on both a block and a call step (PLAN §34f.7).
+func callOnlyFieldsSet(st domain.Step) bool {
+	return st.Example != "" || len(st.Input) > 0 || st.Params != nil || st.Body != nil ||
+		len(st.Headers) > 0 || len(st.Extract) > 0 || len(st.Assert) > 0 ||
+		st.Until != "" || st.Poll != nil || st.Timeout != ""
+}
+
+// blockOnlyFieldsSet reports whether st sets any field that only makes
+// sense on a loop block (never on a call step): foreach, repeat, max,
+// break_when, on_error.
+func blockOnlyFieldsSet(st domain.Step) bool {
+	return st.Foreach != "" || st.Repeat != nil || st.Max != 0 || st.BreakWhen != "" || st.OnError != ""
+}
+
+// checkBlockShape validates a step's shape (PLAN §34f.8): a block (Steps
+// set) must not carry a call-only field or `call` itself, must set exactly
+// one of foreach/repeat, and a repeat block must set max (1..1000) and at
+// least one of until/while; a call step (no Steps) must not carry a
+// block-only field; a block nested inside another block is NESTED_LOOP, and
+// a block in setup/teardown is LOOP_IN_PHASE (both checked here too, since
+// they are also a shape problem at heart).
+func checkBlockShape(fs FlatStep) []domain.Diagnostic {
+	st := fs.Step
+	var diags []domain.Diagnostic
+	shape := func(format string, args ...any) {
+		diags = append(diags, domain.Diagnostic{
+			Code: CodeBlockShape, Severity: domain.SeverityError,
+			Message: fmt.Sprintf(format, args...), Line: st.Line, StepID: st.ID,
+		})
+	}
+
+	if !st.IsBlock() {
+		if blockOnlyFieldsSet(st) {
+			shape("step `%s` sets a loop-only field (foreach/repeat/max/break_when/on_error) but has no `steps:`", st.ID)
+		}
+		return diags
+	}
+
+	if fs.Parent != "" {
+		diags = append(diags, domain.Diagnostic{
+			Code: CodeNestedLoop, Severity: domain.SeverityError,
+			Message: fmt.Sprintf("block `%s` is nested inside block `%s`; loop blocks cannot nest", st.ID, fs.Parent),
+			Line:    st.Line, StepID: st.ID,
+		})
+	}
+	if fs.Phase != "" {
+		diags = append(diags, domain.Diagnostic{
+			Code: CodeLoopInPhase, Severity: domain.SeverityError,
+			Message: fmt.Sprintf("block `%s` is in %s:, which may not contain loop blocks", st.ID, fs.Phase),
+			Line:    st.Line, StepID: st.ID,
+		})
+	}
+
+	if st.Call != "" {
+		shape("block `%s` sets `call`; a block runs its nested `steps:`, not an operation of its own", st.ID)
+	}
+	if callOnlyFieldsSet(st) {
+		shape("block `%s` sets a call-only field (example/input/params/body/headers/extract/assert/until/poll/timeout)", st.ID)
+	}
+
+	switch {
+	case st.Foreach == "" && st.Repeat == nil:
+		shape("block `%s` sets neither `foreach` nor `repeat`", st.ID)
+	case st.Foreach != "" && st.Repeat != nil:
+		shape("block `%s` sets both `foreach` and `repeat`; exactly one is allowed", st.ID)
+	case st.Foreach != "":
+		if st.Max != 0 && (st.Max < 1 || st.Max > 1000) {
+			shape("block `%s`: max must be 1..1000, got %d", st.ID, st.Max)
+		}
+	case st.Repeat != nil:
+		if st.Max != 0 {
+			shape("block `%s`: `max` applies to foreach; a repeat block sets `repeat.max` instead", st.ID)
+		}
+		if st.Repeat.Max < 1 || st.Repeat.Max > 1000 {
+			shape("block `%s`: repeat.max is required and must be 1..1000, got %d", st.ID, st.Repeat.Max)
+		}
+		if st.Repeat.Until == "" && st.Repeat.While == "" {
+			shape("block `%s`: repeat requires at least one of until/while", st.ID)
+		}
+	}
+
 	return diags
 }
 
@@ -283,6 +407,11 @@ type validation struct {
 	// maybeSkipped is the set of step ids a `steps.<id>` reference should be
 	// has()-guarded against (MAYBE_SKIPPED); see its assignment above.
 	maybeSkipped map[string]bool
+	// blockOf maps a step id to its immediately enclosing loop block's id,
+	// or "" for a top-level step or a block itself (PLAN §34f.8; blocks
+	// cannot nest). checkStepRef uses it to relax ordering between two
+	// steps of the same block.
+	blockOf map[string]string
 }
 
 func (vd *validation) fieldsFor(op *domain.Operation) *fieldIndex {
@@ -618,12 +747,16 @@ func isDigits(s string) bool {
 // checkExpressionsForStep collects every expression a step evaluates
 // (templates inside input/params/body/headers; bare CEL in until, extract,
 // and assert) and checks each one's syntax and static references.
-func (vd *validation) checkExpressionsForStep(st domain.Step, idx int) []domain.Diagnostic {
+// blockCtx and hasIter describe the step's own position (PLAN §34f.8): for
+// a nested step, blockCtx is its parent block's id (giving its own
+// expressions sameBlock access to sibling steps) and hasIter is true (`iter`
+// is available); both are "" / false for a top-level step.
+func (vd *validation) checkExpressionsForStep(st domain.Step, idx int, blockCtx string, hasIter bool) []domain.Diagnostic {
 	op := vd.opByStepID[st.ID]
 	var diags []domain.Diagnostic
 
 	add := func(text string, hasCurrent, secretAllowed bool, line int) {
-		diags = append(diags, vd.checkExprText(text, st, op, idx, hasCurrent, secretAllowed, line)...)
+		diags = append(diags, vd.checkExprText(text, st, op, idx, hasCurrent, secretAllowed, hasIter, line, blockCtx)...)
 	}
 	walk := func(v any, secretAllowed bool) {
 		for _, t := range collectTemplates(v) {
@@ -683,7 +816,32 @@ func (vd *validation) checkExpressionsForStep(st domain.Step, idx int) []domain.
 	return diags
 }
 
-func (vd *validation) checkExprText(text string, st domain.Step, op *domain.Operation, idx int, hasCurrent, secretAllowed bool, line int) []domain.Diagnostic {
+// checkBlockFields checks a loop block's own block-only expressions
+// (PLAN §34f.8): `foreach` is evaluated once, before any iteration, so it
+// gets the same (no sibling/loop) treatment as a top-level step's `when`;
+// `repeat.until`, `repeat.while`, and `break_when` are evaluated once per
+// iteration and so get sameBlock access to the block's own nested steps
+// (blockCtx = the block's own id) plus `loop`.
+func (vd *validation) checkBlockFields(st domain.Step, idx int) []domain.Diagnostic {
+	var diags []domain.Diagnostic
+	if st.Foreach != "" {
+		diags = append(diags, vd.checkExprText(st.Foreach, st, nil, idx, false, false, false, st.Line, vd.blockOf[st.ID])...)
+	}
+	if st.Repeat != nil {
+		if st.Repeat.Until != "" {
+			diags = append(diags, vd.checkExprText(st.Repeat.Until, st, nil, idx, false, false, true, st.Line, st.ID)...)
+		}
+		if st.Repeat.While != "" {
+			diags = append(diags, vd.checkExprText(st.Repeat.While, st, nil, idx, false, false, true, st.Line, st.ID)...)
+		}
+	}
+	if st.BreakWhen != "" {
+		diags = append(diags, vd.checkExprText(st.BreakWhen, st, nil, idx, false, false, true, st.Line, st.ID)...)
+	}
+	return diags
+}
+
+func (vd *validation) checkExprText(text string, st domain.Step, op *domain.Operation, idx int, hasCurrent, secretAllowed, hasIter bool, line int, blockCtx string) []domain.Diagnostic {
 	if err := expr.Parse(text); err != nil {
 		return []domain.Diagnostic{{
 			Code: CodeExprSyntax, Severity: domain.SeverityError,
@@ -692,18 +850,27 @@ func (vd *validation) checkExprText(text string, st domain.Step, op *domain.Oper
 	}
 	var diags []domain.Diagnostic
 	for _, r := range expr.Roots(text) {
-		diags = append(diags, vd.checkRef(r, st, op, idx, hasCurrent, secretAllowed, line, text)...)
+		diags = append(diags, vd.checkRef(r, st, op, idx, hasCurrent, secretAllowed, hasIter, line, text, blockCtx)...)
 	}
 	return diags
 }
 
-func (vd *validation) checkRef(r expr.Ref, st domain.Step, op *domain.Operation, idx int, hasCurrent, secretAllowed bool, line int, text string) []domain.Diagnostic {
+func (vd *validation) checkRef(r expr.Ref, st domain.Step, op *domain.Operation, idx int, hasCurrent, secretAllowed, hasIter bool, line int, text, blockCtx string) []domain.Diagnostic {
 	switch r.Root {
 	case "steps":
-		return vd.checkStepRef(r, st, idx, line, text)
+		return vd.checkStepRef(r, st, idx, line, text, blockCtx)
 	case "inputs":
 		return vd.checkInputRef(r, st, line)
 	case "env":
+		return nil
+	case "iter":
+		if !hasIter {
+			return []domain.Diagnostic{{
+				Code: CodeContextRoot, Severity: domain.SeverityError,
+				Message: "`iter` is only available inside a loop block's own nested-step expressions (or its break_when/repeat.until/repeat.while), not in its foreach/when",
+				Line:    line, StepID: st.ID,
+			}}
+		}
 		return nil
 	case "secret":
 		if secretAllowed {
@@ -744,7 +911,16 @@ func contextRootDiag(root string, st domain.Step, line int) []domain.Diagnostic 
 	}}
 }
 
-func (vd *validation) checkStepRef(r expr.Ref, st domain.Step, idx int, line int, text string) []domain.Diagnostic {
+// checkStepRef validates a steps.<id> reference. blockCtx is the checking
+// step's own block context (see checkExpressionsForStep/checkBlockFields):
+// when the referenced step is nested in the SAME block (blockCtx != "" and
+// vd.blockOf[r.StepID] == blockCtx), the usual forward-only ordering rule
+// is relaxed -- a sibling may reference another sibling in either
+// declaration order, since steps.<id> always resolves to that id's latest
+// execution, which on iteration N>=1 may be a sibling that (in declaration
+// order) comes "after" this one but already ran on iteration N-1 (PLAN
+// §34f.8). MAYBE_SKIPPED still applies to that reference like any other.
+func (vd *validation) checkStepRef(r expr.Ref, st domain.Step, idx int, line int, text, blockCtx string) []domain.Diagnostic {
 	refIdx, ok := vd.stepIndex[r.StepID]
 	if !ok {
 		return []domain.Diagnostic{{
@@ -755,7 +931,8 @@ func (vd *validation) checkStepRef(r expr.Ref, st domain.Step, idx int, line int
 			Suggestions: append([]string(nil), vd.allStepIDs...),
 		}}
 	}
-	if refIdx >= idx {
+	sameBlock := blockCtx != "" && vd.blockOf[r.StepID] == blockCtx
+	if refIdx >= idx && !sameBlock {
 		return []domain.Diagnostic{{
 			Code: CodeStepOrder, Severity: domain.SeverityError,
 			Message: fmt.Sprintf("step `%s` runs after `%s`", r.StepID, st.ID),
@@ -884,7 +1061,9 @@ func findDuplicateExtracts(f *domain.Flow) []domain.Diagnostic {
 }
 
 // findDuplicateExtractsIn checks one steps-list node (`setup:`, `steps:`,
-// or `teardown:`) for a duplicate key within any step's `extract:` mapping.
+// `teardown:`, or a loop block's own nested `steps:`) for a duplicate key
+// within any step's `extract:` mapping, recursing into a block's own
+// `steps:` node (PLAN §34f.8; blocks cannot nest, so one level suffices).
 func findDuplicateExtractsIn(stepsNode *yaml.Node) []domain.Diagnostic {
 	if stepsNode == nil || stepsNode.Kind != yaml.SequenceNode {
 		return nil
@@ -895,13 +1074,17 @@ func findDuplicateExtractsIn(stepsNode *yaml.Node) []domain.Diagnostic {
 		if stepNode.Kind != yaml.MappingNode {
 			continue
 		}
-		extractNode := mapValue(stepNode, "extract")
-		if extractNode == nil || extractNode.Kind != yaml.MappingNode {
-			continue
-		}
 		stepID := ""
 		if idNode := mapValue(stepNode, "id"); idNode != nil {
 			stepID = idNode.Value
+		}
+		if nestedSteps := mapValue(stepNode, "steps"); nestedSteps != nil {
+			diags = append(diags, findDuplicateExtractsIn(nestedSteps)...)
+			continue
+		}
+		extractNode := mapValue(stepNode, "extract")
+		if extractNode == nil || extractNode.Kind != yaml.MappingNode {
+			continue
 		}
 		seen := map[string]bool{}
 		for k := 0; k+1 < len(extractNode.Content); k += 2 {

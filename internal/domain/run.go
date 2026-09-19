@@ -102,6 +102,24 @@ type StepResult struct {
 	// Warnings carries non-fatal notes such as "step definition changed since
 	// the run it was reused from".
 	Warnings []string `json:"warnings,omitempty"`
+
+	// -- loop blocks (PLAN §34f.8) --
+
+	// Iteration is set on a nested execution inside a loop block: its
+	// 0-based iteration number. A pointer so iteration 0 serialises rather
+	// than being omitted; nil for a top-level/setup/teardown step and for a
+	// block's own StepResult.
+	Iteration *int `json:"iteration,omitempty"`
+	// Parent is the enclosing block's step id, for a nested execution;
+	// empty otherwise.
+	Parent string `json:"parent,omitempty"`
+	// Kind is "foreach" or "repeat" on a loop block's own StepResult;
+	// empty for a call step and for a nested execution.
+	Kind string `json:"kind,omitempty"`
+	// Count is set on a loop block's own StepResult: the number of
+	// iterations actually run (0 for an empty foreach list, or a repeat
+	// whose `while` was already false before the first iteration).
+	Count int `json:"count,omitempty"`
 }
 
 // RequestRecord is the (redacted) request as sent.
