@@ -15,6 +15,7 @@ import (
 	"github.com/gs-sinha/sapien/internal/domain"
 	"github.com/gs-sinha/sapien/internal/engine"
 	"github.com/gs-sinha/sapien/internal/errs"
+	flowpkg "github.com/gs-sinha/sapien/internal/flow"
 	"github.com/gs-sinha/sapien/internal/flowpatch"
 	"github.com/gs-sinha/sapien/internal/folder"
 )
@@ -851,6 +852,9 @@ type RunFlowInput struct {
 	// Detail bounds the result size (58-step field report: every full result
 	// blew the token ceiling). summary is the default.
 	Detail string `json:"detail,omitempty" jsonschema:"summary (default): one line per step, failed steps with their assertion details, no bodies; failed: bodies (capped) only for failed or errored steps; full: every body, capped, large"`
+	// Attach and Rebuild apply to ui steps (get_dsl_reference("ui")).
+	Attach  []string `json:"attach,omitempty" jsonschema:"ui steps: apps to drive as already running (e.g. under flutter run): no build, install, or clear_state"`
+	Rebuild bool     `json:"rebuild,omitempty" jsonschema:"ui steps: run each app's build command before installing, even if its APK exists"`
 }
 
 // runFlow's permission class is execute_read or execute_mutation, whichever
@@ -861,7 +865,17 @@ func (s *server) runFlow(ctx context.Context, req *sdkmcp.CallToolRequest, in Ru
 		return errResult(err), nil, nil
 	}
 	class := classExecuteRead
-	for _, st := range flow.Steps {
+	for _, fs := range flowpkg.AllSteps(flow) {
+		st := fs.Step
+		if st.IsBlock() {
+			continue // its nested steps are walked on their own
+		}
+		if st.IsUI() {
+			// Driving an app (logging in, tapping through screens)
+			// changes state like any write.
+			class = classExecuteMutation
+			break
+		}
 		op, err := s.engine().Catalog().ResolveOperation(ctx, st.Call)
 		if err != nil {
 			return errResult(err), nil, nil
@@ -887,6 +901,8 @@ func (s *server) runFlow(ctx context.Context, req *sdkmcp.CallToolRequest, in Ru
 		ResumeFrom:      in.ResumeFrom,
 		FromStep:        in.FromStep,
 		UntilStep:       in.UntilStep,
+		Attach:          in.Attach,
+		Rebuild:         in.Rebuild,
 	})
 	if err != nil {
 		return errResult(err), nil, nil

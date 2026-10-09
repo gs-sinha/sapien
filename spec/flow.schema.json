@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$comment": "*.flow.yaml -- see PLAN.md section 8, section 34f, and internal/domain/flow.go. Reserved future keys (parallel, retry, use, needs, datasets) are rejected today via additionalProperties: false. A step is either a call step or a loop block (has `steps:`); see $defs/step's if/then/else.",
+  "$comment": "*.flow.yaml -- see PLAN.md section 8, section 34f, and internal/domain/flow.go. Reserved future keys (parallel, retry, use, needs, datasets) are rejected today via additionalProperties: false. A step is a call step, a loop block (has `steps:`), or a ui step (has `ui:`); see $defs/step's if/then/else.",
   "title": "Flow file",
   "type": "object",
   "additionalProperties": false,
@@ -83,7 +83,7 @@
       }
     },
     "step": {
-      "description": "A step is a call step (an operation call) or a loop block (PLAN §34f.8): whichever it is decided purely by whether `steps:` is present.",
+      "description": "A step is a call step (an operation call), a loop block (PLAN §34f.8), or a ui step (drives a mobile app): a block has `steps:`, a ui step has `ui:`, anything else is a call step.",
       "if": {
         "type": "object",
         "required": [
@@ -94,7 +94,18 @@
         "$ref": "#/$defs/blockStep"
       },
       "else": {
-        "$ref": "#/$defs/callStep"
+        "if": {
+          "type": "object",
+          "required": [
+            "ui"
+          ]
+        },
+        "then": {
+          "$ref": "#/$defs/uiStep"
+        },
+        "else": {
+          "$ref": "#/$defs/callStep"
+        }
       }
     },
     "callStep": {
@@ -391,6 +402,236 @@
           "type": "number"
         }
       }
+    },
+    "uiStep": {
+      "description": "A ui step: runs `ui.actions` against the app `ui.app` (an entry of the environment's `apps:`) on a local Android device through Appium. when/extract/assert/timeout work as on a call step; inside its own extract/assert, `body` is {logs: {api, lines}, screen: {activity}, actions} and `out` holds `read` results.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "ui"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-zA-Z_][a-zA-Z0-9_-]*$"
+        },
+        "when": {
+          "type": "string",
+          "minLength": 1,
+          "description": "CEL boolean (inputs/env/steps only, plus loop.*/sibling access when nested in a block); false skips this step without sending a request."
+        },
+        "extract": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "assert": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/assertion"
+          }
+        },
+        "timeout": {
+          "type": "string",
+          "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$"
+        },
+        "ui": {
+          "$ref": "#/$defs/ui"
+        }
+      }
+    },
+    "ui": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "app",
+        "actions"
+      ],
+      "properties": {
+        "app": {
+          "type": "string",
+          "minLength": 1
+        },
+        "actions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/uiAction"
+          }
+        }
+      }
+    },
+    "uiSelector": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1
+        },
+        "text_contains": {
+          "type": "string",
+          "minLength": 1
+        },
+        "hint": {
+          "type": "string",
+          "minLength": 1
+        },
+        "xpath": {
+          "type": "string",
+          "minLength": 1
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "uiActionArgs": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1
+        },
+        "text_contains": {
+          "type": "string",
+          "minLength": 1
+        },
+        "hint": {
+          "type": "string",
+          "minLength": 1
+        },
+        "xpath": {
+          "type": "string",
+          "minLength": 1
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "clear_state": {
+          "type": "boolean"
+        },
+        "grant_permissions": {
+          "type": "boolean"
+        },
+        "url": {
+          "type": "string",
+          "minLength": 1
+        },
+        "into": {
+          "$ref": "#/$defs/uiSelector"
+        },
+        "clear": {
+          "type": "boolean"
+        },
+        "direction": {
+          "enum": [
+            "up",
+            "down",
+            "left",
+            "right"
+          ]
+        },
+        "max_swipes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50
+        },
+        "timeout": {
+          "type": "string",
+          "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$"
+        },
+        "gone": {
+          "type": "boolean"
+        },
+        "as": {
+          "type": "string",
+          "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "eq": {
+          "type": "string"
+        },
+        "contains": {
+          "type": "string"
+        },
+        "matches": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      }
+    },
+    "uiAction": {
+      "description": "One action: a bare `back`/`stop`/`launch`/`screenshot`/`hide_keyboard`, or a one-key mapping `<kind>: {...}` (deeplink and screenshot also accept a plain string). Per-kind argument rules are checked by the Go validator (UI_ACTION).",
+      "oneOf": [
+        {
+          "enum": [
+            "back",
+            "stop",
+            "launch",
+            "screenshot",
+            "hide_keyboard"
+          ]
+        },
+        {
+          "type": "object",
+          "minProperties": 1,
+          "maxProperties": 1,
+          "propertyNames": {
+            "enum": [
+              "launch",
+              "stop",
+              "deeplink",
+              "tap",
+              "type",
+              "clear",
+              "swipe",
+              "scroll_to",
+              "back",
+              "hide_keyboard",
+              "wait_for",
+              "read",
+              "screenshot",
+              "assert_visible",
+              "assert_not_visible",
+              "assert_text"
+            ]
+          },
+          "additionalProperties": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/uiActionArgs"
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      ]
     }
   }
 }

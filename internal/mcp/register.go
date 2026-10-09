@@ -68,7 +68,7 @@ func (srv *server) registerTools(s *sdkmcp.Server) {
 
 	sdkmcp.AddTool(s, &sdkmcp.Tool{
 		Name:        "get_dsl_reference",
-		Description: "Get a Sapien reference with worked examples: sapien (what Sapien is and what you can do with it), flow (the flow DSL, including soft assertions), memory, expressions, or service (how to lay out and register a service's api/ package so Sapien can index it).",
+		Description: "Get a Sapien reference with worked examples: sapien (what Sapien is and what you can do with it), flow (the flow DSL, including soft assertions), ui (ui steps that drive a mobile app on a local emulator), memory, expressions, or service (how to lay out and register a service's api/ package so Sapien can index it).",
 	}, srv.getDSLReference)
 
 	sdkmcp.AddTool(s, &sdkmcp.Tool{

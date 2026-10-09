@@ -28,6 +28,9 @@ const (
 // StepResult alongside the raw (unredacted) expr.StepValue later steps use
 // to reference this one as steps.<id>.
 func (r *Runner) executeStep(ctx context.Context, ec *execCtx, step domain.Step, idx int, op *domain.Operation, stepsSoFar map[string]expr.StepValue) (domain.StepResult, expr.StepValue) {
+	if step.IsUI() {
+		return r.executeUIStep(ctx, ec, step, idx, stepsSoFar)
+	}
 	started := ec.now()
 	result := domain.StepResult{StepID: step.ID, Index: idx, Operation: op.ID, Started: started}
 	outMap := map[string]any{}
@@ -634,6 +637,10 @@ func matchesString(v any) string {
 func evalAssertion(eval *expr.Evaluator, compiled expr.Compiled, scope expr.Scope, op *domain.Operation, extractErrs map[string]error) domain.AssertionResult {
 	ar := domain.AssertionResult{Expr: compiled.Expr, Message: compiled.Message}
 
+	if compiled.Kind == "schema" && op == nil {
+		ar.Message = "schema: contract needs an operation; a ui step has none"
+		return ar
+	}
 	if compiled.Kind == "schema" {
 		status := 0
 		if scope.Current != nil {

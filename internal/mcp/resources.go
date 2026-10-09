@@ -175,6 +175,7 @@ func renderMemoryMarkdown(m *domain.Memory) string {
 var referenceTopics = map[string]string{
 	"sapien":      "sapien",
 	"flow-dsl":    "flow",
+	"ui":          "ui",
 	"memory":      "memory",
 	"expressions": "expressions",
 	"service":     "service",

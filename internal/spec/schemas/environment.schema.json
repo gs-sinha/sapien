@@ -22,9 +22,30 @@
       "additionalProperties": { "$ref": "#/$defs/auth" }
     },
     "transport": { "$ref": "#/$defs/transport" },
-    "redaction": { "$ref": "#/$defs/redaction" }
+    "redaction": { "$ref": "#/$defs/redaction" },
+    "apps": {
+      "type": "object",
+      "description": "Mobile apps ui steps can drive in this environment, keyed by the name a step's `ui.app` uses.",
+      "additionalProperties": { "$ref": "#/$defs/app" }
+    }
   },
   "$defs": {
+    "app": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["package"],
+      "properties": {
+        "platform": { "enum": ["android"] },
+        "package": { "type": "string", "minLength": 1 },
+        "activity": { "type": "string", "minLength": 1 },
+        "repo": { "type": "string", "minLength": 1, "description": "App source checkout, relative to the workspace root or absolute." },
+        "build": { "type": "string", "minLength": 1, "description": "Shell command run in repo to build the APK, e.g. `fvm flutter build apk --debug --flavor stag -t lib/main_stag.dart`." },
+        "apk": { "type": "string", "minLength": 1, "description": "Built APK, relative to repo or absolute." },
+        "log_format": { "enum": ["rider-box", "overwatch-api-logger", "raw"] },
+        "log_tag": { "type": "string", "minLength": 1 },
+        "permissions": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+      }
+    },
     "serviceEnv": {
       "type": "object",
       "additionalProperties": false,

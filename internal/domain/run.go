@@ -102,6 +102,9 @@ type StepResult struct {
 	// Warnings carries non-fatal notes such as "step definition changed since
 	// the run it was reused from".
 	Warnings []string `json:"warnings,omitempty"`
+	// Artifacts are files a ui step left behind (screenshots, its logcat
+	// slice, the page source of a failing screen).
+	Artifacts []StepArtifact `json:"artifacts,omitempty"`
 
 	// -- loop blocks (PLAN §34f.8) --
 

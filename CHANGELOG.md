@@ -6,6 +6,30 @@ and phase numbers refer to PLAN.md §34's roadmap.
 
 ## [Unreleased]
 
+### Added
+- **UI steps: drive a mobile app from a flow.** A step with `ui: {app,
+  actions}` runs actions (`launch`, `tap`, `type`, `wait_for`, `read`,
+  `scroll_to`, `swipe`, `deeplink`, `screenshot`, `assert_visible`,
+  `assert_text`, ...) against an Android app on a local emulator through
+  Appium, in the same flow as API calls, sharing `steps.<id>` both ways.
+  Inside a ui step, `body.logs.api` is the app's own network calls parsed
+  from logcat (`log_format: rider-box | overwatch-api-logger | raw`),
+  `body.logs.lines` the raw lines, `out` what `read` actions saw. One
+  device session per run; screenshots, the step's logcat, and a failing
+  screen's page source are saved under `.sapien/artifacts/<run_id>/` and
+  listed on the step (`artifacts`, migration 010). Environments gain
+  `apps:` (package, repo, build command, APK, log format, permissions);
+  per-machine settings live in `.sapien/ui.yaml`. Sapien builds an app
+  when its APK is missing (or with `flow run --rebuild`), installs it when
+  it changed, and drives an app already running under `flutter run` with
+  `--attach <app>`. New reference topic `get_dsl_reference("ui")`; new
+  `sapien device doctor|snapshot|build`. Android only for now.
+
+### Fixed
+- MCP `run_flow` resolved an operation for every top-level step to pick its
+  permission class, so a flow with a loop block failed before running; it
+  now walks setup, steps, teardown, and nested steps, skipping blocks.
+
 ## [1.4.1] - 2026-09-20
 
 ### Added

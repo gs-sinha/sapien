@@ -184,6 +184,12 @@ func (v *Validator) validateMaterialized(ctx context.Context, f *domain.Flow) (*
 			// catalog for the block step itself.
 			continue
 		}
+		if st.IsUI() {
+			// A ui step drives an app on a device; there is no operation
+			// to resolve against the catalog.
+			diags = append(diags, checkUIStep(st)...)
+			continue
+		}
 
 		switch {
 		case st.Call == "" && st.Example == "":
@@ -787,6 +793,17 @@ func (vd *validation) checkExpressionsForStep(st domain.Step, idx int, blockCtx 
 	}
 	walk(st.Body, false, "body")
 	walk(stringMapToAny(st.Headers), true, "headers")
+	tmpls := uiActionTemplates(st)
+	fields := make([]string, 0, len(tmpls))
+	for field := range tmpls {
+		fields = append(fields, field)
+	}
+	sort.Strings(fields)
+	for _, field := range fields {
+		for _, v := range tmpls[field] {
+			walk(v, false, field)
+		}
+	}
 
 	if st.Until != "" {
 		add(st.Until, "until", true, false, st.Line)
@@ -958,14 +975,21 @@ func (vd *validation) checkOutRef(r expr.Ref, st domain.Step, line int) []domain
 	if _, ok := st.Extract[name]; ok {
 		return nil
 	}
-	names := make([]string, 0, len(st.Extract))
+	reads := uiReadNames(st)
+	for _, n := range reads {
+		if n == name {
+			return nil
+		}
+	}
+	names := make([]string, 0, len(st.Extract)+len(reads))
 	for n := range st.Extract {
 		names = append(names, n)
 	}
+	names = append(names, reads...)
 	sort.Strings(names)
 	return []domain.Diagnostic{{
 		Code: CodeUnknownOut, Severity: domain.SeverityError,
-		Message:     fmt.Sprintf("out.%s is not extracted by step `%s`; add it to `extract:` or fix the name", name, st.ID),
+		Message:     fmt.Sprintf("out.%s is not extracted by step `%s`; add it to `extract:` (or, on a ui step, a `read` action's `as:`) or fix the name", name, st.ID),
 		Line:        line,
 		StepID:      st.ID,
 		Suggestions: names,

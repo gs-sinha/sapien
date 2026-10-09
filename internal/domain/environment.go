@@ -53,5 +53,8 @@ type Environment struct {
 	Auth       map[string]Auth       `yaml:"auth,omitempty" json:"auth,omitempty"` // "default" or a service name
 	Transport  *Transport            `yaml:"transport,omitempty" json:"transport,omitempty"`
 	Redaction  *Redaction            `yaml:"redaction,omitempty" json:"redaction,omitempty"`
-	Path       string                `yaml:"-" json:"path,omitempty"`
+	// Apps are the mobile apps ui steps can drive in this environment,
+	// keyed by the name a step's `ui.app` uses.
+	Apps map[string]AppConfig `yaml:"apps,omitempty" json:"apps,omitempty"`
+	Path string               `yaml:"-" json:"path,omitempty"`
 }

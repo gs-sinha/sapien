@@ -1,0 +1,48 @@
+I/flutter (4242): app started
+D/OtherTag ( 100): noise
+I/flutter (4242): [38;5;12m┌───────────────────────────────────────[0m
+I/flutter (4242): [38;5;12m│ #0   _logApiDebug (package:kaptaan/core/network/network_api_service.dart:88:12)[0m
+I/flutter (4242): [38;5;12m├┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄[0m
+I/flutter (4242): [38;5;12m│ 💡 ╔═══════════════ [HTTP] API REQUEST-RESPONSE LOG ════════════════════════[0m
+I/flutter (4242): [38;5;12m│ 💡 ║ API POST /auth[0m
+I/flutter (4242): [38;5;12m│ 💡 ╠═════════════════════════════════════════════[0m
+I/flutter (4242): [38;5;12m│ 💡 ║ Request URL: https://0rqgkkpp8j.execute-api.us-east-2.amazonaws.com/v1/auth[0m
+I/flutter (4242): [38;5;12m│ 💡 ║ Request headers:[0m
+I/flutter (4242): [38;5;12m│ 💡 ║   {[0m
+I/flutter (4242): [38;5;12m│ 💡 ║     "Content-Type": "application/json"[0m
+I/flutter (4242): [38;5;12m│ 💡 ║   }[0m
+I/flutter (4242): [38;5;12m│ 💡 ║ Request body:[0m
+I/flutter (4242): [38;5;12m│ 💡 ║   {[0m
+I/flutter (4242): [38;5;12m│ 💡 ║     "request_type": "create_auth",[0m
+I/flutter (4242): [38;5;12m│ 💡 ║     "payload": {[0m
+I/flutter (4242): [38;5;12m│ 💡 ║       "scope": "rider",[0m
+I/flutter (4242): [38;5;12m│ 💡 ║       "username": "8445544024"[0m
+I/flutter (4242): [38;5;12m│ 💡 ║     }[0m
+I/flutter (4242): [38;5;12m│ 💡 ║   }[0m
+I/flutter (4242): [38;5;12m│ 💡 ╠═════════════════════════════════════════════[0m
+I/flutter (4242): [38;5;12m│ 💡 ║ Status: 200[0m
+I/flutter (4242): [38;5;12m│ 💡 ║ Response:[0m
+I/flutter (4242): [38;5;12m│ 💡 ║   {[0m
+I/flutter (4242): [38;5;12m│ 💡 ║     "session": "abc"[0m
+I/flutter (4242): [38;5;12m│ 💡 ║   }[0m
+I/flutter (4242): [38;5;12m│ 💡 ╚═════════════════════════════════════════════[0m
+I/flutter (4242): [38;5;12m└───────────────────────────────────────[0m
+E/flutter (4242): [38;5;12m┌───────────────────────────────────────[0m
+E/flutter (4242): [38;5;12m│ #0   _logApiDebug (package:kaptaan/core/network/network_api_service.dart:88:12)[0m
+E/flutter (4242): [38;5;12m├┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄[0m
+E/flutter (4242): [38;5;12m│ ⛔ ╔═══════════════ [DIO] API REQUEST-RESPONSE LOG ════════════════════════[0m
+E/flutter (4242): [38;5;12m│ ⛔ ║ API GET /rider/profile[0m
+E/flutter (4242): [38;5;12m│ ⛔ ╠═════════════════════════════════════════════[0m
+E/flutter (4242): [38;5;12m│ ⛔ ║ Request URL: https://0rqgkkpp8j.execute-api.us-east-2.amazonaws.com/v1/rider/profile?x=1[0m
+E/flutter (4242): [38;5;12m│ ⛔ ║ Request headers:[0m
+E/flutter (4242): [38;5;12m│ ⛔ ║   {[0m
+E/flutter (4242): [38;5;12m│ ⛔ ║     "Authorization": "Bearer t0k"[0m
+E/flutter (4242): [38;5;12m│ ⛔ ║   }[0m
+E/flutter (4242): [38;5;12m│ ⛔ ╠═════════════════════════════════════════════[0m
+E/flutter (4242): [38;5;12m│ ⛔ ║ Status: 401[0m
+E/flutter (4242): [38;5;12m│ ⛔ ║ Response:[0m
+E/flutter (4242): [38;5;12m│ ⛔ ║   {[0m
+E/flutter (4242): [38;5;12m│ ⛔ ║     "message": "Unauthorized"[0m
+E/flutter (4242): [38;5;12m│ ⛔ ║   }[0m
+E/flutter (4242): [38;5;12m│ ⛔ ╚═════════════════════════════════════════════[0m
+E/flutter (4242): [38;5;12m└───────────────────────────────────────[0m
