@@ -20,12 +20,16 @@
 #   SAPIEN_PREFIX    install directory (default: the existing sapien's
 #                    directory, if any, else /usr/local/bin when writable,
 #                    otherwise ~/.local/bin); same as --prefix
+#   SAPIEN_APPIUM    "yes" or "no": same as --with-appium / --no-appium
 #
 # Flags:
 #   --prefix <dir>   install into <dir> instead of the default
 #   --version <ver>  same as SAPIEN_VERSION
 #   --force          install even if an existing sapien on PATH is already
 #                    at this version
+#   --with-appium    install Appium and its UiAutomator2 driver (for ui steps)
+#                    without asking
+#   --no-appium      skip the Appium question
 #   -h, --help       print this help
 #
 # POSIX sh only: no bashisms, so this also runs under dash/ash (Alpine, CI
@@ -36,6 +40,7 @@ REPO="gs-sinha/sapien"
 VERSION="${SAPIEN_VERSION:-}"
 PREFIX="${SAPIEN_PREFIX:-}"
 FORCE=0
+APPIUM="${SAPIEN_APPIUM:-}"
 # Tracks whether PREFIX came from the user (flag or env) rather than this
 # script's own default, so the dev-build-symlink refusal below knows
 # whether the user has taken responsibility for where this lands.
@@ -55,6 +60,9 @@ Usage: install.sh [--prefix <dir>] [--version <ver>] [--force]
                    env SAPIEN_VERSION
   --force          install even if an existing sapien on PATH is already
                    at this version
+  --with-appium    install Appium + the UiAutomator2 driver for ui steps
+                   without asking; env SAPIEN_APPIUM=yes
+  --no-appium      skip the Appium question; env SAPIEN_APPIUM=no
 EOF
 }
 
@@ -73,6 +81,14 @@ while [ $# -gt 0 ]; do
       ;;
     --force)
       FORCE=1
+      shift
+      ;;
+    --with-appium)
+      APPIUM=yes
+      shift
+      ;;
+    --no-appium)
+      APPIUM=no
       shift
       ;;
     -h | --help)
@@ -318,6 +334,72 @@ case "$status_json" in
     fi
     ;;
 esac
+
+# --- Appium, for ui steps (optional) ------------------------------------------
+#
+# A flow's ui steps drive an Android app through Appium and its UiAutomator2
+# driver. Both are npm installs, so this offers them here; the rest (Android
+# SDK, JDK, an emulator) is left to `sapien device doctor`, which names the
+# fix for each gap. The script usually arrives on stdin (curl | sh), so the
+# question is read from /dev/tty, and with no terminal it is not asked.
+appium_ready() {
+  command -v appium >/dev/null 2>&1 \
+    && appium driver list --installed --json 2>/dev/null | grep -q uiautomator2
+}
+
+setup_appium() {
+  if ! command -v npm >/dev/null 2>&1; then
+    echo "install.sh: warning: npm not found; install Node 22 (e.g. \`nvm install 22\`), then: npm install -g appium && appium driver install uiautomator2" >&2
+    return 0
+  fi
+  # Appium 3 needs Node 20.19+ (or 22.12+); an older Node gets Appium 2 and
+  # the last UiAutomator2 driver release that supports it.
+  appium_pkg="appium"
+  driver_pkg="uiautomator2"
+  node_ver="$(node --version 2>/dev/null | sed 's/^v//')"
+  node_major="${node_ver%%.*}"
+  node_minor="${node_ver#*.}"; node_minor="${node_minor%%.*}"
+  case "$node_major" in '' | *[!0-9]*) node_major=0 ;; esac
+  case "$node_minor" in '' | *[!0-9]*) node_minor=0 ;; esac
+  if [ "$node_major" -lt 18 ]; then
+    echo "install.sh: warning: Appium needs Node 18+ (found ${node_ver:-none}); \`nvm install 22 && nvm use 22\`, then re-run this with --with-appium" >&2
+    return 0
+  fi
+  if [ "$node_major" -lt 20 ] || { [ "$node_major" -eq 20 ] && [ "$node_minor" -lt 19 ]; }; then
+    appium_pkg="appium@2"
+    driver_pkg="uiautomator2@3.10.0"
+  fi
+  if ! command -v appium >/dev/null 2>&1; then
+    say "npm install -g $appium_pkg"
+    npm install -g "$appium_pkg" || {
+      echo "install.sh: warning: npm install -g $appium_pkg failed; run it yourself (a system Node may need sudo)" >&2
+      return 0
+    }
+  fi
+  say "appium driver install $driver_pkg"
+  appium driver install "$driver_pkg" \
+    || echo "install.sh: warning: driver install failed; run \`appium driver install $driver_pkg\` yourself" >&2
+}
+
+# A release older than ui steps (--version v1.4.1) has no `device` command.
+if [ "$APPIUM" != "no" ] && "$PREFIX/sapien" device --help >/dev/null 2>&1 && ! appium_ready; then
+  if [ -z "$APPIUM" ] && ( : </dev/tty ) 2>/dev/null; then
+    echo
+    say "ui steps (driving an Android app from a flow) need Appium and its UiAutomator2 driver"
+    printf 'install.sh: install them now with npm? [y/N] ' >/dev/tty
+    read -r answer </dev/tty || answer=""
+    case "$answer" in
+      y | Y | yes | YES) APPIUM=yes ;;
+    esac
+  fi
+  if [ "$APPIUM" = "yes" ]; then
+    setup_appium
+    say "checking the rest of the ui-step setup (Android SDK, JDK, emulator):"
+    "$PREFIX/sapien" device doctor || true
+  else
+    say "for ui steps later: re-run this with --with-appium, or see \`sapien device doctor\`"
+  fi
+fi
 
 cat <<'EOF'
 

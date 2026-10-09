@@ -6,6 +6,8 @@ and phase numbers refer to PLAN.md §34's roadmap.
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-10-09
+
 ### Added
 - **UI steps: drive a mobile app from a flow.** A step with `ui: {app,
   actions}` runs actions (`launch`, `tap`, `type`, `wait_for`, `read`,
@@ -24,6 +26,13 @@ and phase numbers refer to PLAN.md §34's roadmap.
   it changed, and drives an app already running under `flutter run` with
   `--attach <app>`. New reference topic `get_dsl_reference("ui")`; new
   `sapien device doctor|snapshot|build`. Android only for now.
+- **`install.sh` offers to set up Appium for ui steps.** When Appium or its
+  UiAutomator2 driver is missing it asks (from the terminal, so `curl | sh`
+  still works) whether to `npm install` them, picking Appium 2 or 3 to
+  match the Node version, then runs `sapien device doctor` for the rest
+  (Android SDK, JDK, emulator). `--with-appium` / `--no-appium` (env
+  `SAPIEN_APPIUM=yes|no`) answer it ahead of time; with no terminal it
+  only prints how to set it up later.
 
 ### Fixed
 - MCP `run_flow` resolved an operation for every top-level step to pick its
