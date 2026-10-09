@@ -2,14 +2,18 @@ package local
 
 import (
 	"context"
+	"path/filepath"
+	"sort"
 
 	"github.com/gs-sinha/sapien/internal/catalog"
+	"github.com/gs-sinha/sapien/internal/device"
 	"github.com/gs-sinha/sapien/internal/domain"
 	"github.com/gs-sinha/sapien/internal/engine"
 	"github.com/gs-sinha/sapien/internal/env"
 	"github.com/gs-sinha/sapien/internal/errs"
 	"github.com/gs-sinha/sapien/internal/flow"
 	"github.com/gs-sinha/sapien/internal/runner"
+	"github.com/gs-sinha/sapien/internal/workspace"
 )
 
 // runnerAPI implements engine.RunnerAPI over a Local (PLAN §9).
@@ -100,6 +104,8 @@ func (l *Local) runFlow(ctx context.Context, f *domain.Flow, opts engine.RunOpti
 		ContinueOnFailure: opts.ContinueOnFailure,
 		AllowProduction:   opts.AllowProduction,
 		Trigger:           opts.Trigger,
+		UIDevice:          l.uiDeviceFactory(resolved, opts),
+		ArtifactsDir:      filepath.Join(l.ws.Dir, domain.WorkspaceStateDir, "artifacts"),
 	}
 	resume, err := l.resumeFor(ctx, f, opts)
 	if err != nil {
@@ -157,4 +163,49 @@ func (l *Local) resolveRunEnv(ctx context.Context, envName string) (*env.Resolve
 // *runner.Runner of their own.
 func RunError(run *domain.Run) error {
 	return runner.ErrorFor(run)
+}
+
+// uiDeviceFactory opens the local Android device for a run's ui steps:
+// apps from the resolved environment, machine settings from
+// .sapien/ui.yaml, plus this run's --attach/--rebuild.
+func (l *Local) uiDeviceFactory(resolved *env.Resolved, opts engine.RunOptions) func(context.Context) (device.Device, error) {
+	return func(context.Context) (device.Device, error) {
+		stateDir := filepath.Join(l.ws.Dir, domain.WorkspaceStateDir)
+		local, err := device.LoadLocalConfig(stateDir)
+		if err != nil {
+			return nil, errs.Wrap(errs.Invalid, err, "reading %s", filepath.Join(stateDir, device.LocalConfigFile))
+		}
+		progress := opts.Progress
+		if progress == nil && l.logger != nil {
+			progress = func(msg string) { l.logger.Info(msg, "component", "device") }
+		}
+		return device.NewManager(device.Options{
+			WorkspaceDir: l.ws.Dir,
+			StateDir:     stateDir,
+			EnvName:      resolved.Env.Name,
+			Apps:         resolved.Env.Apps,
+			Local:        local,
+			Attach:       opts.Attach,
+			Rebuild:      opts.Rebuild,
+			Progress:     progress,
+			EnvsWithApp:  l.envsWithApp,
+		}), nil
+	}
+}
+
+// envsWithApp lists the workspace environments whose apps: define app,
+// sorted; nil when none do or the environments cannot be read.
+func (l *Local) envsWithApp(app string) []string {
+	envs, err := workspace.ListEnvironments(l.ws)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, e := range envs {
+		if _, ok := e.Apps[app]; ok {
+			out = append(out, e.Name)
+		}
+	}
+	sort.Strings(out)
+	return out
 }

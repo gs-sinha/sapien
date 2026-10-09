@@ -394,7 +394,7 @@ func compactJSON(v any) string {
 
 // GetDSLReferenceInput is get_dsl_reference's arguments.
 type GetDSLReferenceInput struct {
-	Topic string `json:"topic,omitempty" jsonschema:"sapien|flow|memory|expressions|service; default flow. sapien = what Sapien is and what you can do with it (read this first in a new session). service = how to lay out a service's api/ package (openapi.yaml, service.yaml, docs/) so Sapien can index it, and how to register it"`
+	Topic string `json:"topic,omitempty" jsonschema:"sapien|flow|ui|memory|expressions|service; default flow. ui = ui steps that drive a mobile app on a local emulator. sapien = what Sapien is and what you can do with it (read this first in a new session). service = how to lay out a service's api/ package (openapi.yaml, service.yaml, docs/) so Sapien can index it, and how to register it"`
 }
 
 // GetDSLReferenceOutput is get_dsl_reference's structured output.

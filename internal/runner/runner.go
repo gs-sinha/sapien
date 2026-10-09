@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gs-sinha/sapien/internal/device"
 	"github.com/gs-sinha/sapien/internal/domain"
 	"github.com/gs-sinha/sapien/internal/env"
 	"github.com/gs-sinha/sapien/internal/errs"
@@ -49,6 +50,14 @@ type Options struct {
 	// Client executes HTTP requests. nil means a runtime.Client built from
 	// Env.Transport()/Env.Env.Production.
 	Client *runtime.Client
+
+	// UIDevice opens the device ui steps drive; called once, on a run's
+	// first ui step, and closed when the run ends. nil means ui steps
+	// error (a remote engine, or a caller with no device).
+	UIDevice func(ctx context.Context) (device.Device, error)
+	// ArtifactsDir is where ui steps write screenshots, logcat slices, and
+	// page sources, under <ArtifactsDir>/<run_id>/<step_id>/. "" keeps none.
+	ArtifactsDir string
 
 	// Resume configures a partial/resumed execution (engine.RunOptions'
 	// ResumeFrom/FromStep/UntilStep; PLAN §9). nil means a normal, full run.
@@ -156,6 +165,10 @@ type execCtx struct {
 	// well-defined for a nested execution, so every StepResult -- nested or
 	// not -- now gets its Index from here instead.
 	idxCounter int
+
+	// device is the run's ui device, opened by the first ui step (see
+	// uiDevice) and closed when Run returns.
+	device device.Device
 }
 
 // nextIndex returns the next value in ec's monotonic Index sequence,
@@ -272,6 +285,7 @@ func (r *Runner) Run(ctx context.Context, f *domain.Flow, inputs map[string]any,
 	}
 
 	r.emit(opts, domain.EventRunStarted, run)
+	defer ec.closeDevice(context.WithoutCancel(ctx))
 
 	stepsSoFar := map[string]expr.StepValue{}
 	var stopRemaining, runCancelled bool
@@ -478,6 +492,9 @@ func (r *Runner) resolveOps(ctx context.Context, steps []domain.Step) (map[strin
 					return err
 				}
 				continue
+			}
+			if step.IsUI() {
+				continue // drives an app; no operation to resolve
 			}
 			op, err := r.ops.Operation(ctx, step.Call)
 			if err != nil {

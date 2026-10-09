@@ -725,7 +725,7 @@ func newFlowDeleteCmd(app *App) *cobra.Command {
 
 func newFlowReferenceCmd(app *App) *cobra.Command {
 	return &cobra.Command{
-		Use:   "reference [sapien|flow|memory|expressions|service]",
+		Use:   "reference [sapien|flow|ui|memory|expressions|service]",
 		Short: "Print the DSL reference text for agents",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -757,8 +757,9 @@ func newFlowReferenceCmd(app *App) *cobra.Command {
 func newFlowRunCmd(app *App) *cobra.Command {
 	var inputs []string
 	var resumeFrom, fromStep, untilStep string
-	var continueOnFailure, allowProduction, watch bool
+	var continueOnFailure, allowProduction, watch, rebuild bool
 	var report, out string
+	var attach []string
 
 	cmd := &cobra.Command{
 		Use:   "run <id|path>",
@@ -793,6 +794,13 @@ func newFlowRunCmd(app *App) *cobra.Command {
 				UntilStep:         untilStep,
 				AllowProduction:   allowProduction,
 				Trigger:           "cli",
+				Attach:            attach,
+				Rebuild:           rebuild,
+			}
+			// Device progress (emulator boot, Appium start, APK build and
+			// install) goes to stderr so stdout stays the run's own output.
+			if !app.Printer.IsJSON() {
+				opts.Progress = func(msg string) { fmt.Fprintln(cmd.ErrOrStderr(), app.Printer.Dim("device: "+msg)) }
 			}
 			// --watch prints step transitions live via the Observer callback
 			// (engine.RunOptions), the seam the Engine interface documents for
@@ -844,6 +852,8 @@ func newFlowRunCmd(app *App) *cobra.Command {
 	cmd.Flags().StringVar(&report, "report", "", "write a report instead of the default output: junit|json")
 	cmd.Flags().StringVar(&out, "out", "", "report output file (default: stdout)")
 	cmd.Flags().BoolVar(&watch, "watch", false, "print step transitions live as the run executes")
+	cmd.Flags().StringSliceVar(&attach, "attach", nil, "ui steps: drive these apps as already running (e.g. under flutter run): no build, install, or clear_state (repeatable or comma-separated)")
+	cmd.Flags().BoolVar(&rebuild, "rebuild", false, "ui steps: run each app's build command before installing, even if its APK exists")
 	return cmd
 }
 

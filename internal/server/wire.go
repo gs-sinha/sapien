@@ -27,6 +27,9 @@ type runOptionsWire struct {
 	ResumeFrom string `json:"resume_from,omitempty"`
 	FromStep   string `json:"from_step,omitempty"`
 	UntilStep  string `json:"until_step,omitempty"`
+	// ui steps (engine.RunOptions.Attach/Rebuild).
+	Attach  []string `json:"attach,omitempty"`
+	Rebuild bool     `json:"rebuild,omitempty"`
 }
 
 func (w runOptionsWire) toEngine() engine.RunOptions {
@@ -39,6 +42,8 @@ func (w runOptionsWire) toEngine() engine.RunOptions {
 		ResumeFrom:        w.ResumeFrom,
 		FromStep:          w.FromStep,
 		UntilStep:         w.UntilStep,
+		Attach:            w.Attach,
+		Rebuild:           w.Rebuild,
 	}
 }
 

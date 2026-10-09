@@ -83,6 +83,9 @@ A step with `steps:` and no `call`/`example` is a loop block instead of a
 call step: see [Conditions and loops](#conditions-and-loops) for its own
 keys (`foreach`, `repeat`, `max`, `break_when`, `on_error`, `steps`).
 
+A step with `ui:` instead of `call:` drives a mobile app on a local
+Android emulator; see [ui-steps.md](ui-steps.md).
+
 ## Bindings
 
 `input:` binds by parameter name against the operation's contract: path

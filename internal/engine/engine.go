@@ -200,6 +200,17 @@ type RunOptions struct {
 	// UntilStep is the last step to execute (inclusive); later steps are
 	// skipped. Teardown still runs.
 	UntilStep string
+
+	// Attach names apps (environment apps: entries) the run's ui steps
+	// should drive as already running, e.g. under `flutter run`: never
+	// built, installed, or cleared. Adds to .sapien/ui.yaml's attach:.
+	Attach []string
+	// Rebuild runs each app's build command before installing it, even
+	// when its APK already exists.
+	Rebuild bool
+	// Progress, when set, receives one-line device status messages from ui
+	// steps (booting the emulator, starting Appium, building, installing).
+	Progress func(string)
 }
 
 // CallRequest executes a single operation as a one-step run.

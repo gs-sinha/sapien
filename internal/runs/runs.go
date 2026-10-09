@@ -37,7 +37,7 @@ const runColumns = `id, flow_id, flow_snapshot_json, env, inputs_json, status, s
 // outside any loop (see iterationToSQL/iterationFromSQL), parent is the
 // enclosing block's step id for a nested execution, kind ("foreach"|
 // "repeat") and count (iterations run) are set on a block's own row.
-const stepColumns = `step_id, idx, status, skip_reason, operation, attempts, request_json, response_json, timings_json, assertions_json, out_json, error_json, started, finished, iteration, parent, kind, count`
+const stepColumns = `step_id, idx, status, skip_reason, operation, attempts, request_json, response_json, timings_json, assertions_json, out_json, error_json, started, finished, iteration, parent, kind, count, artifacts_json`
 
 // Create inserts run, assigning run.ID and run.Started if unset and
 // defaulting run.Status to queued. Only the fields relevant to a freshly
@@ -181,10 +181,19 @@ func (s *Store) AppendStep(ctx context.Context, runID string, step domain.StepRe
 		outJSON = sql.NullString{String: s2, Valid: true}
 	}
 
+	var artifactsJSON sql.NullString
+	if len(step.Artifacts) > 0 {
+		s2, err := store.MarshalJSON(step.Artifacts)
+		if err != nil {
+			return err
+		}
+		artifactsJSON = sql.NullString{String: s2, Valid: true}
+	}
+
 	return s.db.Write(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, `
 			INSERT INTO run_steps (run_id, `+stepColumns+`)
-			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 			ON CONFLICT(run_id, step_id, iteration) DO UPDATE SET
 				status          = excluded.status,
 				skip_reason     = excluded.skip_reason,
@@ -200,7 +209,8 @@ func (s *Store) AppendStep(ctx context.Context, runID string, step domain.StepRe
 				finished        = excluded.finished,
 				parent          = excluded.parent,
 				kind            = excluded.kind,
-				count           = excluded.count
+				count           = excluded.count,
+				artifacts_json  = excluded.artifacts_json
 		`,
 			runID,
 			step.StepID,
@@ -221,6 +231,7 @@ func (s *Store) AppendStep(ctx context.Context, runID string, step domain.StepRe
 			step.Parent, // NOT NULL DEFAULT '', like skip_reason
 			step.Kind,   // NOT NULL DEFAULT '', like skip_reason
 			step.Count,
+			artifactsJSON,
 		)
 		if err != nil {
 			if strings.Contains(err.Error(), "FOREIGN KEY constraint failed") {
@@ -585,8 +596,9 @@ func scanStep(sc rowScanner) (domain.StepResult, error) {
 		started, finished                                                          sql.NullString
 		iteration, count                                                           int
 		parent, kind                                                               string
+		artifactsJSON                                                              sql.NullString
 	)
-	if err := sc.Scan(&stepID, &idx, &status, &skipReason, &operation, &attempts, &requestJSON, &responseJSON, &timingsJSON, &assertionsJSON, &outJSON, &errorJSON, &started, &finished, &iteration, &parent, &kind, &count); err != nil {
+	if err := sc.Scan(&stepID, &idx, &status, &skipReason, &operation, &attempts, &requestJSON, &responseJSON, &timingsJSON, &assertionsJSON, &outJSON, &errorJSON, &started, &finished, &iteration, &parent, &kind, &count, &artifactsJSON); err != nil {
 		return domain.StepResult{}, err
 	}
 
@@ -623,6 +635,11 @@ func scanStep(sc rowScanner) (domain.StepResult, error) {
 	}
 	if outJSON.Valid {
 		if err := store.UnmarshalJSON(outJSON.String, &step.Out); err != nil {
+			return domain.StepResult{}, err
+		}
+	}
+	if artifactsJSON.Valid {
+		if err := store.UnmarshalJSON(artifactsJSON.String, &step.Artifacts); err != nil {
 			return domain.StepResult{}, err
 		}
 	}

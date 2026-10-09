@@ -66,6 +66,13 @@ type Step struct {
 	Poll    *Poll             `yaml:"poll,omitempty" json:"poll,omitempty"`
 	Timeout string            `yaml:"timeout,omitempty" json:"timeout,omitempty"` // per-request timeout, e.g. "10s"
 
+	// UI makes this a ui step: it drives a mobile app on a local device
+	// (see UIStep) instead of calling an operation. A ui step sets no
+	// call/example/input/params/body/headers/until/poll (UI_SHAPE); its
+	// when/extract/assert work as on a call step, against the ui step's
+	// own value (body.logs, body.screen, out from `read` actions).
+	UI *UIStep `yaml:"ui,omitempty" json:"ui,omitempty"`
+
 	// Block fields (PLAN §34f.8): a step with Steps set and no Call/Example
 	// is a loop block -- every call-only field above must be empty on it
 	// (BLOCK_SHAPE) -- that runs its nested Steps repeatedly: once per
@@ -113,6 +120,9 @@ type Repeat struct {
 // step. A well-formed flow (BLOCK_SHAPE checked) never sets both Steps and
 // Call/Example on the same step.
 func (s Step) IsBlock() bool { return len(s.Steps) > 0 }
+
+// IsUI reports whether s is a ui step (UI set) rather than a call step.
+func (s Step) IsUI() bool { return s.UI != nil }
 
 // ExplicitParams is the disambiguated form of Step.Input.
 type ExplicitParams struct {

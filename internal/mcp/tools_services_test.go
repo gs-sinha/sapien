@@ -278,7 +278,7 @@ func TestTool_GetDSLReference_ServiceTopic(t *testing.T) {
 func TestServerInstructions_MentionOnboarding(t *testing.T) {
 	assert.Contains(t, instructions, `get_dsl_reference("service")`)
 	assert.Contains(t, instructions, "add_service")
-	assert.Contains(t, instructions, "reference/{sapien|flow-dsl|memory|expressions|service|flow.schema.json}")
+	assert.Contains(t, instructions, "reference/{sapien|flow-dsl|ui|memory|expressions|service|flow.schema.json}")
 }
 
 func TestTool_AddService_SuggestsAgentsFileSection(t *testing.T) {

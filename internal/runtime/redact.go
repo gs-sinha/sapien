@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"net/http"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -227,4 +228,54 @@ func (r *Redactor) ResponseRecord(resp *Response) domain.ResponseRecord {
 	}
 	rec.Body = r.redactBody(resp.Body)
 	return rec
+}
+
+// headerPairRe matches a `"name": "value"` JSON pair, as an app's own
+// logs print request headers; Text redacts the value when name is a
+// redacted header.
+var headerPairRe = regexp.MustCompile(`"([A-Za-z0-9_-]+)"(\s*:\s*)"[^"]*"`)
+
+// Text scrubs free text, such as an app's log lines captured by a ui step:
+// secret values (as String does), and the value of any `"<header>": "..."`
+// pair naming a redacted header.
+func (r *Redactor) Text(s string) string {
+	s = headerPairRe.ReplaceAllStringFunc(s, func(m string) string {
+		sub := headerPairRe.FindStringSubmatch(m)
+		if r.isRedactedHeader(sub[1]) {
+			return `"` + sub[1] + `"` + sub[2] + `"` + redactedPlaceholder + `"`
+		}
+		return m
+	})
+	return r.String(s)
+}
+
+// Value scrubs a decoded JSON value an app logged (a ui step's
+// body.logs.api records): a map key naming a redacted header has its value
+// replaced, then the configured JSON paths and secret values are applied.
+func (r *Redactor) Value(v any) any {
+	v = r.redactHeaderKeys(v)
+	return r.redactBody(v)
+}
+
+func (r *Redactor) redactHeaderKeys(v any) any {
+	switch t := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(t))
+		for k, x := range t {
+			if _, isStr := x.(string); isStr && r.isRedactedHeader(k) {
+				out[k] = redactedPlaceholder
+				continue
+			}
+			out[k] = r.redactHeaderKeys(x)
+		}
+		return out
+	case []any:
+		out := make([]any, len(t))
+		for i, x := range t {
+			out[i] = r.redactHeaderKeys(x)
+		}
+		return out
+	default:
+		return v
+	}
 }

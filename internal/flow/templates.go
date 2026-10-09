@@ -145,6 +145,17 @@ func ReferencedSteps(st domain.Step) []string {
 	}
 	texts = append(texts, collectTemplates(st.Body)...)
 	texts = append(texts, collectTemplates(stringMapToAny(st.Headers))...)
+	tmpls := uiActionTemplates(st)
+	fields := make([]string, 0, len(tmpls))
+	for field := range tmpls {
+		fields = append(fields, field)
+	}
+	sort.Strings(fields)
+	for _, field := range fields {
+		for _, v := range tmpls[field] {
+			texts = append(texts, collectTemplates(v)...)
+		}
+	}
 	if st.Until != "" {
 		texts = append(texts, st.Until)
 	}

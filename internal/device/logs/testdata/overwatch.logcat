@@ -1,0 +1,45 @@
+I/flutter (5151): ┌──────────────────────
+I/flutter (5151): [38;5;12m│ 💡 [33m══════════════════ 🟡 API LOGGER → REQUEST ═════════════════=[0m[0m
+I/flutter (5151): [38;5;12m│ 💡 [33m→ URL: https://b9qajw9ai7.execute-api.us-east-2.amazonaws.com/v1/dispatch/riders[0m[0m
+I/flutter (5151): [38;5;12m│ 💡 [33m→ METHOD: POST[0m[0m
+I/flutter (5151): [38;5;12m│ 💡 [33m→ HEADERS: {[0m
+I/flutter (5151): [38;5;12m│ 💡   "authorization": "Bearer x"[0m
+I/flutter (5151): [38;5;12m│ 💡 }[0m[0m
+I/flutter (5151): [38;5;12m│ 💡 [33m→ BODY: {[0m
+I/flutter (5151): [38;5;12m│ 💡   "hub": 12[0m
+I/flutter (5151): [38;5;12m│ 💡 }[0m[0m
+I/flutter (5151): [38;5;12m│ 💡 [0m
+I/flutter (5151): └──────────────────────
+I/flutter (5151): ┌──────────────────────
+I/flutter (5151): [38;5;12m│ 💡 [33m══════════════════ 🟡 API LOGGER → REQUEST ═════════════════=[0m[0m
+I/flutter (5151): [38;5;12m│ 💡 [33m→ URL: https://b9qajw9ai7.execute-api.us-east-2.amazonaws.com/v1/dispatch/cod[0m[0m
+I/flutter (5151): [38;5;12m│ 💡 [33m→ METHOD: GET[0m[0m
+I/flutter (5151): [38;5;12m│ 💡 [33m→ HEADERS: {[0m
+I/flutter (5151): [38;5;12m│ 💡   "authorization": "Bearer x"[0m
+I/flutter (5151): [38;5;12m│ 💡 }[0m[0m
+I/flutter (5151): [38;5;12m│ 💡 [33m→ BODY: null[0m[0m
+I/flutter (5151): [38;5;12m│ 💡 [0m
+I/flutter (5151): └──────────────────────
+I/flutter (5151): ┌──────────────────────
+I/flutter (5151): [38;5;12m│ 💡 [32m══════════════════ 🟢 API LOGGER → RESPONSE ═════════════════=[0m[0m
+I/flutter (5151): [38;5;12m│ 💡 [32m→ URL: https://b9qajw9ai7.execute-api.us-east-2.amazonaws.com/v1/dispatch/riders[0m[0m
+I/flutter (5151): [38;5;12m│ 💡 [32m→ STATUS CODE: 200[0m[0m
+I/flutter (5151): [38;5;12m│ 💡 [32m→ DATA: {[0m
+I/flutter (5151): [38;5;12m│ 💡   "riders": [[0m
+I/flutter (5151): [38;5;12m│ 💡     {[0m
+I/flutter (5151): [38;5;12m│ 💡       "id": 7,[0m
+I/flutter (5151): [38;5;12m│ 💡       "name": "Ravi"[0m
+I/flutter (5151): [38;5;12m│ 💡     }[0m
+I/flutter (5151): [38;5;12m│ 💡   ][0m
+I/flutter (5151): [38;5;12m│ 💡 }[0m[0m
+I/flutter (5151): [38;5;12m│ 💡 [0m
+I/flutter (5151): └──────────────────────
+I/flutter (5151): ┌──────────────────────
+I/flutter (5151): [38;5;12m│ ⛔ [31m════════════════════ 🔴 API LOGGER → ERROR ═══════════════════=[0m[0m
+I/flutter (5151): [38;5;12m│ ⛔ [31m→ URL: https://b9qajw9ai7.execute-api.us-east-2.amazonaws.com/v1/dispatch/cod[0m[0m
+I/flutter (5151): [38;5;12m│ ⛔ [31m→ MESSAGE: Http status error [500][0m[0m
+I/flutter (5151): [38;5;12m│ ⛔ [31m→ RESPONSE: {[0m
+I/flutter (5151): [38;5;12m│ ⛔   "error": "boom"[0m
+I/flutter (5151): [38;5;12m│ ⛔ }[0m[0m
+I/flutter (5151): [38;5;12m│ ⛔ [0m
+I/flutter (5151): └──────────────────────

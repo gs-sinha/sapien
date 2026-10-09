@@ -46,6 +46,7 @@ type stepDoc struct {
 	Until   string                 `yaml:"until,omitempty"`
 	Poll    *domain.Poll           `yaml:"poll,omitempty"`
 	Timeout string                 `yaml:"timeout,omitempty"`
+	UI      *domain.UIStep         `yaml:"ui,omitempty"`
 
 	// Block fields (PLAN §34f.8); see domain.Step.
 	Foreach   string         `yaml:"foreach,omitempty"`
@@ -136,6 +137,7 @@ func stepsToDomain(docs []stepDoc) []domain.Step {
 			Until:     sd.Until,
 			Poll:      sd.Poll,
 			Timeout:   sd.Timeout,
+			UI:        sd.UI,
 			Foreach:   sd.Foreach,
 			Repeat:    sd.Repeat,
 			Max:       sd.Max,

@@ -750,3 +750,24 @@ func TestDeriveStatus(t *testing.T) {
 		})
 	}
 }
+
+func TestAppendStep_ArtifactsRoundTrip(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+
+	run := &domain.Run{Environment: "stage"}
+	require.NoError(t, s.Create(ctx, run))
+
+	arts := []domain.StepArtifact{
+		{Kind: "screenshot", Name: "final.png", Path: "/ws/.sapien/artifacts/run_1/login/final.png"},
+		{Kind: "logcat", Name: "logcat.txt", Path: "/ws/.sapien/artifacts/run_1/login/logcat.txt"},
+	}
+	require.NoError(t, s.AppendStep(ctx, run.ID, domain.StepResult{StepID: "login", Status: domain.StepPassed, Artifacts: arts}))
+	require.NoError(t, s.AppendStep(ctx, run.ID, domain.StepResult{StepID: "api", Index: 1, Status: domain.StepPassed}))
+
+	got, err := s.Get(ctx, run.ID)
+	require.NoError(t, err)
+	require.Len(t, got.Steps, 2)
+	assert.Equal(t, arts, got.Steps[0].Artifacts)
+	assert.Nil(t, got.Steps[1].Artifacts, "a step without artifacts stores none")
+}

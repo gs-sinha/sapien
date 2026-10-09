@@ -46,6 +46,7 @@ func Reference() string {
 		"| `until` | CEL; when present the step is retried until it evaluates true (or `poll.timeout` elapses). |",
 		"| `poll` | `{interval: 1s, timeout: 30s}` (defaults shown); only used with `until`. |",
 		"| `timeout` | Per-request timeout, e.g. `10s`. |",
+		"| `ui` | Makes this a ui step: `{app, actions}` drives a mobile app instead of calling an operation; see `get_dsl_reference(\"ui\")`. |",
 		"",
 		"A step with `steps:` and no `call`/`example` is a loop block instead of",
 		"a call step; see \"Control flow\" below for its keys (`foreach`, `repeat`,",
@@ -426,6 +427,7 @@ func Reference() string {
 		"| `BLOCK_SHAPE` | A loop block or call step's shape is malformed: mixed call-only and block-only fields, both/neither of `foreach`/`repeat` set, `repeat` missing `max`/`until`/`while`, or `max` outside 1..1000. |",
 		"| `NESTED_LOOP` | A loop block nested inside another loop block. |",
 		"| `LOOP_IN_PHASE` | A loop block inside `setup:`/`teardown:`. |",
+		"| `UI_SHAPE` / `UI_ACTION` | A ui step or one of its actions is malformed; see `get_dsl_reference(\"ui\")`. |",
 	}
 	return strings.Join(lines, "\n") + "\n"
 }
