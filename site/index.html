@@ -71,7 +71,7 @@
   <section class="hero">
     <div class="wrap hero-grid">
       <div>
-        <a class="pill" href="#releases"><span class="tag" data-latest>v1.4.1</span> macOS &amp; Linux · Apache-2.0 · free</a>
+        <a class="pill" href="#releases"><span class="tag" data-latest>v1.5.0</span> macOS &amp; Linux · Apache-2.0 · free</a>
         <h1>API discovery for <em>agents</em> and humans.</h1>
         <p class="lede">Sapien gives every service in your org <strong>business-first docs, a schema and ready-to-send payloads</strong>, written by the agents already working in those repos. Any agent in any repo can query it, any developer can browse it, and an agent can turn it into <strong>multi-service flows from one sentence</strong>.</p>
         <div class="install">
@@ -311,7 +311,7 @@ reversed  ledger-service.getEntry            <span class="ok">200</span>   2/2
               <div class="tabs-panels">
                 <div class="tabpanel" role="tabpanel" id="p-script" aria-labelledby="t-script">
                   <pre class="code"><span class="p">$ </span>curl -fsSL https://gs-sinha.github.io/sapien/install.sh | sh</pre>
-                  <p class="note">Detects your OS and CPU (an Apple silicon Mac under Rosetta still gets the native build), verifies the release checksum, and installs to <code>/usr/local/bin</code>, or <code>~/.local/bin</code> when that isn't writable. Works with <code>wget</code> too. Pin a version with <code>SAPIEN_VERSION=v1.4.1</code>, or choose the directory with <code>sh -s -- --prefix ~/bin</code>.</p>
+                  <p class="note">Detects your OS and CPU (an Apple silicon Mac under Rosetta still gets the native build), verifies the release checksum, and installs to <code>/usr/local/bin</code>, or <code>~/.local/bin</code> when that isn't writable. Works with <code>wget</code> too. Pin a version with <code>SAPIEN_VERSION=v1.5.0</code>, or choose the directory with <code>sh -s -- --prefix ~/bin</code>.</p>
                 </div>
                 <div class="tabpanel" role="tabpanel" id="p-brew" aria-labelledby="t-brew">
                   <pre class="code"><span class="p">$ </span>brew install gs-sinha/tap/sapien</pre>
@@ -727,9 +727,9 @@ reversed  ledger-service.getEntry           <span class="ok">passed</span>  200 
       <div class="releases">
         <div class="card latest">
           <p class="eyebrow" style="margin:0"><svg class="i" aria-hidden="true"><use href="#i-tag"/></svg>Latest release</p>
-          <p class="ver" data-latest>v1.4.1</p>
-          <p class="date" data-latest-date>September 20, 2026</p>
-          <p class="note" style="margin:0">Need an older version? Set it for the install script: <code>curl … | SAPIEN_VERSION=v1.4.0 sh</code></p>
+          <p class="ver" data-latest>v1.5.0</p>
+          <p class="date" data-latest-date>October 9, 2026</p>
+          <p class="note" style="margin:0">Need an older version? Set it for the install script: <code>curl … | SAPIEN_VERSION=v1.4.1 sh</code></p>
           <div class="links">
             <a class="btn" href="https://github.com/gs-sinha/sapien/releases" data-latest-link>Release notes</a>
             <a class="btn" href="https://github.com/gs-sinha/sapien/blob/main/CHANGELOG.md">Full changelog</a>
@@ -737,6 +737,15 @@ reversed  ledger-service.getEntry           <span class="ok">passed</span>  200 
         </div>
 
         <ol class="timeline">
+          <li>
+            <h3>v1.5.0 <span class="when">October 9, 2026</span></h3>
+            <ul>
+              <li>UI steps: drive an Android app from a flow through Appium (launch, tap, type, read, assert, screenshots), in the same flow as your API calls, with the app's own network calls read back from its logs.</li>
+              <li><code>sapien device doctor</code> checks Node, Appium, the Android SDK, the JDK and the emulator, and names the fix for each gap; <code>sapien device build</code> and <code>snapshot</code> build the app and capture its screen.</li>
+              <li>The install script offers to set up Appium and its UiAutomator2 driver for you (<code>--with-appium</code> or <code>--no-appium</code> to answer ahead of time).</li>
+              <li>Fixed: <code>run_flow</code> over MCP no longer fails on a flow that has a loop block.</li>
+            </ul>
+          </li>
           <li>
             <h3>v1.4.1 <span class="when">September 20, 2026</span></h3>
             <ul>
